@@ -131,6 +131,28 @@ def test_errp():
     check(p_err > p_ok, "error epoch scores higher than clean")
 
 
+def test_errp_model_metadata():
+    print("[errp] trained model roundtrip validates acquisition metadata")
+    try:
+        import sklearn  # noqa: F401
+    except ImportError:
+        print("  skip scikit-learn is not installed (baseline backend remains available)")
+        return
+    import os
+    import tempfile
+    det = ErrPDetector(backend="baseline")
+    windows = [_synth_epoch(config.EEG_FS, error=bool(i % 2)) for i in range(6)]
+    labels = [i % 2 for i in range(6)]
+    det.fit(windows, labels)
+    with tempfile.TemporaryDirectory() as folder:
+        path = os.path.join(folder, "model.pkl")
+        det.save(path)
+        loaded = ErrPDetector(backend="model", model_path=path)
+        check(loaded.backend == "model", "metadata-bearing model loads")
+        check(loaded.p_error(windows[1]) > loaded.p_error(windows[0]),
+              "loaded model preserves classification")
+
+
 def test_eeg_packet_timestamps():
     print("[eeg] batched packets receive distinct sample timestamps")
     eeg = EEGBridge()
@@ -212,6 +234,7 @@ if __name__ == "__main__":
     test_policy_veto_scope()
     test_arm_command_validation()
     test_errp()
+    test_errp_model_metadata()
     test_eeg_packet_timestamps()
     test_ring_recent_is_time_based()
     test_pick_place()

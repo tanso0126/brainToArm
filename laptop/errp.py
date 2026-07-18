@@ -31,15 +31,29 @@ def _col(window, ch):
 
 
 def _bandpass(sig, fs, band):
-    if not _HAVE_SP or len(sig) < 15:
+    if not _HAVE_SP:
         return sig
     lo, hi = band
     ny = 0.5 * fs
     b, a = butter(4, [lo / ny, min(hi / ny, 0.99)], btype="band")
+    padlen = 3 * (max(len(a), len(b)) - 1)
+    if len(sig) <= padlen:
+        return sig
     return filtfilt(b, a, sig).tolist()
 
 
+def _sigmoid(x):
+    """Numerically stable logistic function."""
+    if x >= 0:
+        z = math.exp(-x)
+        return 1.0 / (1.0 + z)
+    z = math.exp(x)
+    return z / (1.0 + z)
+
+
 class ErrPDetector:
+    MODEL_FORMAT = 1
+
     def __init__(self, backend=None, model_path=None):
         self.backend = backend or config.ERRP_BACKEND
         self.fs = config.EEG_FS
@@ -53,11 +67,39 @@ class ErrPDetector:
             try:
                 import pickle
                 with open(path, "rb") as f:
-                    self.model = pickle.load(f)
+                    payload = pickle.load(f)
+                if isinstance(payload, dict) and "model" in payload:
+                    self._validate_model_metadata(payload.get("metadata", {}), path)
+                    self.model = payload["model"]
+                else:
+                    raise ValueError(
+                        f"legacy model at {path} has no acquisition metadata; retrain it")
                 print(f"[errp] loaded model {path}")
-            except FileNotFoundError:
-                print(f"[errp] no model at {path}; falling back to baseline")
-                self.backend = "baseline"
+            except FileNotFoundError as exc:
+                raise FileNotFoundError(
+                    f"ERRP_BACKEND='model' but no model exists at {path}") from exc
+
+    def _model_metadata(self):
+        return {
+            "format": self.MODEL_FORMAT,
+            "fs": self.fs,
+            "band": list(self.band),
+            "channels": list(self.chans),
+            "baseline_s": config.ERRP_BASELINE_S,
+            "window_s": config.ERRP_WINDOW_S,
+        }
+
+    def _validate_model_metadata(self, metadata, path):
+        expected = self._model_metadata()
+        mismatches = [
+            key for key, value in expected.items()
+            if metadata.get(key) != value
+        ]
+        if mismatches:
+            details = ", ".join(
+                f"{key}: model={metadata.get(key)!r} current={expected[key]!r}"
+                for key in mismatches)
+            raise ValueError(f"ErrP model/config mismatch at {path}: {details}")
 
     # --- calibration: learn resting variability so the threshold is adaptive ---
     def update_baseline(self, resting_window):
@@ -66,14 +108,15 @@ class ErrPDetector:
         # detector scale-invariant: it works without knowing the ADC's uV/LSB,
         # because everything is expressed in units of the person's own EEG noise.
         rw = self._car(resting_window)
-        amps = []
+        signals = []
         for ch in self.chans:
             sig = _bandpass(_col(rw, ch), self.fs, self.band)
             if sig:
-                m = sum(sig) / len(sig)
-                var = sum((v - m) ** 2 for v in sig) / len(sig)
-                amps.append(math.sqrt(var))
-        self._baseline_std = (sum(amps) / len(amps)) if amps else 10.0
+                signals.append(sig)
+        mean_sig = self._mean_signal(signals)
+        m = sum(mean_sig) / len(mean_sig)
+        var = sum((v - m) ** 2 for v in mean_sig) / len(mean_sig)
+        self._baseline_std = math.sqrt(var)
 
     # --- feature extraction (shared by both backends) ---
     def _car(self, window):
@@ -146,10 +189,9 @@ class ErrPDetector:
     def p_error(self, window):
         if self.backend == "model" and self.model is not None:
             f = self._features(window)
-            try:
+            if hasattr(self.model, "predict_proba"):
                 return float(self.model.predict_proba([f])[0][1])
-            except Exception:
-                return float(self.model.predict([f])[0])
+            return float(self.model.predict([f])[0])
         return self._baseline_prob(window)
 
     def _baseline_prob(self, window):
@@ -168,13 +210,12 @@ class ErrPDetector:
         neg = -self._deflection(mean_sig)             # positive when deflected down
         std = self._baseline_std
         if std and std > 1e-6:
-            # spatial averaging cut the noise by ~sqrt(n_ch); the search over ~0.6s
-            # still biases upward, so center the sigmoid at 3.0 sigma.
-            z = neg / (std / math.sqrt(max(1, len(chans))))
+            # Baseline std is measured on the same spatially averaged signal.
+            z = neg / std
             # center at 3.3 sigma: real ErrP is many-sigma (saturates ~1.0), so
             # this keeps full sensitivity while rejecting noise-search false alarms.
-            return 1.0 / (1.0 + math.exp(-1.2 * (z - 3.3)))
-        return 1.0 / (1.0 + math.exp(-0.25 * (neg - 12.0)))   # uncalibrated fallback
+            return _sigmoid(1.2 * (z - 3.3))
+        return _sigmoid(0.25 * (neg - 12.0))   # uncalibrated fallback
 
     @staticmethod
     def _mean_signal(chans):
@@ -188,18 +229,31 @@ class ErrPDetector:
 
     # --- training (model backend) ---
     def fit(self, windows, labels):
-        from sklearn.pipeline import make_pipeline
-        from sklearn.preprocessing import StandardScaler
-        from sklearn.linear_model import LogisticRegression
+        if not windows or len(windows) != len(labels):
+            raise ValueError("windows and labels must be non-empty and the same length")
+        if set(labels) != {0, 1}:
+            raise ValueError("ErrP training needs both labels 0 (correct) and 1 (error)")
         X = [self._features(w) for w in windows]
-        self.model = make_pipeline(
-            StandardScaler(),
-            LogisticRegression(max_iter=2000, class_weight="balanced"),
-        ).fit(X, labels)
+        self.model = self.make_model().fit(X, labels)
         self.backend = "model"
         return self
 
+    @staticmethod
+    def make_model():
+        from sklearn.pipeline import make_pipeline
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.linear_model import LogisticRegression
+        return make_pipeline(
+            StandardScaler(),
+            LogisticRegression(max_iter=2000, class_weight="balanced"),
+        )
+
     def save(self, path=None):
         import pickle
+        if self.model is None:
+            raise RuntimeError("cannot save an unfitted ErrP model")
         with open(path or config.ERRP_MODEL_PATH, "wb") as f:
-            pickle.dump(self.model, f)
+            pickle.dump({
+                "model": self.model,
+                "metadata": self._model_metadata(),
+            }, f)

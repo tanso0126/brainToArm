@@ -334,16 +334,21 @@ brainToArm/
     against the person's own resting EEG noise**, so it works without knowing the
     device's exact microvolt scaling. Runs on day one.
   - `"model"` — a trained scikit-learn classifier for higher accuracy.
+  Saved models include sampling, channel, band, and epoch metadata; a mismatched
+  runtime configuration is rejected instead of producing an invalid prediction.
   `update_baseline()` calibrates the resting noise; `fit()`/`save()` train.
   Tested false-positive rate ~1%, false-negative ~0% on synthetic data.
 
-- **`record_errp.py`** — Collects training data. Drives the arm through
+- **`record_errp.py`** — Collects training data. A goal is fixed for the session,
+  then the script drives the arm through
   deliberately correct and deliberately wrong actions while the subject watches;
   since *we* chose right vs wrong, each epoch is **auto-labeled** (no button
-  pressing). Saves one CSV per epoch plus a `labels.csv`.
+  pressing). Saves one CSV per epoch plus a `labels.csv`; repeated sessions append
+  unused epoch numbers and never overwrite earlier trials.
 
-- **`errp_train.py`** — Loads a recorded folder, fits the `ErrPDetector` model
-  backend, saves `errp_model.pkl`, and reports accuracy. Then set
+- **`errp_train.py`** — Validates a recorded folder, reports stratified
+  cross-validated balanced accuracy when the dataset is large enough, fits the
+  final `ErrPDetector` model, and saves `errp_model.pkl`. Then set
   `ERRP_BACKEND="model"` in config to use it live.
 
 ### Vision

@@ -126,6 +126,39 @@ hover pose, and prevent a blind or unconverged alignment from descending.
 - `python3 -m compileall -q laptop`
 - `python3 laptop/orchestrator.py --auto`
 
+## Patch 6 — reproducible ErrP datasets and configuration-bound models
+
+### Intent
+
+Prevent mislabeled/overwritten training sessions, reject models trained for a
+different acquisition layout, and report a generalization estimate rather than
+presenting fit-set accuracy as model quality.
+
+### Changes
+
+- Model files now bundle sampling rate, channel selection, band, and epoch-window
+  metadata. Missing, legacy, or configuration-mismatched model files fail loudly
+  when the model backend is explicitly selected.
+- Added validated binary labels/channel widths, stable filtering for short input,
+  a numerically stable sigmoid, and baseline noise measured on the same spatially
+  averaged signal used for decisions.
+- Added stratified balanced-accuracy cross-validation when each class has enough
+  examples; fit-set accuracy is labeled diagnostic only.
+- Recording sessions now establish one stable goal, perform preflight and
+  markerless background setup, reject incomplete epochs, use exclusive monotonic
+  filenames across repeated sessions, and time out instead of silently producing
+  fewer trials forever.
+- Added a trained-model save/load regression test and updated the README.
+
+### Verification
+
+- `python3 laptop/test_pipeline.py`
+- `python3 laptop/validate.py`
+- `python3 -m compileall -q laptop`
+- Mock `record_errp.py` session in a temporary folder. Model roundtrip/training is
+  exercised when `scikit-learn` is installed; the present bare environment skips
+  that optional test explicitly.
+
 ## Patch 5 — task-scoped vetoes and strict reachability
 
 ### Intent
