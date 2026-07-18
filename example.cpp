@@ -25,9 +25,9 @@ void loop() { // roop -> loop 로 수정
   servo5.write(90);
   servo6.write(170);
   servo7.write(180);
-  delay(100);    // 1초 대기
+  delay(100);    // 0.1초 대기
   
   servo1.write(100);
   servo7.write(90);
-  delay(100);    // 동작을 확실히 하기 위해 1초 대기 추가
+  delay(100);    // 동작 확인을 위한 0.1초 대기
 }

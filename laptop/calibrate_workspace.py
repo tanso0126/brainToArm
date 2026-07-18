@@ -80,8 +80,12 @@ def main():
     print(f"CAM_CALIB_IMAGE_PTS = {[[int(x), int(y)] for x, y in clicks]}")
     print(f"CAM_CALIB_WORLD_PTS = {[list(p) for p in WORLD_PTS]}")
     print("CAM_CALIBRATED = True")
-    print(f"# mean reprojection error: {err:.2f} cm "
-          f"({'good' if err < 1.0 else 'high — re-click more carefully'})")
+    print(f"# calibration-point fit error: {err:.2f} cm")
+    if len(clicks) == 4:
+        print("# NOTE: four points define a homography exactly; this fit error does")
+        print("# not measure accuracy between points. Use 6+ spread-out points for a check.")
+    else:
+        print(f"# {'fit looks consistent' if err < 1.0 else 'high fit error — re-click'}")
 
 
 if __name__ == "__main__":

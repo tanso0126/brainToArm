@@ -224,7 +224,7 @@ def run_trial(arm, eeg, errp, vision, policy, max_objects=None):
                 break
         elif result == "fail":
             return False
-        # "veto" -> loop; that vetoed spot stays rejected for the rest of the run
+        # "veto" -> loop; the spot remains rejected for this selection cycle
     print(f"[trial] delivered {delivered} object(s).")
     return True
 

@@ -358,7 +358,8 @@ brainToArm/
   (label + workspace x,y) and locates the arm tip, all in centimeters via a
   pixel→world homography. **Markerless by default** (`OBJECT_METHOD="bgsub"`):
   snapshot the empty table once (`learn_background()`), then objects and the arm
-  are foreground; the arm tip is the foreground point farthest from the base.
+  are foreground; arm-tip candidates are the contour points farthest from the
+  base, disambiguated by proximity to the expected target during servoing.
   Also supports `"yolo"` (semantic detection, needs `ultralytics`), `"hsv"`
   (color blobs), and `"aruco"` (printed markers) if you prefer. `location_clear()`
   implements the markerless grasp verification. Falls back to a fixed mock scene
@@ -366,7 +367,9 @@ brainToArm/
 
 - **`calibrate_workspace.py`** — The one camera step you can't skip: click 4
   points of known real-world centimeters in the live image; it computes and
-  prints the pixel↔cm homography to paste into `config.py`.
+  prints the pixel↔cm homography to paste into `config.py`. Four points define the
+  transform but cannot independently measure between-point accuracy; use 6+ if
+  you want a meaningful fit-consistency check.
 
 - **`camera_calibrate.py`** — Optional. Removes lens/fisheye distortion (only
   matters if a cheap wide lens bends straight lines near the edges), using a
@@ -511,7 +514,8 @@ python3 laptop/eeg_detect.py     # new streaming serial port? -> Path A
 ```
 - Path A: set `EEG_SOURCE="serial"`, `EEG_PORT`, `EEG_BAUD`.
 - Path B (nothing appeared): run `windows_eeg_server.py` on Windows, set
-  `EEG_SOURCE="tcp"`.
+  `EEG_SOURCE="tcp"`. It listens on localhost by default; use `--host 0.0.0.0`
+  only when forwarding to a separate directly connected Mac.
 Confirm `EEG_FS` and `EEG_CHANNEL_MAP` (which slots are your 8 EEG electrodes)
 against TeleScan's live channel display. Set `ERRP_FRONTOCENTRAL` to the indices
 of the electrodes you placed at fronto-central sites (Fz/FCz/Cz).

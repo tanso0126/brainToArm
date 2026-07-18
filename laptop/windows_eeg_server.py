@@ -17,8 +17,9 @@ has the exact prototype — change only the ctypes lines flagged CONFIRM.
 import socket
 import ctypes
 import time
+import argparse
 
-HOST, PORT = "0.0.0.0", 9000
+HOST, PORT = "127.0.0.1", 9000
 DLL_NAME = "LXSMWD12.dll"
 READ_CHUNK = 512          # bytes to pull per DLL read
 
@@ -26,14 +27,18 @@ READ_CHUNK = 512          # bytes to pull per DLL read
 class LaxthaDLL:
     """Thin wrapper over LXSMWD12.dll returning raw LXSDF bytes."""
 
-    def __init__(self):
-        self.dll = ctypes.WinDLL(DLL_NAME)     # DLL must be on PATH / cwd
+    def __init__(self, dll_name=DLL_NAME):
+        self.dll = ctypes.WinDLL(dll_name)     # DLL must be on PATH / cwd
         # CONFIRM signatures against the LXSMWD12 Developer Manual:
         #   int  LXSMWD12_Open(int port)      -> handle/status
         #   int  LXSMWD12_Start(void)
         #   int  LXSMWD12_GetData(byte* buf, int maxlen) -> bytes written
         #   void LXSMWD12_Stop(void); LXSMWD12_Close(void)
         self._buf = (ctypes.c_ubyte * 4096)()
+        get = getattr(self.dll, "LXSMWD12_GetData", None)
+        if get is not None:
+            get.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int]
+            get.restype = ctypes.c_int
 
     def open(self, port=0):
         if hasattr(self.dll, "LXSMWD12_Open"):
@@ -42,6 +47,8 @@ class LaxthaDLL:
             self.dll.LXSMWD12_Start()
 
     def read(self, n=READ_CHUNK):
+        if not 0 < n <= len(self._buf):
+            raise ValueError(f"read size must be in [1, {len(self._buf)}]")
         get = getattr(self.dll, "LXSMWD12_GetData", None)
         if get is None:
             raise RuntimeError("LXSMWD12_GetData not found; check manual for the "
@@ -49,6 +56,8 @@ class LaxthaDLL:
         got = get(self._buf, n)
         if got <= 0:
             return b""
+        if got > n:
+            raise RuntimeError(f"DLL reported {got} bytes for a {n}-byte buffer request")
         return bytes(self._buf[:got])
 
     def close(self):
@@ -58,30 +67,47 @@ class LaxthaDLL:
             self.dll.LXSMWD12_Close()
 
 
-def serve():
-    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind((HOST, PORT)); srv.listen(1)
-    print(f"[win-eeg] listening {HOST}:{PORT}")
-    dev = LaxthaDLL()
+def serve(host=HOST, port=PORT, dll_name=DLL_NAME):
+    dev = LaxthaDLL(dll_name)
     dev.open()
-    print("[win-eeg] device started, waiting for orchestrator...")
     try:
-        while True:
-            conn, addr = srv.accept()
-            print(f"[win-eeg] client {addr}")
-            try:
-                while True:
-                    data = dev.read()
-                    if data:
-                        conn.sendall(data)
-                    else:
-                        time.sleep(0.002)
-            except (ConnectionResetError, BrokenPipeError):
-                print("[win-eeg] client gone; waiting for reconnect")
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            srv.bind((host, port))
+            srv.listen(1)
+            print(f"[win-eeg] listening {host}:{port}")
+            print("[win-eeg] device started, waiting for orchestrator...")
+            while True:
+                conn, addr = srv.accept()
+                print(f"[win-eeg] client {addr}")
+                with conn:
+                    try:
+                        while True:
+                            data = dev.read()
+                            if data:
+                                conn.sendall(data)
+                            else:
+                                time.sleep(0.002)
+                    except (ConnectionResetError, BrokenPipeError):
+                        print("[win-eeg] client gone; waiting for reconnect")
     finally:
         dev.close()
 
 
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--host", default=HOST,
+                    help="listen address; use 0.0.0.0 only for a direct remote Mac")
+    ap.add_argument("--port", type=int, default=PORT)
+    ap.add_argument("--dll", default=DLL_NAME)
+    args = ap.parse_args()
+    if not 1 <= args.port <= 65535:
+        ap.error("--port must be in [1, 65535]")
+    try:
+        serve(args.host, args.port, args.dll)
+    except KeyboardInterrupt:
+        print("\n[win-eeg] stopped")
+
+
 if __name__ == "__main__":
-    serve()
+    main()

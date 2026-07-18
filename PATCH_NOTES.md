@@ -126,6 +126,31 @@ hover pose, and prevent a blind or unconverged alignment from descending.
 - `python3 -m compileall -q laptop`
 - `python3 laptop/orchestrator.py --auto`
 
+## Patch 10 — honest calibration output and bounded Windows bridge
+
+### Intent
+
+Avoid presenting an exactly determined four-point homography fit as an independent
+accuracy measurement, and make the optional Windows EEG transport conservative by
+default and deterministic in cleanup.
+
+### Changes
+
+- Four-point workspace calibration now explains that near-zero fit error is not
+  validation; 6+ correspondences are recommended for a consistency residual.
+- Windows bridge defaults to localhost, exposes host/port/DLL CLI options, closes
+  client/server resources deterministically, handles Ctrl-C, declares the assumed
+  DLL read signature, and bounds/checks read sizes.
+- Updated markerless-tip, Path B, calibration, veto-scope, and obsolete example
+  comments to match current behavior.
+
+### Verification
+
+- `python3 -m compileall -q laptop`
+- `python3 laptop/windows_eeg_server.py --help` (requires Windows because
+  `ctypes.WinDLL` is instantiated only after argument parsing and server start)
+- Full hardware-free regression suite below.
+
 ## Patch 9 — explicit real-hardware calibration gates
 
 ### Intent
