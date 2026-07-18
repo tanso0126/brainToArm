@@ -36,10 +36,13 @@ def _raw_to_uv(raw):
 
 def _select_eeg(all_channels):
     """Pick the 8 EEG slots out of the full interleaved channel list."""
-    out = []
-    for slot in config.EEG_CHANNEL_MAP:
-        out.append(_raw_to_uv(all_channels[slot]) if slot < len(all_channels) else 0.0)
-    return out
+    missing = [slot for slot in config.EEG_CHANNEL_MAP
+               if slot < 0 or slot >= len(all_channels)]
+    if missing:
+        raise ValueError(
+            f"EEG_CHANNEL_MAP slots {missing} outside parsed packet with "
+            f"{len(all_channels)} channels")
+    return [_raw_to_uv(all_channels[slot]) for slot in config.EEG_CHANNEL_MAP]
 
 
 class RingBuffer:
@@ -213,7 +216,12 @@ class EEGBridge:
         port = config.EEG_PORT
         if port == "auto":
             cands = glob.glob("/dev/cu.usbserial*") + glob.glob("/dev/cu.usbmodem*") \
-                + glob.glob("/dev/tty.usbserial*")
+                + glob.glob("/dev/tty.usbserial*") + glob.glob("/dev/ttyUSB*")
+            cands = sorted(set(cands))
+            if len(cands) > 1:
+                raise RuntimeError(
+                    "multiple EEG serial candidates; set EEG_PORT explicitly: "
+                    + ", ".join(cands))
             port = cands[0] if cands else None
         return port
 

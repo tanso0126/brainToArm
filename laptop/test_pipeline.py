@@ -56,6 +56,20 @@ def test_lxsdf_drops():
     check(p.dropped == 2, f"counted 2 dropped (got {p.dropped})")
 
 
+def test_lxsdf_rejects_invalid_shapes():
+    print("[lxsdf] rejects corrupt channel counts and lossy sample values")
+    try:
+        LXSDFParser(total_channels=0)
+        check(False, "zero channel count rejected")
+    except ValueError:
+        check(True, "zero channel count rejected")
+    try:
+        build_packet([0xFE00])
+        check(False, "unencodable high byte rejected")
+    except ValueError:
+        check(True, "unencodable high byte rejected")
+
+
 def test_ik():
     print("[ik] servo range + base aim")
     for x, y in [(12, 4), (8, -3), (-6, 9), (0, 15)]:
@@ -230,6 +244,7 @@ if __name__ == "__main__":
     test_lxsdf_roundtrip()
     test_lxsdf_resync()
     test_lxsdf_drops()
+    test_lxsdf_rejects_invalid_shapes()
     test_ik()
     test_policy_veto_scope()
     test_arm_command_validation()

@@ -16,11 +16,11 @@ except ImportError:
     _HAVE_SERIAL = False
 
 
-def _autodetect():
+def _serial_candidates():
     # macOS Arduino boards enumerate as /dev/cu.usbmodem* or /dev/cu.usbserial*
     cands = glob.glob("/dev/cu.usbmodem*") + glob.glob("/dev/cu.usbserial*") \
         + glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*")
-    return cands[0] if cands else None
+    return sorted(set(cands))
 
 
 class ArmSerial:
@@ -35,7 +35,12 @@ class ArmSerial:
             if not _HAVE_SERIAL:
                 raise RuntimeError("real arm requested but pyserial is missing")
             if self.port == "auto":
-                self.port = _autodetect()
+                candidates = _serial_candidates()
+                if len(candidates) > 1:
+                    raise RuntimeError(
+                        "multiple serial devices found; set ARM_PORT explicitly: "
+                        + ", ".join(candidates))
+                self.port = candidates[0] if candidates else None
             if not self.port:
                 raise RuntimeError("real arm requested but no serial board was found")
             try:

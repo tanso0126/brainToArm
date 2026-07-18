@@ -34,13 +34,20 @@ def validate():
     # --- EEG channel map sane ---
     total = config.EEG_TOTAL_CHANNELS
     for slot in config.EEG_CHANNEL_MAP:
+        if not isinstance(slot, int) or isinstance(slot, bool) or slot < 0:
+            errs.append(f"EEG_CHANNEL_MAP slot {slot!r} must be a non-negative integer")
+            continue
         if total is not None and slot >= total:
             errs.append(f"EEG_CHANNEL_MAP slot {slot} >= EEG_TOTAL_CHANNELS {total}")
     if len(config.EEG_CHANNEL_MAP) != config.EEG_CHANNELS:
         warns.append(f"EEG_CHANNEL_MAP has {len(config.EEG_CHANNEL_MAP)} slots but EEG_CHANNELS={config.EEG_CHANNELS}")
     for ch in config.ERRP_FRONTOCENTRAL:
-        if ch >= config.EEG_CHANNELS:
+        if not isinstance(ch, int) or isinstance(ch, bool) or ch < 0:
+            errs.append(f"ERRP_FRONTOCENTRAL ch {ch!r} must be a non-negative integer")
+        elif ch >= config.EEG_CHANNELS:
             errs.append(f"ERRP_FRONTOCENTRAL ch {ch} >= EEG_CHANNELS {config.EEG_CHANNELS}")
+    if len(set(config.EEG_CHANNEL_MAP)) != len(config.EEG_CHANNEL_MAP):
+        errs.append("EEG_CHANNEL_MAP contains duplicate packet slots")
 
     # --- ErrP band below Nyquist ---
     if config.EEG_FS <= 0:

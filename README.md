@@ -262,7 +262,7 @@ brainToArm/
   Run with `--auto` to remove the human (arm accepts everything).
 
 - **`arm_serial.py`** — `ArmSerial` class: opens the Arduino port (auto-detects
-  `/dev/cu.usbmodem*` etc.), sends validated angle commands, requires `OK` and
+  `/dev/cu.usbmodem*` etc. only when the candidate is unambiguous), sends validated angle commands, requires `OK` and
   `DONE`, drives the gripper, and homes. Mock mode is selected explicitly with
   `ARM_MOCK=True`; when a real arm is requested, a missing port, bad reply, or
   motion timeout stops the run instead of pretending the command succeeded.
@@ -314,7 +314,8 @@ brainToArm/
   exact same parser is exercised with and without hardware).
 
 - **`eeg_detect.py`** — Bench tool. Plug in the PolyG-I; it lists serial ports
-  before/after and dumps raw bytes from any new port, telling you whether the
+  before/after and dumps raw bytes only from a newly appeared port (or an explicit
+  `--port`), telling you whether the
   device streams as a plain serial port (**Path A** works) or not (**Path B**).
 
 - **`windows_eeg_server.py`** — Path B only. Runs on Windows, calls the LAXTHA

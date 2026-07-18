@@ -28,6 +28,7 @@ DLL bridge = Path B). Same parser both ways. Yields per-packet channel samples.
 
 HEADER_BYTES = 8          # indices 0..7 before stream data begins
 SYNC = b"\xFF\xFE"
+MAX_CHANNELS = 64          # sanity bound against false sync gaps/corrupt config
 
 
 class LXSDFParser:
@@ -37,6 +38,11 @@ class LXSDFParser:
     def __init__(self, total_channels=None):
         # total_channels: number of 2-byte channel slots per packet. If None,
         # auto-detect by measuring the gap between two consecutive sync headers.
+        if total_channels is not None and (
+                not isinstance(total_channels, int)
+                or isinstance(total_channels, bool)
+                or not 1 <= total_channels <= MAX_CHANNELS):
+            raise ValueError(f"total_channels must be in [1, {MAX_CHANNELS}] or None")
         self.total_channels = total_channels
         self.buf = bytearray()
         self._last_pc = None
@@ -61,7 +67,11 @@ class LXSDFParser:
             # false sync inside data; drop the first byte and retry later
             del self.buf[:first + 1]
             return False
-        self.total_channels = (gap - HEADER_BYTES) // 2
+        channels = (gap - HEADER_BYTES) // 2
+        if not 1 <= channels <= MAX_CHANNELS:
+            del self.buf[:first + 1]
+            return False
+        self.total_channels = channels
         del self.buf[:first]      # align buffer to a packet boundary
         return True
 
@@ -116,12 +126,10 @@ def build_packet(channels, pc=0, ppd=0):
     so the exact same parser path is exercised without hardware."""
     pkt = bytearray([0xFF, 0xFE, ppd & 0x0F, 0x00, pc & 0xFF, 0x00, 0x00, 0x00])
     for v in channels:
-        v &= 0xFFFF
+        if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 0xFDFF:
+            raise ValueError("LXSDF channel values must be integers in [0, 65023]")
         hi = (v >> 8) & 0xFF
         lo = v & 0xFF
-        # spec keeps high bytes <=253 so they can't fake a sync pair
-        if hi >= 0xFE:
-            hi = 0xFD
         pkt.append(hi)
         pkt.append(lo)
     return bytes(pkt)

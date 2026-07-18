@@ -159,6 +159,33 @@ presenting fit-set accuracy as model quality.
   exercised when `scikit-learn` is installed; the present bare environment skips
   that optional test explicitly.
 
+## Patch 7 — unambiguous USB discovery and strict LXSDF channel mapping
+
+### Intent
+
+Avoid opening the wrong USB device when the Arduino and EEG are connected at the
+same time, and make packet/config corruption stop acquisition rather than inject
+zero-valued EEG channels.
+
+### Changes
+
+- Arm and EEG `auto` discovery now succeeds only for exactly one candidate;
+  multiple ports require explicit `ARM_PORT`/`EEG_PORT` selection.
+- `eeg_detect.py` probes only ports that appeared after its plug-in prompt or an
+  explicit `--port`, avoiding accidental Arduino resets.
+- Invalid/duplicate/negative EEG mappings now fail validation, and mappings beyond
+  the parsed packet fail the source thread instead of being padded with zeros.
+- Added bounded LXSDF channel-count validation and rejected sample values that the
+  packet format cannot encode without loss.
+- Added parser regression tests and updated discovery documentation.
+
+### Verification
+
+- `python3 laptop/test_pipeline.py`
+- `python3 laptop/validate.py`
+- `python3 -m compileall -q laptop`
+- `python3 laptop/eeg_detect.py --help`
+
 ## Patch 5 — task-scoped vetoes and strict reachability
 
 ### Intent
