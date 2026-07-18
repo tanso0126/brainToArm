@@ -117,15 +117,19 @@ def human_vetoes_mock(det):
     return ans == "y"
 
 
-def read_veto(eeg, errp, target):
-    """Onset-locked veto read. Timestamp the instant the arm commits (hover), let
+def read_veto(eeg, errp, onset):
+    """Onset-locked veto read. Given the timestamp at which the arm began its
+    visible commitment, let
     the response develop, then epoch [onset-baseline, onset+window] by TIMESTAMP
     (not sample count) so a real ErrP stays aligned regardless of thread jitter.
     Returns (is_veto, p_error)."""
-    onset = eeg.mark_onset()
-    if KEYBOARD_BRAIN and human_vetoes_mock(target):
-        eeg.mark_error(VETO_WATCH_S)      # mock brain: inject a real ErrP burst
     window = eeg.wait_and_epoch(onset)
+    expected = int((config.ERRP_BASELINE_S + config.ERRP_WINDOW_S) * config.EEG_FS)
+    minimum = int(expected * config.EEG_MIN_EPOCH_FRACTION)
+    if len(window) < minimum:
+        detail = f"; source error: {eeg.last_error}" if eeg.last_error else ""
+        raise RuntimeError(
+            f"incomplete EEG epoch ({len(window)}/{expected} samples){detail}")
     p_err = errp.p_error(window)
     return p_err >= errp.threshold, p_err
 
@@ -135,10 +139,17 @@ def do_pick_and_place(arm, eeg, errp, vision, policy, target):
     # commit: hover above the object so the human SEES the intent (ErrP needs a
     # clearly perceived wrong action, so we pause at hover during the veto read).
     print(f"[act] committing to '{target.label}' at ({target.x:.1f},{target.y:.1f})")
-    arm.gripper(open_=True)
+    arm.gripper(open_=True); arm.wait_done()
+
+    # The visible reach is the event the observer judges. Timestamp immediately
+    # before motion begins; timestamping after the blocking move misses the ErrP.
+    mock_veto = KEYBOARD_BRAIN and human_vetoes_mock(target)
+    onset = eeg.mark_onset()
+    if mock_veto:
+        eeg.mark_error(VETO_WATCH_S, onset_t=onset)
     move_to(arm, policy, (target.x, target.y), config.Z_APPROACH)
 
-    veto, p_err = read_veto(eeg, errp, target)
+    veto, p_err = read_veto(eeg, errp, onset)
     print(f"    [errp] P(error)={p_err:.2f} (thr={errp.threshold})")
     if veto:
         print(f"    -> BRAIN SAYS NO. veto '{target.label}', reselect.")
@@ -166,7 +177,12 @@ def run_trial(arm, eeg, errp, vision, policy, max_objects=None):
     """Continuously clear the table: re-detect, pick the best remaining target,
     veto-or-place, repeat until nothing's left (or max_objects delivered)."""
     policy.reset_trial()
-    errp.update_baseline(eeg.snapshot(1.0))    # calibrate on a calm moment
+    resting = eeg.snapshot(1.0)                # calibrate on a calm moment
+    minimum = int(config.EEG_FS * config.EEG_MIN_EPOCH_FRACTION)
+    if len(resting) < minimum:
+        raise RuntimeError(
+            f"not enough resting EEG for calibration ({len(resting)}/{config.EEG_FS})")
+    errp.update_baseline(resting)
 
     delivered = 0
     while True:
@@ -234,7 +250,10 @@ def preflight(arm, eeg, vision):
     # eeg stream actually producing samples
     time.sleep(1.2)
     n = len(eeg.snapshot(1.0))
-    if n == 0:
+    if eeg.last_error is not None:
+        print(f"  eeg    : FAIL — source stopped: {eeg.last_error}")
+        ok = False
+    elif n == 0:
         print("  eeg    : FAIL — no samples. Run eeg_detect.py; check EEG_SOURCE/port/baud.")
         ok = False
     else:

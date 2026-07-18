@@ -15,7 +15,6 @@ Output: a thread-safe ring buffer of EEG samples in microvolts, shape
 import time
 import glob
 import socket
-import struct
 import threading
 import collections
 import math
@@ -51,9 +50,9 @@ class RingBuffer:
         self.buf = collections.deque(maxlen=capacity)
         self.lock = threading.Lock()
 
-    def push(self, sample):
+    def push(self, sample, timestamp=None):
         with self.lock:
-            self.buf.append((time.monotonic(), sample))
+            self.buf.append((time.monotonic() if timestamp is None else timestamp, sample))
 
     def snapshot(self, n):
         with self.lock:
@@ -69,6 +68,11 @@ class RingBuffer:
         with self.lock:
             return self.buf[-1][0] if self.buf else None
 
+    def entries(self):
+        """Copy timestamped entries. Intended for health checks and tests."""
+        with self.lock:
+            return list(self.buf)
+
 
 class EEGBridge:
     def __init__(self):
@@ -80,6 +84,8 @@ class EEGBridge:
         self._stop = threading.Event()
         self._error_burst_until = 0.0
         self._error_burst_start = 0.0
+        self._next_sample_t = None
+        self.last_error = None
         self.thread = threading.Thread(target=self._run, daemon=True)
 
     def start(self):
@@ -89,6 +95,8 @@ class EEGBridge:
 
     def stop(self):
         self._stop.set()
+        if self.thread.is_alive() and threading.current_thread() is not self.thread:
+            self.thread.join(timeout=2.0)
 
     def snapshot(self, seconds):
         return self.ring.snapshot(int(seconds * self.fs))
@@ -108,16 +116,40 @@ class EEGBridge:
             time.sleep(0.005)
         return self.ring.epoch(onset_t, pre, post)
 
-    def mark_error(self, duration=0.8):
+    def mark_error(self, duration=0.8, onset_t=None):
         """Mock only: simulate the human brain's ErrP to a wrong action.
         Time-locked: a monophasic negative deflection peaking ~300ms later."""
-        now = time.time()
-        self._error_burst_start = now
-        self._error_burst_until = now + duration
+        onset_t = time.monotonic() if onset_t is None else onset_t
+        self._error_burst_start = onset_t
+        self._error_burst_until = onset_t + duration
 
     def _emit_from_bytes(self, data):
-        for all_channels, _pc in self.parser.feed(data):
-            self.ring.push(_select_eeg(all_channels))
+        packets = self.parser.feed(data)
+        if not packets:
+            return
+
+        # A serial/TCP read commonly contains several device packets. Giving all
+        # of them the read-completion time collapses tens of milliseconds into one
+        # instant and corrupts onset epoching. Reconstruct nominal device time from
+        # EEG_FS and gently discipline it to the local monotonic clock.
+        now = time.monotonic()
+        dt = 1.0 / self.fs
+        if self._next_sample_t is None:
+            first_t = now - (len(packets) - 1) * dt
+        else:
+            predicted_end = self._next_sample_t + (len(packets) - 1) * dt
+            clock_error = now - predicted_end
+            if abs(clock_error) > 0.25:
+                # Reconnect, a cleared OS buffer, or a badly stalled source: align
+                # the new batch to arrival time instead of carrying a stale clock.
+                first_t = now - (len(packets) - 1) * dt
+            else:
+                correction = max(-0.1 * dt, min(0.1 * dt, 0.02 * clock_error))
+                first_t = self._next_sample_t + correction
+
+        for i, (all_channels, _pc) in enumerate(packets):
+            self.ring.push(_select_eeg(all_channels), first_t + i * dt)
+        self._next_sample_t = first_t + len(packets) * dt
 
     # ---- sources ----
     def _run(self):
@@ -126,6 +158,7 @@ class EEGBridge:
              "serial": self._run_serial,
              "tcp": self._run_tcp}[self.source]()
         except Exception as e:
+            self.last_error = e
             print(f"[eeg] source thread died: {e}")
 
     def _run_mock(self):
@@ -136,8 +169,8 @@ class EEGBridge:
         # channel mapping are exercised. 16 total slots, EEG = first 8.
         total = config.EEG_TOTAL_CHANNELS or 16
         while not self._stop.is_set():
-            now = time.time()
-            erroring = now < self._error_burst_until
+            now = time.monotonic()
+            erroring = self._error_burst_start <= now < self._error_burst_until
             te = now - self._error_burst_start          # time since action onset
             # monophasic ErrP: negative Gaussian bump peaking ~300ms post-onset
             errp_uv = -40.0 * math.exp(-((te - 0.30) / 0.07) ** 2) if erroring else 0.0
@@ -175,28 +208,35 @@ class EEGBridge:
         port = self._resolve_serial_port()
         if not port:
             raise RuntimeError("no EEG serial port; run eeg_detect.py")
-        s = serial.Serial(port, config.EEG_BAUD, timeout=0.1)
-        print(f"[eeg] serial {port} @ {config.EEG_BAUD}")
-        while not self._stop.is_set():
-            data = s.read(512)
-            if data:
-                self._emit_from_bytes(data)
-        s.close()
+        with serial.Serial(port, config.EEG_BAUD, timeout=0.1) as s:
+            # Do not epoch packets buffered before this acquisition session.
+            s.reset_input_buffer()
+            print(f"[eeg] serial {port} @ {config.EEG_BAUD}")
+            while not self._stop.is_set():
+                data = s.read(512)
+                if data:
+                    self._emit_from_bytes(data)
 
     def _run_tcp(self):
         while not self._stop.is_set():
             try:
-                sock = socket.create_connection(
-                    (config.EEG_TCP_HOST, config.EEG_TCP_PORT), timeout=3)
-                print(f"[eeg] tcp {config.EEG_TCP_HOST}:{config.EEG_TCP_PORT}")
-                while not self._stop.is_set():
-                    data = sock.recv(4096)
-                    if not data:
-                        break
-                    self._emit_from_bytes(data)
+                with socket.create_connection(
+                        (config.EEG_TCP_HOST, config.EEG_TCP_PORT), timeout=3) as sock:
+                    sock.settimeout(0.5)
+                    print(f"[eeg] tcp {config.EEG_TCP_HOST}:{config.EEG_TCP_PORT}")
+                    while not self._stop.is_set():
+                        try:
+                            data = sock.recv(4096)
+                        except socket.timeout:
+                            continue
+                        if not data:
+                            break
+                        self._emit_from_bytes(data)
             except OSError as e:
+                if self._stop.is_set():
+                    break
                 print(f"[eeg] tcp retry ({e})")
-                time.sleep(1.0)
+                self._stop.wait(1.0)
 
 
 if __name__ == "__main__":

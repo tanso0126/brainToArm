@@ -64,6 +64,7 @@ EEG_TOTAL_CHANNELS = None  # None = auto-detect from packet length; or force an 
 EEG_CHANNEL_MAP = [0, 1, 2, 3, 4, 5, 6, 7]   # packet slot -> EEG ch 0..7
 EEG_CHANNELS = 8
 EEG_FS = 256               # sampling rate (Hz) — confirm in TeleScan; 256 typical
+EEG_MIN_EPOCH_FRACTION = 0.80  # abort a decision if too many onset-locked samples are missing
 
 # ADC scaling: raw 2-byte sample -> microvolts. LXSDF ships a 12-bit ADC value.
 # uV = (raw - ADC_ZERO) * ADC_UV_PER_LSB. Defaults center a 12-bit unipolar code

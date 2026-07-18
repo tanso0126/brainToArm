@@ -254,8 +254,9 @@ brainToArm/
     streaming samples, the camera sees objects, and the config is self-consistent
     (via `validate.py`). Prints GO / NO-GO; refuses to run on a dead subsystem
     (override with `--force`).
-  - `read_veto()` — timestamps the action onset, waits, cuts the ErrP epoch by
-    that timestamp, returns whether the brain vetoed.
+  - `read_veto()` — uses the timestamp captured immediately before the visible
+    reach begins, waits, cuts the ErrP epoch by that timestamp, and refuses to
+    decide from an incomplete epoch.
   - `do_pick_and_place()` — one object, the full sequence (steps 3–10).
   - `run_trial()` — repeatedly clear the table until empty or `max_objects`.
   Run with `--auto` to remove the human (arm accepts everything).
@@ -285,7 +286,9 @@ brainToArm/
 ### EEG acquisition and the brain signal
 
 - **`eeg_bridge.py`** — `EEGBridge` runs a background thread that fills a
-  **timestamped** ring buffer of EEG samples (in microvolts). Three
+  **timestamped** ring buffer of EEG samples (in microvolts). Batched transport
+  reads are reconstructed at the configured device sample interval instead of
+  assigning one arrival timestamp to every packet. Three
   interchangeable sources selected by `config.EEG_SOURCE`:
   - `"mock"` — synthetic 8-channel signal (widespread alpha + noise), with an
     injectable ErrP-like burst for testing. Goes through the **real** LXSDF

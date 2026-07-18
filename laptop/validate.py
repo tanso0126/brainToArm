@@ -35,8 +35,12 @@ def validate():
             errs.append(f"ERRP_FRONTOCENTRAL ch {ch} >= EEG_CHANNELS {config.EEG_CHANNELS}")
 
     # --- ErrP band below Nyquist ---
-    if config.ERRP_BAND[1] >= config.EEG_FS / 2:
+    if config.EEG_FS <= 0:
+        errs.append("EEG_FS must be > 0")
+    elif config.ERRP_BAND[1] >= config.EEG_FS / 2:
         errs.append(f"ERRP_BAND high {config.ERRP_BAND[1]}Hz >= Nyquist {config.EEG_FS/2}Hz")
+    if not (0 < config.EEG_MIN_EPOCH_FRACTION <= 1):
+        errs.append("EEG_MIN_EPOCH_FRACTION must be in (0, 1]")
 
     # --- source selection valid ---
     if config.EEG_SOURCE not in ("mock", "serial", "tcp"):

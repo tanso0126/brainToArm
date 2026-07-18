@@ -34,3 +34,29 @@ control, and establish the requested Markdown record for every subsequent patch.
 
 - Confirmed `git status --ignored` reports Python bytecode as ignored.
 
+## Patch 2 — onset-correct, fail-closed EEG veto acquisition
+
+### Intent
+
+Make the EEG veto correspond to the action the observer actually sees and prevent
+missing or dead EEG data from being interpreted as approval.
+
+### Changes
+
+- Moved action-onset capture to immediately before the visible hover reach. The
+  former ordering timestamped after the blocking move and could miss the ErrP.
+- Reconstructed distinct monotonic sample times for packets received in one
+  serial/TCP batch using `EEG_FS`.
+- Made mock ErrP injection use the same monotonic onset clock.
+- Added EEG source error reporting, deterministic resource cleanup, TCP receive
+  timeouts, thread joining, and serial input-buffer clearing at session start.
+- Added `EEG_MIN_EPOCH_FRACTION`; veto decisions and resting calibration now stop
+  on insufficient samples instead of silently producing a low error probability.
+- Added validation and a regression test for batched packet timestamps.
+- Updated the README acquisition description.
+
+### Verification
+
+- `python3 laptop/test_pipeline.py`
+- `python3 laptop/validate.py`
+- `python3 -m compileall -q laptop`

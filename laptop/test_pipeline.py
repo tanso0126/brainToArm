@@ -12,6 +12,7 @@ import config
 from lxsdf import LXSDFParser, build_packet
 import kinematics
 from errp import ErrPDetector
+from eeg_bridge import EEGBridge
 
 
 def check(cond, msg):
@@ -93,6 +94,20 @@ def test_errp():
     check(p_err > p_ok, "error epoch scores higher than clean")
 
 
+def test_eeg_packet_timestamps():
+    print("[eeg] batched packets receive distinct sample timestamps")
+    eeg = EEGBridge()
+    chans = [config.ADC_ZERO] * 16
+    eeg._emit_from_bytes(b"".join(build_packet(chans, pc=i) for i in range(8)))
+    entries = eeg.ring.entries()
+    times = [t for t, _ in entries]
+    check(len(times) == 8, "all packets entered the ring")
+    check(all(a < b for a, b in zip(times, times[1:])), "timestamps are strictly increasing")
+    span = times[-1] - times[0]
+    expected = 7 / config.EEG_FS
+    check(abs(span - expected) < 1e-6, "batch timing follows configured sampling rate")
+
+
 def test_pick_place():
     print("[pickplace] grasp verify + delivery removes object from table")
     import sim
@@ -122,5 +137,6 @@ if __name__ == "__main__":
     test_lxsdf_drops()
     test_ik()
     test_errp()
+    test_eeg_packet_timestamps()
     test_pick_place()
     print("\nALL TESTS PASSED")
