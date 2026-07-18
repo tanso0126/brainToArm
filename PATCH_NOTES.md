@@ -60,3 +60,33 @@ missing or dead EEG data from being interpreted as approval.
 - `python3 laptop/test_pipeline.py`
 - `python3 laptop/validate.py`
 - `python3 -m compileall -q laptop`
+
+## Patch 3 — explicit arm mode and strict serial protocol
+
+### Intent
+
+Prevent a requested real-arm run from silently degrading to a successful-looking
+mock, and ensure malformed commands or missing firmware completion cannot produce
+uncontrolled follow-on motion.
+
+### Changes
+
+- Added the explicit `ARM_MOCK` safety switch. With `ARM_MOCK=False`, missing
+  `pyserial`, an absent port, or an open failure now raises immediately.
+- Added host-side joint count/type/integer/range validation, strict `OK`/`ERR`
+  handling, `PONG` preflight verification, and `DONE` timeout exceptions.
+- Made shutdown report a failed return-home attempt without hiding the original
+  failure.
+- Made firmware angle parsing atomic and strict: invalid, extra, truncated, or
+  overlong input changes no targets and receives an error reply.
+- Added configuration checks and host command-validation regression tests.
+- Updated hardware bring-up documentation for the explicit mode switch.
+
+### Verification
+
+- `python3 laptop/test_pipeline.py`
+- `python3 laptop/validate.py`
+- `python3 -m compileall -q laptop`
+- Firmware source inspected for bounded input and atomic target update; an Arduino
+  toolchain is not available in this environment, so hardware compilation remains
+  part of board bring-up.

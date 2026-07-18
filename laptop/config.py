@@ -11,6 +11,7 @@ wrong constant here — no code changes.
 # ======================================================================
 ARM_PORT = "auto"          # "auto" = first usb-serial, or e.g. "/dev/cu.usbmodem1101"
 ARM_BAUD = 115200
+ARM_MOCK = True             # explicit safety switch; False requires a real, responsive board
 N_JOINTS = 7
 UNUSED_JOINT = 2           # servo3 index (0-based) — attached but not driven
 HOME_POSE = [90, 90, 90, 90, 90, 170, 180]

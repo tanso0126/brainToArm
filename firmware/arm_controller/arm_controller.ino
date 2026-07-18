@@ -69,15 +69,30 @@ void setup() {
   Serial.println("READY");
 }
 
-// Parse "A a1 a2 ... a7". -1 means keep existing target for that joint.
+bool parseIntStrict(char* tok, int* out) {
+  if (tok == NULL || *tok == '\0') return false;
+  char* end = NULL;
+  long value = strtol(tok, &end, 10);
+  if (end == tok || *end != '\0' || value < -1 || value > 180) return false;
+  *out = (int)value;
+  return true;
+}
+
+// Parse "A a1 a2 ... a7" atomically. -1 keeps the existing target. A malformed
+// command changes no targets; this matters when a truncated serial line arrives.
 bool parseAngles(char* line) {
+  if (line[1] != ' ' && line[1] != '\t') return false;
+  int nextTarget[N];
+  for (uint8_t i = 0; i < N; i++) nextTarget[i] = target[i];
   char* tok = strtok(line + 1, " ,\t"); // skip the 'A'
   for (uint8_t i = 0; i < N; i++) {
-    if (tok == NULL) return false;
-    int v = atoi(tok);
-    if (v >= 0) target[i] = clampJoint(i, v);
+    int v;
+    if (!parseIntStrict(tok, &v)) return false;
+    if (v >= 0) nextTarget[i] = clampJoint(i, v);
     tok = strtok(NULL, " ,\t");
   }
+  if (tok != NULL) return false;
+  for (uint8_t i = 0; i < N; i++) target[i] = nextTarget[i];
   return true;
 }
 
@@ -96,8 +111,14 @@ void handleLine(char* line) {
       if (parseAngles(line)) { announced = false; Serial.println("OK"); }
       else                    Serial.println("ERR parse");
       break;
-    case 'P': Serial.println("PONG"); break;
-    case 'S': sendStatus(); break;
+    case 'P':
+      if (line[1] == '\0') Serial.println("PONG");
+      else                  Serial.println("ERR parse");
+      break;
+    case 'S':
+      if (line[1] == '\0') sendStatus();
+      else                  Serial.println("ERR parse");
+      break;
     default:  Serial.println("ERR cmd");
   }
 }
@@ -105,12 +126,22 @@ void handleLine(char* line) {
 void readSerial() {
   static char buf[64];
   static uint8_t len = 0;
+  static bool overflow = false;
   while (Serial.available()) {
     char c = Serial.read();
     if (c == '\n' || c == '\r') {
-      if (len > 0) { buf[len] = '\0'; handleLine(buf); len = 0; }
+      if (overflow) {
+        Serial.println("ERR line too long");
+      } else if (len > 0) {
+        buf[len] = '\0';
+        handleLine(buf);
+      }
+      len = 0;
+      overflow = false;
     } else if (len < sizeof(buf) - 1) {
       buf[len++] = c;
+    } else {
+      overflow = true;
     }
   }
 }

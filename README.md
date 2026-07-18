@@ -262,9 +262,10 @@ brainToArm/
   Run with `--auto` to remove the human (arm accepts everything).
 
 - **`arm_serial.py`** — `ArmSerial` class: opens the Arduino port (auto-detects
-  `/dev/cu.usbmodem*` etc.), sends angle commands, waits for `DONE`, drives the
-  gripper, homes. If pyserial or the board is missing it transparently falls into
-  a **mock** mode that just prints commands, so the whole stack runs with no arm.
+  `/dev/cu.usbmodem*` etc.), sends validated angle commands, requires `OK` and
+  `DONE`, drives the gripper, and homes. Mock mode is selected explicitly with
+  `ARM_MOCK=True`; when a real arm is requested, a missing port, bad reply, or
+  motion timeout stops the run instead of pretending the command succeeded.
 
 - **`kinematics.py`** — Inverse kinematics. `solve(x, y, z)` turns a workspace
   point (centimeters, origin at the arm base) into the 7 servo commands: base
@@ -484,7 +485,7 @@ pip install -r requirements.txt
 ```
 
 **1 — Arm.** Flash `firmware/arm_controller/arm_controller.ino` to the Arduino.
-Find its serial port and set `ARM_PORT` in `config.py`. Measure your arm's link
+Find its serial port, set `ARM_PORT` and `ARM_MOCK=False` in `config.py`. Measure your arm's link
 lengths with a ruler into `L_BASE_HEIGHT / L_UPPER / L_FORE / L_HAND`. Then:
 ```bash
 python3 laptop/arm_jog.py        # jog joints; fix SERVO_DIRECTION/OFFSET if a
@@ -531,7 +532,7 @@ no keyboard — the brain drives the veto directly.
 
 Grouped constants (see the file for full comments):
 
-- **Arm serial:** `ARM_PORT`, `ARM_BAUD`, `N_JOINTS`, `HOME_POSE`, joint index
+- **Arm serial:** `ARM_PORT`, `ARM_BAUD`, `ARM_MOCK`, `N_JOINTS`, `HOME_POSE`, joint index
   names, `GRIP_OPEN/CLOSED`.
 - **Arm geometry & calibration:** `L_BASE_HEIGHT/L_UPPER/L_FORE/L_HAND`,
   `SERVO_OFFSET/DIRECTION/MIN/MAX`.

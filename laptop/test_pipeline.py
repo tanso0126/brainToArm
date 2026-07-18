@@ -69,6 +69,24 @@ def test_ik():
     check(ax != anx, "base yaw responds to target direction")
 
 
+def test_arm_command_validation():
+    print("[arm] rejects malformed or unsafe commands before serial write")
+    from arm_serial import ArmSerial
+    arm = ArmSerial(mock=True)
+    try:
+        arm.send_angles([90] * (config.N_JOINTS - 1))
+        check(False, "wrong joint count rejected")
+    except ValueError:
+        check(True, "wrong joint count rejected")
+    unsafe = list(config.HOME_POSE)
+    unsafe[0] = config.SERVO_MAX[0] + 1
+    try:
+        arm.send_angles(unsafe)
+        check(False, "out-of-range angle rejected")
+    except ValueError:
+        check(True, "out-of-range angle rejected")
+
+
 def _synth_epoch(fs, error=False):
     n = int((config.ERRP_BASELINE_S + config.ERRP_WINDOW_S) * fs)
     win = []
@@ -136,6 +154,7 @@ if __name__ == "__main__":
     test_lxsdf_resync()
     test_lxsdf_drops()
     test_ik()
+    test_arm_command_validation()
     test_errp()
     test_eeg_packet_timestamps()
     test_pick_place()

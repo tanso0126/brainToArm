@@ -240,12 +240,14 @@ def preflight(arm, eeg, vision):
 
     # arm serial
     if getattr(arm, "mock", False):
-        print("  arm    : MOCK (no board detected)")
+        print("  arm    : MOCK (ARM_MOCK=True)")
         if config.EEG_SOURCE != "mock":
-            print("           ! real EEG but mock arm — check ARM_PORT / USB")
+            print("           ! real EEG with an explicitly mocked arm")
     else:
+        arm.ping()
         r = arm.send_angles(config.HOME_POSE)
-        print(f"  arm    : OK ({arm.port}) ack={r!r}")
+        arm.wait_done()
+        print(f"  arm    : OK ({arm.port}) ping=PONG ack={r!r}")
 
     # eeg stream actually producing samples
     time.sleep(1.2)
@@ -300,7 +302,11 @@ def main():
         print(f"[run] {'complete' if ok else 'aborted'}")
     finally:
         eeg.stop()
-        arm.home()
+        try:
+            arm.home()
+            arm.wait_done()
+        except Exception as exc:
+            print(f"[arm] failed to return home during shutdown: {exc}")
         arm.close()
         if hasattr(vision, "close"):
             vision.close()

@@ -17,11 +17,19 @@ def validate():
         arr = getattr(config, name)
         if len(arr) != config.N_JOINTS:
             errs.append(f"{name} has {len(arr)} entries, expected N_JOINTS={config.N_JOINTS}")
+    if not isinstance(config.ARM_MOCK, bool):
+        errs.append("ARM_MOCK must be True or False")
+    if not config.ARM_MOCK and not config.ARM_PORT:
+        errs.append("ARM_PORT must be set when ARM_MOCK=False")
 
     # --- home pose within servo limits ---
     for i, a in enumerate(config.HOME_POSE):
+        if config.SERVO_MIN[i] > config.SERVO_MAX[i]:
+            errs.append(f"SERVO_MIN[{i}] > SERVO_MAX[{i}]")
         if not (config.SERVO_MIN[i] <= a <= config.SERVO_MAX[i]):
             errs.append(f"HOME_POSE[{i}]={a} outside SERVO_MIN/MAX [{config.SERVO_MIN[i]},{config.SERVO_MAX[i]}]")
+        if config.SERVO_DIRECTION[i] not in (-1, 1):
+            errs.append(f"SERVO_DIRECTION[{i}] must be -1 or 1")
 
     # --- EEG channel map sane ---
     total = config.EEG_TOTAL_CHANNELS
