@@ -272,14 +272,16 @@ brainToArm/
   yaw to face the target, then a 2-link (upper arm + forearm) law-of-cosines
   solution for shoulder and elbow, wrist kept pointing down for a top grasp.
   Uses the link lengths and servo calibration from `config.py`. Unreachable
-  points are clamped rather than throwing. `reachable(x,y,z)` reports feasibility.
+  points are rejected rather than silently mapped to a different pose.
+  `reachable(x,y,z)` reports feasibility.
 
 - **`policy.py`** — `Policy` class, two jobs kept separate:
   1. **Target selection** (the part the brain corrects): rank candidate objects,
      naive prior = nearest first (so it *will* sometimes pick wrong — that's the
      point). `reject()` records a vetoed **position** (not a detection id, because
-     markerless detection renumbers objects every frame). `confirm()` reinforces
-     a good pick.
+     markerless detection renumbers objects every frame). Vetoes last for one
+     object-selection cycle; persistent spatial preference is disabled unless the
+     application supplies a stable task meaning and explicitly enables it.
   2. **Reach planning:** `target_to_angles()` calls the IK. This is the seam where
      a trained reinforcement-learning reacher could later replace IK without
      touching anything else.

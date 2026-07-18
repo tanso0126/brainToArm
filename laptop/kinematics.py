@@ -8,8 +8,8 @@ servo5/6 wrist, servo7 gripper.
 Coordinates: workspace origin at the base axis on the table. x,y horizontal
 (same frame as the overhead camera), z up. Units cm (config link lengths).
 
-If a target is unreachable the solution is clamped to the nearest reachable
-pose rather than throwing, so the loop degrades gracefully.
+Unreachable or non-finite targets are rejected. Quietly clamping a physical
+target would move the gripper somewhere other than the camera-observed object.
 """
 import math
 import config
@@ -31,6 +31,11 @@ def solve(x, y, z=0.0, approach_from_above=True):
     Joints solved: base yaw, shoulder, elbow. Wrist is set to keep the hand
     roughly level (or pointing down for a top grasp). Gripper left as-is (HOME).
     """
+    if not all(math.isfinite(v) for v in (x, y, z)):
+        raise ValueError(f"target coordinates must be finite: {(x, y, z)}")
+    if not reachable(x, y, z, approach_from_above=approach_from_above):
+        raise ValueError(f"target is outside geometric reach: {(x, y, z)}")
+
     L1 = config.L_UPPER
     L2 = config.L_FORE
     Lh = config.L_HAND
@@ -47,12 +52,6 @@ def solve(x, y, z=0.0, approach_from_above=True):
     dr = r                                          # radial reach to wrist
 
     dist = math.hypot(dr, dz)
-    reach = L1 + L2
-    if dist > reach:                                # clamp to max reach
-        dist = reach - 1e-3
-    if dist < abs(L1 - L2):                         # clamp to min reach
-        dist = abs(L1 - L2) + 1e-3
-
     # law of cosines for the 2-link planar arm
     cos_elbow = (L1 * L1 + L2 * L2 - dist * dist) / (2 * L1 * L2)
     elbow_inner = math.degrees(math.acos(_clamp(cos_elbow, -1, 1)))
@@ -78,9 +77,12 @@ def solve(x, y, z=0.0, approach_from_above=True):
     return angles
 
 
-def reachable(x, y, z=0.0):
+def reachable(x, y, z=0.0, approach_from_above=True):
+    if not all(math.isfinite(v) for v in (x, y, z)):
+        return False
     r = math.hypot(x, y)
-    dz = z + config.L_HAND - config.L_BASE_HEIGHT
+    hand_z = config.L_HAND if approach_from_above else 0.0
+    dz = z + hand_z - config.L_BASE_HEIGHT
     dist = math.hypot(r, dz)
     return abs(config.L_UPPER - config.L_FORE) <= dist <= (config.L_UPPER + config.L_FORE)
 

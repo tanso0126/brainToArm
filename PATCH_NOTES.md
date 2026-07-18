@@ -125,3 +125,31 @@ hover pose, and prevent a blind or unconverged alignment from descending.
 - `python3 laptop/validate.py`
 - `python3 -m compileall -q laptop`
 - `python3 laptop/orchestrator.py --auto`
+
+## Patch 5 — task-scoped vetoes and strict reachability
+
+### Intent
+
+Keep the brain signal as a correction to the current ambiguous choice, not a
+permanent dislike of a table location, and never substitute an unreachable target
+with an unannounced different physical pose.
+
+### Changes
+
+- Reset rejected positions after each accepted delivery so a clear-table run can
+  begin a new human-goal selection.
+- Disabled cross-selection spatial preference by default with
+  `POLICY_SPATIAL_LEARNING`; it can be enabled only when the surrounding task gives
+  locations a stable meaning.
+- Filtered geometrically unreachable detections before selection and report them
+  separately from brain-vetoed candidates.
+- Made IK reject non-finite and unreachable targets instead of clamping them.
+- Added configuration and regression tests for veto scope and reachability.
+- Updated the README policy and IK descriptions.
+
+### Verification
+
+- `python3 laptop/test_pipeline.py`
+- `python3 laptop/validate.py`
+- `python3 -m compileall -q laptop`
+- `python3 laptop/orchestrator.py --auto`

@@ -67,6 +67,25 @@ def test_ik():
     ax = kinematics.solve(15, 0)[config.J_BASE]
     anx = kinematics.solve(-15, 0)[config.J_BASE]
     check(ax != anx, "base yaw responds to target direction")
+    try:
+        kinematics.solve(1000, 1000, 0)
+        check(False, "unreachable target rejected")
+    except ValueError:
+        check(True, "unreachable target rejected")
+
+
+def test_policy_veto_scope():
+    print("[policy] veto scope resets for the next requested object")
+    from policy import Policy
+    from vision import Detection
+    policy = Policy()
+    a = Detection(1, "a", 8.0, -3.0)
+    b = Detection(2, "b", 12.0, 4.0)
+    policy.reject(a)
+    check(policy.choose([a, b], (0, 0)) is b, "veto excludes target in current selection")
+    check(not policy.preference, "spatial learning is off without task identity")
+    policy.reset_selection()
+    check(policy.choose([a], (0, 0)) is a, "veto clears after an accepted delivery")
 
 
 def test_arm_command_validation():
@@ -190,6 +209,7 @@ if __name__ == "__main__":
     test_lxsdf_resync()
     test_lxsdf_drops()
     test_ik()
+    test_policy_veto_scope()
     test_arm_command_validation()
     test_errp()
     test_eeg_packet_timestamps()

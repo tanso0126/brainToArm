@@ -64,6 +64,8 @@ def validate():
         errs.append("GRASP_RETRIES must be >= 0")
     if config.GRASP_VERIFY_RADIUS_CM <= 0:
         errs.append("GRASP_VERIFY_RADIUS_CM must be > 0")
+    if not isinstance(config.POLICY_SPATIAL_LEARNING, bool):
+        errs.append("POLICY_SPATIAL_LEARNING must be True or False")
     if not (0 < config.SERVO_GAIN <= 1):
         errs.append("SERVO_GAIN must be in (0, 1]")
     if config.SERVO_TOL_CM <= 0 or config.SERVO_MAX_ITERS <= 0:

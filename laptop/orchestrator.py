@@ -207,12 +207,19 @@ def run_trial(arm, eeg, errp, vision, policy, max_objects=None):
               ", ".join(d.label for d in detections))
         target = policy.choose(detections, arm_xy)
         if target is None:
-            print("[trial] every remaining object was vetoed. Stop.")
+            if policy.unreachable:
+                labels = ", ".join(d.label for d in policy.unreachable)
+                print(f"[trial] no eligible target; unreachable: {labels}. Stop.")
+            else:
+                print("[trial] every remaining object was vetoed. Stop.")
             break
 
         result = do_pick_and_place(arm, eeg, errp, vision, policy, target)
         if result == "done":
             delivered += 1
+            # A veto answers "not for the current goal", not "never touch this
+            # location". The next pick in a clear-table run is a new selection.
+            policy.reset_selection()
             if max_objects and delivered >= max_objects:
                 break
         elif result == "fail":

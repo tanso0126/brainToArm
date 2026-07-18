@@ -28,9 +28,15 @@ class Policy:
     def __init__(self):
         self.rejected_pts = []     # workspace (x,y) the human vetoed this round
         self.preference = {}       # rounded-position -> learned score bump
+        self.unreachable = []      # most recent detections filtered for geometry
 
     def reset_trial(self):
+        self.reset_selection()
+
+    def reset_selection(self):
+        """Forget vetoes after one object is accepted; the next goal may differ."""
         self.rejected_pts = []
+        self.unreachable = []
 
     @staticmethod
     def _key(x, y):
@@ -47,20 +53,29 @@ class Policy:
         return d - self.preference.get(self._key(det.x, det.y), 0.0)
 
     def choose(self, detections, arm_xy):
-        live = [d for d in detections if not self._is_rejected(d)]
+        self.unreachable = [d for d in detections if not self._reachable_for_pick(d)]
+        live = [d for d in detections
+                if not self._is_rejected(d) and d not in self.unreachable]
         if not live:
             return None
         return min(live, key=lambda d: self.score(d, arm_xy))
 
-    def reject(self, det, learn=True):
+    @staticmethod
+    def _reachable_for_pick(det):
+        return all(kinematics.reachable(det.x, det.y, z) for z in (
+            config.Z_APPROACH, config.Z_GRASP, config.Z_LIFT))
+
+    def reject(self, det, learn=None):
         """Human ErrP said this target is wrong."""
+        learn = config.POLICY_SPATIAL_LEARNING if learn is None else learn
         self.rejected_pts.append((det.x, det.y))
         if learn:
             k = self._key(det.x, det.y)
             self.preference[k] = self.preference.get(k, 0.0) - 3.0
 
-    def confirm(self, det, learn=True):
+    def confirm(self, det, learn=None):
         """Placed with no veto -> reinforce this choice."""
+        learn = config.POLICY_SPATIAL_LEARNING if learn is None else learn
         if learn:
             k = self._key(det.x, det.y)
             self.preference[k] = self.preference.get(k, 0.0) + 1.0
