@@ -58,11 +58,13 @@ def servo_to_object(arm, vision, policy, target, z):
     not optics. Systematic bias is cancelled iteratively."""
     if not config.SERVO_ENABLE:
         move_to(arm, policy, (target.x, target.y), z)
-        return None
+        return (target.x, target.y), None, True
     corr = [0.0, 0.0]
     err = None
+    command_xy = (target.x, target.y)
     for it in range(config.SERVO_MAX_ITERS):
-        move_to(arm, policy, (target.x + corr[0], target.y + corr[1]), z)
+        command_xy = (target.x + corr[0], target.y + corr[1])
+        move_to(arm, policy, command_xy, z)
         tip = vision.arm_tip()
         if tip is None:                       # tip not seen this frame; retry
             continue
@@ -70,27 +72,29 @@ def servo_to_object(arm, vision, policy, target, z):
         err = math.hypot(ex, ey)
         print(f"    [servo] iter {it}: tip=({tip[0]:.1f},{tip[1]:.1f}) err={err:.2f}cm")
         if err <= config.SERVO_TOL_CM:
-            break
+            return command_xy, err, True
         corr[0] += config.SERVO_GAIN * ex
         corr[1] += config.SERVO_GAIN * ey
-    return err
+    return command_xy, err, False
 
 
-def grasp_object(arm, vision, policy, target):
+def grasp_object(arm, vision, policy, target, grasp_xy=None):
     """Descend, close, lift, and verify the object was actually picked up.
     Retries the grasp if verification says the object is still on the table."""
+    grasp_xy = grasp_xy or (target.x, target.y)
     for attempt in range(config.GRASP_RETRIES + 1):
-        move_to(arm, policy, (target.x, target.y), config.Z_GRASP)   # descend
+        move_to(arm, policy, grasp_xy, config.Z_GRASP)               # descend
         arm.gripper(open_=False); arm.wait_done()                    # close claw
+        mock_grasped = True
         if getattr(arm, "mock", False):
             idx = sim.WORLD.index_of(target.label, target.x, target.y)
-            if idx is not None:
-                sim.WORLD.grasp(idx)
-        move_to(arm, policy, (target.x, target.y), config.Z_LIFT)    # lift
+            mock_grasped = sim.WORLD.grasp(
+                idx, (target.x, target.y), tolerance_cm=1.0)
+        move_to(arm, policy, grasp_xy, config.Z_LIFT)                # lift
         if getattr(arm, "mock", False):
             sim.WORLD.lifted()                                       # object leaves table
         if not config.GRASP_VERIFY:
-            return True
+            return mock_grasped
         # retract sideways a bit so the arm isn't over the spot during the check
         move_to(arm, policy, (target.x * 0.5, target.y * 0.5), config.Z_LIFT)
         if vision.location_clear(target):
@@ -98,6 +102,8 @@ def grasp_object(arm, vision, policy, target):
             return True
         print(f"    [grasp] FAILED (object still there), retry {attempt+1}")
         arm.gripper(open_=True); arm.wait_done()
+        if getattr(arm, "mock", False):
+            sim.WORLD.release()
     return False
 
 
@@ -159,10 +165,16 @@ def do_pick_and_place(arm, eeg, errp, vision, policy, target):
         return "veto"
 
     print(f"    -> accepted '{target.label}'. pick-and-place.")
-    err = servo_to_object(arm, vision, policy, target, config.Z_APPROACH)
+    grasp_xy, err, aligned = servo_to_object(
+        arm, vision, policy, target, config.Z_APPROACH)
     if err is not None:
         print(f"    [servo] aligned to {err:.2f}cm")
-    if not grasp_object(arm, vision, policy, target):
+    if not aligned:
+        detail = "tip was not visible" if err is None else f"final error {err:.2f}cm"
+        print(f"    [servo] FAILED ({detail}); refusing to descend.")
+        arm.home(); arm.wait_done()
+        return "fail"
+    if not grasp_object(arm, vision, policy, target, grasp_xy=grasp_xy):
         print(f"    [grasp] gave up on '{target.label}'.")
         arm.home(); arm.wait_done()
         return "fail"
@@ -213,7 +225,7 @@ def run_trial(arm, eeg, errp, vision, policy, max_objects=None):
 def setup_scene(vision):
     """Markerless background-subtraction needs one empty-table snapshot. Mock
     skips this. Two keypresses, no props."""
-    if getattr(vision, "mock", False) or config.OBJECT_METHOD != "bgsub":
+    if getattr(vision, "mock", False) or config.OBJECT_METHOD == "aruco":
         return
     input("[setup] clear the table (arm parked), then press Enter... ")
     vision.learn_background()

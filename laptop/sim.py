@@ -11,6 +11,7 @@ good enough because the loop corrects, not the optics.
 Also tracks which objects have been picked, so the mock scene shrinks as the arm
 removes objects and grasp-verification ("did it leave its spot?") returns true.
 """
+import math
 import random
 
 # Fixed systematic offset (cm) between commanded and actual tip position, as a
@@ -39,8 +40,15 @@ class World:
     def set_command(self, xy):
         self._commanded = xy
 
-    def grasp(self, idx):
+    def grasp(self, idx, object_xy=None, tolerance_cm=1.0):
+        """Close on an object only when the simulated physical tip is near it."""
+        if idx is None or object_xy is None:
+            return False
+        tx, ty = self._actual_tip()
+        if math.hypot(tx - object_xy[0], ty - object_xy[1]) > tolerance_cm:
+            return False
         self._holding = idx
+        return True
 
     def lifted(self):
         """Mark the held object as removed from the table (picked up)."""
@@ -50,10 +58,14 @@ class World:
     def release(self):
         self._holding = None
 
-    def tip(self):
+    def _actual_tip(self):
         cx, cy = self._commanded
-        return (cx + BIAS[0] + random.gauss(0, NOISE_CM),
-                cy + BIAS[1] + random.gauss(0, NOISE_CM))
+        return cx + BIAS[0], cy + BIAS[1]
+
+    def tip(self):
+        tx, ty = self._actual_tip()
+        return (tx + random.gauss(0, NOISE_CM),
+                ty + random.gauss(0, NOISE_CM))
 
 
 # the "big nail vs small nail" ambiguity — AI can't tell which the human wants

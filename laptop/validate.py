@@ -60,6 +60,20 @@ def validate():
     if not (config.Z_GRASP < config.Z_APPROACH <= config.Z_LIFT):
         warns.append(f"heights odd: expect Z_GRASP < Z_APPROACH <= Z_LIFT "
                      f"({config.Z_GRASP},{config.Z_APPROACH},{config.Z_LIFT})")
+    if config.GRASP_RETRIES < 0:
+        errs.append("GRASP_RETRIES must be >= 0")
+    if config.GRASP_VERIFY_RADIUS_CM <= 0:
+        errs.append("GRASP_VERIFY_RADIUS_CM must be > 0")
+    if not (0 < config.SERVO_GAIN <= 1):
+        errs.append("SERVO_GAIN must be in (0, 1]")
+    if config.SERVO_TOL_CM <= 0 or config.SERVO_MAX_ITERS <= 0:
+        errs.append("SERVO_TOL_CM and SERVO_MAX_ITERS must be > 0")
+
+    # --- camera homography point sets ---
+    if len(config.CAM_CALIB_IMAGE_PTS) < 4:
+        errs.append("CAM_CALIB_IMAGE_PTS needs at least 4 points")
+    if len(config.CAM_CALIB_IMAGE_PTS) != len(config.CAM_CALIB_WORLD_PTS):
+        errs.append("camera image/world calibration point counts differ")
 
     # --- place location reachable by IK ---
     px, py = config.PLACE_LOCATION

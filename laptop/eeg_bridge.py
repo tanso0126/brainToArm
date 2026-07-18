@@ -58,6 +58,12 @@ class RingBuffer:
         with self.lock:
             return [s for _, s in list(self.buf)[-n:]]
 
+    def recent(self, seconds):
+        """Samples whose timestamps fall within the latest wall-clock interval."""
+        cutoff = time.monotonic() - seconds
+        with self.lock:
+            return [s for t, s in self.buf if t >= cutoff]
+
     def epoch(self, onset_t, pre, post):
         """Samples with timestamp in [onset_t - pre, onset_t + post]."""
         lo, hi = onset_t - pre, onset_t + post
@@ -99,7 +105,7 @@ class EEGBridge:
             self.thread.join(timeout=2.0)
 
     def snapshot(self, seconds):
-        return self.ring.snapshot(int(seconds * self.fs))
+        return self.ring.recent(seconds)
 
     def mark_onset(self):
         """Timestamp the moment the arm commits to an action. Pair with
@@ -165,10 +171,15 @@ class EEGBridge:
         dt = 1.0 / self.fs
         t = 0.0
         pc = 0
+        next_emit = time.monotonic()
         # emit the same number of slots a real PolyG-I would, so auto-detect and
         # channel mapping are exercised. 16 total slots, EEG = first 8.
         total = config.EEG_TOTAL_CHANNELS or 16
         while not self._stop.is_set():
+            delay = next_emit - time.monotonic()
+            if delay > 0:
+                self._stop.wait(delay)
+                continue
             now = time.monotonic()
             erroring = self._error_burst_start <= now < self._error_burst_until
             te = now - self._error_burst_start          # time since action onset
@@ -192,7 +203,11 @@ class EEGBridge:
             self._emit_from_bytes(build_packet(raw_slots, pc=pc))
             pc = (pc + 1) & 0xFF
             t += dt
-            time.sleep(dt)
+            next_emit += dt
+            # If the process was suspended for a long time, do not generate an
+            # unbounded historical burst. Resume with at most 250 ms of catch-up.
+            if next_emit < now - 0.25:
+                next_emit = now - 0.25
 
     def _resolve_serial_port(self):
         port = config.EEG_PORT

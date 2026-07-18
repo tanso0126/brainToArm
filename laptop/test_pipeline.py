@@ -126,8 +126,20 @@ def test_eeg_packet_timestamps():
     check(abs(span - expected) < 1e-6, "batch timing follows configured sampling rate")
 
 
+def test_ring_recent_is_time_based():
+    print("[eeg] recent snapshot uses timestamps rather than a fixed count")
+    from eeg_bridge import RingBuffer
+    import time
+    ring = RingBuffer(10)
+    now = time.monotonic()
+    ring.push([1], now - 2.0)
+    ring.push([2], now - 0.1)
+    check(ring.recent(1.0) == [[2]], "stale samples are excluded from health checks")
+
+
 def test_pick_place():
-    print("[pickplace] grasp verify + delivery removes object from table")
+    print("[pickplace] visual correction is preserved through grasp + delivery")
+    import random
     import sim
     from arm_serial import ArmSerial
     from policy import Policy
@@ -135,18 +147,42 @@ def test_pick_place():
     import orchestrator as orch
 
     sim.WORLD = sim.World(sim.DEFAULT_OBJECTS)   # fresh world
-    arm = ArmSerial()                            # mock (no board)
+    random.seed(7)
+    arm = ArmSerial(mock=True)
     policy = Policy()
     vision = Vision(mock=True)
     target = Detection(1, "nail_small", 8.0, -3.0, {"size": "small"})
 
     n_before = len(sim.WORLD.objects)
-    ok = orch.grasp_object(arm, vision, policy, target)
+    grasp_xy, err, aligned = orch.servo_to_object(
+        arm, vision, policy, target, config.Z_APPROACH)
+    check(aligned and err <= config.SERVO_TOL_CM, "visual servo converged")
+    check(grasp_xy != (target.x, target.y), "alignment produced a corrected command")
+    ok = orch.grasp_object(arm, vision, policy, target, grasp_xy=grasp_xy)
     check(ok, "grasp verified in mock")
     orch.place_object(arm, policy, config.PLACE_LOCATION)
     check(len(sim.WORLD.objects) == n_before - 1, "object removed from table after delivery")
     check(sim.WORLD._holding is None, "gripper released after place")
     arm.close()
+
+
+def test_servo_visibility_failure():
+    print("[servo] missing arm tip prevents descent")
+    from arm_serial import ArmSerial
+    from policy import Policy
+    from vision import Detection
+    import orchestrator as orch
+
+    class BlindVision:
+        @staticmethod
+        def arm_tip():
+            return None
+
+    arm = ArmSerial(mock=True)
+    target = Detection(1, "obj", 8.0, -3.0)
+    _xy, err, aligned = orch.servo_to_object(
+        arm, BlindVision(), Policy(), target, config.Z_APPROACH)
+    check(err is None and not aligned, "alignment fails closed when tip is unseen")
 
 
 if __name__ == "__main__":
@@ -157,5 +193,7 @@ if __name__ == "__main__":
     test_arm_command_validation()
     test_errp()
     test_eeg_packet_timestamps()
+    test_ring_recent_is_time_based()
     test_pick_place()
+    test_servo_visibility_failure()
     print("\nALL TESTS PASSED")

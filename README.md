@@ -172,9 +172,9 @@ This is exactly what `orchestrator.py` does per object (function
                    • ErrP detected  → this is the wrong object:
                                        drop it, return home, wait, reselect (→2)
                    • no ErrP        → the human is fine with it, continue
- 5. ALIGN       visual servoing: measure tip→object error from the camera and
-                nudge until the tip is over the object (cancels cheap-camera and
-                rough-calibration error — precision from feedback, not optics)
+5. ALIGN       visual servoing: measure tip→object error from the camera and
+                nudge until the tip is over the object; preserve that corrected
+                command through descent (failure to see/converge aborts the grasp)
  6. GRASP       descend, close the claw, lift
  7. VERIFY      is the object gone from its old spot? (camera check, no force
                 sensor needed) — if not, reopen and retry
@@ -412,7 +412,9 @@ brainToArm/
 - **A cheap camera is fine because precision comes from feedback.** Visual
   servoing closes the loop: the arm watches its own tip approach the object and
   corrects until the error is small, cancelling both camera- and IK-calibration
-  error. A 720p phone cam over a 30 cm table already resolves ~0.5 mm/pixel.
+  error. The corrected command is retained for descent; failure to observe or
+  converge never falls through to a blind grasp. A 720p phone cam over a 30 cm
+  table already resolves ~0.5 mm/pixel.
 
 - **Markerless, zero props.** Background subtraction needs only one snapshot of
   the empty table — no stickers, no printed markers, no special backdrop.

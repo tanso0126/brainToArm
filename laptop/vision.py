@@ -72,8 +72,12 @@ class Vision:
             raise RuntimeError(f"cannot open camera index {config.CAM_INDEX}")
         img = np.array(config.CAM_CALIB_IMAGE_PTS, dtype=np.float32)
         wld = np.array(config.CAM_CALIB_WORLD_PTS, dtype=np.float32)
+        if len(img) < 4 or len(img) != len(wld):
+            raise ValueError("camera homography needs matching sets of at least 4 points")
         self.H, _ = cv2.findHomography(img, wld)
         self.Hinv, _ = cv2.findHomography(wld, img)
+        if self.H is None or self.Hinv is None:
+            raise ValueError("camera calibration points do not define a homography")
         self._base_px = self._world_to_px(0.0, 0.0)   # arm base at workspace origin
         if config.OBJECT_METHOD == "aruco":
             adict = getattr(cv2.aruco, config.ARUCO_DICT)
@@ -175,6 +179,8 @@ class Vision:
             if area < config.OBJECT_MIN_AREA:
                 continue
             M = cv2.moments(c)
+            if not M["m00"]:
+                continue
             cx, cy = M["m10"] / M["m00"], M["m01"] / M["m00"]
             wx, wy = self._px_to_world(cx, cy)
             self._object_boxes.append(cv2.boundingRect(c))
@@ -223,7 +229,8 @@ class Vision:
                 continue
             cx, cy = float(c[0][:, 0].mean()), float(c[0][:, 1].mean())
             wx, wy = self._px_to_world(cx, cy)
-            dets.append(Detection(i, config.OBJECT_ARUCO[i], wx, wy, {"aruco": i}))
+            dets.append(Detection(i, config.OBJECT_ARUCO[i], wx, wy,
+                                  {"aruco": i, "px": (cx, cy)}))
         return dets
 
     def _tip_aruco(self) -> Optional[Tuple[float, float]]:
@@ -240,6 +247,7 @@ class Vision:
         frame = self._grab()
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         dets, oid = [], 0
+        self._object_boxes = []
         for label, (lo, hi) in config.OBJECT_HSV.items():
             mask = cv2.inRange(hsv, np.array(lo), np.array(hi))
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
@@ -248,9 +256,12 @@ class Vision:
                 if cv2.contourArea(c) < config.OBJECT_MIN_AREA:
                     continue
                 M = cv2.moments(c)
+                if not M["m00"]:
+                    continue
                 cx, cy = M["m10"] / M["m00"], M["m01"] / M["m00"]
                 wx, wy = self._px_to_world(cx, cy)
-                dets.append(Detection(oid, label, wx, wy))
+                self._object_boxes.append(cv2.boundingRect(c))
+                dets.append(Detection(oid, label, wx, wy, {"px": (cx, cy)}))
                 oid += 1
         return dets
 
@@ -262,9 +273,18 @@ class Vision:
         In mock, reads the sim world (object removed on a successful lift)."""
         if self.mock:
             return sim.WORLD.index_of(det.label, det.x, det.y) is None
+        if config.OBJECT_METHOD != "bgsub":
+            # ArUco/HSV/YOLO already provide object detections in world units;
+            # verify disappearance directly rather than depending on a bgsub
+            # reference that those modes may not have learned.
+            return all(
+                ((other.x - det.x) ** 2 + (other.y - det.y) ** 2) ** 0.5
+                > config.GRASP_VERIFY_RADIUS_CM
+                for other in self.detect()
+            )
         px = det.meta.get("px")
         if px is None:
-            return True
+            return False
         cx, cy = px
         frame = self._grab_stable(3)
         mask = self._foreground_mask(frame)

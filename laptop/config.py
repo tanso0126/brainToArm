@@ -31,6 +31,7 @@ PLACE_LOCATION = (0.0, 16.0)   # workspace (x,y) delivery point — e.g. near th
 PLACE_ZONES = {"deliver": (0.0, 16.0), "reject_bin": (-14.0, 6.0)}
 GRASP_VERIFY = True        # after lifting, confirm the object left its spot
 GRASP_RETRIES = 2
+GRASP_VERIFY_RADIUS_CM = 2.0  # non-bgsub methods: no detection may remain this close
 
 # ---- Arm geometry for inverse kinematics (cm). MEASURE THESE on your build ----
 # Distances between joint axes along the arm. Defaults are rough values for the

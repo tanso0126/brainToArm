@@ -90,3 +90,38 @@ uncontrolled follow-on motion.
 - Firmware source inspected for bounded input and atomic target update; an Arduino
   toolchain is not available in this environment, so hardware compilation remains
   part of board bring-up.
+
+## Patch 4 — carry visual-servo correction into the grasp
+
+### Intent
+
+Ensure camera feedback changes the physical grasp trajectory instead of only the
+hover pose, and prevent a blind or unconverged alignment from descending.
+
+### Changes
+
+- `servo_to_object()` now returns the last commanded corrected workspace point,
+  measured error, and convergence state.
+- Descent and lift use that corrected point. Missing tip observations or failure
+  to reach `SERVO_TOL_CM` now abort before descent.
+- The simulation only captures an object when the biased physical tip is within
+  grasp tolerance, making the test capable of detecting lost corrections.
+- Grasp verification for ArUco/HSV/YOLO now checks re-detections in world space;
+  background-subtraction verification fails closed when centroid metadata is
+  unavailable.
+- Added homography validation, safe zero-moment handling, HSV centroid metadata,
+  and markerless-tip background setup for HSV/YOLO modes.
+- Added visual convergence and missing-tip regression tests and related config
+  validation.
+- Corrected EEG health snapshots to use timestamps rather than a fixed trailing
+  count, and made the mock source catch up to its configured sample clock after
+  ordinary scheduler delays. The stricter epoch check exposed this during the
+  full mock regression before the patch was committed.
+- Updated the README task and visual-servo descriptions.
+
+### Verification
+
+- `python3 laptop/test_pipeline.py`
+- `python3 laptop/validate.py`
+- `python3 -m compileall -q laptop`
+- `python3 laptop/orchestrator.py --auto`
