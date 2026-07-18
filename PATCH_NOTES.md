@@ -186,6 +186,35 @@ zero-valued EEG channels.
 - `python3 -m compileall -q laptop`
 - `python3 laptop/eeg_detect.py --help`
 
+## Patch 8 — safe lifecycle, resilient validation, and guarded manual jog
+
+### Intent
+
+Close already-open resources when any later subsystem fails to initialize, return
+a failing process status for aborted runs, and ensure configuration diagnostics do
+not crash on the malformed values they are meant to report.
+
+### Changes
+
+- Wrapped the entire orchestrator construction/run lifecycle in cleanup and made
+  expected hardware/config failures concise, non-zero exits.
+- Expanded configuration checks for array integrity, gripper limits, EEG/ADC/ErrP
+  domains, duplicate channels, serial-port collision, finite calibration points,
+  link geometry, and delivery reach at release and transport heights.
+- Made array validation conditional so short lists produce errors without an
+  indexing exception.
+- Hardened `arm_jog.py`: invalid gripper words no longer mean “close”, pose state
+  updates only after accepted motion, input errors stay in the console, and exit
+  waits for a home move before closing serial.
+- Added a regression test for malformed-array validation.
+
+### Verification
+
+- `python3 laptop/test_pipeline.py`
+- `python3 laptop/validate.py`
+- `python3 -m compileall -q laptop`
+- `python3 laptop/orchestrator.py --auto`
+
 ## Patch 5 — task-scoped vetoes and strict reachability
 
 ### Intent

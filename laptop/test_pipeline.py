@@ -120,6 +120,19 @@ def test_arm_command_validation():
         check(True, "out-of-range angle rejected")
 
 
+def test_validate_handles_short_arrays():
+    print("[config] malformed servo arrays are reported without crashing")
+    import validate
+    original = config.SERVO_MIN
+    try:
+        config.SERVO_MIN = [0]
+        errors, _warnings = validate.validate()
+        check(any("SERVO_MIN has" in error for error in errors),
+              "short servo array reported")
+    finally:
+        config.SERVO_MIN = original
+
+
 def _synth_epoch(fs, error=False):
     n = int((config.ERRP_BASELINE_S + config.ERRP_WINDOW_S) * fs)
     win = []
@@ -248,6 +261,7 @@ if __name__ == "__main__":
     test_ik()
     test_policy_veto_scope()
     test_arm_command_validation()
+    test_validate_handles_short_arrays()
     test_errp()
     test_errp_model_metadata()
     test_eeg_packet_timestamps()

@@ -28,43 +28,57 @@ def main():
     arm = ArmSerial()
     policy = Policy()
     if getattr(arm, "mock", False):
-        print("NOTE: no board detected — running in MOCK (prints commands only).")
-    arm.home(); arm.wait_done()
+        print("NOTE: ARM_MOCK=True — commands are printed only.")
     pose = list(config.HOME_POSE)
-    print(__doc__)
 
-    while True:
-        try:
+    try:
+        arm.home(); arm.wait_done()
+        print(__doc__)
+        while True:
             cmd = input("jog> ").strip().split()
-        except EOFError:
-            break
-        if not cmd:
-            continue
-        c = cmd[0].lower()
-        if c == "q":
-            break
-        elif c == "h":
-            pose = list(config.HOME_POSE); arm.send_angles(pose); arm.wait_done()
-        elif c == "j" and len(cmd) == 3:
-            i = int(cmd[1]) - 1
-            if 0 <= i < config.N_JOINTS:
-                pose[i] = int(cmd[2])
-                arm.send_angles(pose); arm.wait_done()
-            else:
-                print("joint must be 1..7")
-        elif c == "g" and len(cmd) == 2:
-            arm.gripper(open_=(cmd[1].lower() == "open")); arm.wait_done()
-        elif c == "ik" and len(cmd) >= 3:
-            x, y = float(cmd[1]), float(cmd[2])
-            z = float(cmd[3]) if len(cmd) > 3 else 0.0
-            pose = policy.target_to_angles((x, y), z=z)
-            print(f"  IK({x},{y},{z}) -> {pose}")
-            arm.send_angles(pose); arm.wait_done()
-        elif c == "s":
-            print(f"  pose = {pose}")
-        else:
-            print("commands: h | j <i> <deg> | g open|close | ik <x> <y> [z] | s | q")
-    arm.home(); arm.close()
+            if not cmd:
+                continue
+            c = cmd[0].lower()
+            try:
+                if c == "q":
+                    break
+                elif c == "h":
+                    next_pose = list(config.HOME_POSE)
+                    arm.send_angles(next_pose); arm.wait_done(); pose = next_pose
+                elif c == "j" and len(cmd) == 3:
+                    i = int(cmd[1]) - 1
+                    if not 0 <= i < config.N_JOINTS:
+                        raise ValueError("joint must be 1..7")
+                    next_pose = list(pose)
+                    next_pose[i] = int(cmd[2])
+                    arm.send_angles(next_pose); arm.wait_done(); pose = next_pose
+                elif c == "g" and len(cmd) == 2:
+                    action = cmd[1].lower()
+                    if action not in ("open", "close"):
+                        raise ValueError("gripper action must be open or close")
+                    arm.gripper(open_=(action == "open")); arm.wait_done()
+                    pose[config.J_GRIP] = (config.GRIP_OPEN if action == "open"
+                                           else config.GRIP_CLOSED)
+                elif c == "ik" and len(cmd) in (3, 4):
+                    x, y = float(cmd[1]), float(cmd[2])
+                    z = float(cmd[3]) if len(cmd) == 4 else 0.0
+                    next_pose = policy.target_to_angles((x, y), z=z)
+                    print(f"  IK({x},{y},{z}) -> {next_pose}")
+                    arm.send_angles(next_pose); arm.wait_done(); pose = next_pose
+                elif c == "s":
+                    print(f"  pose = {pose}")
+                else:
+                    print("commands: h | j <i> <deg> | g open|close | ik <x> <y> [z] | s | q")
+            except (ValueError, TypeError, RuntimeError, TimeoutError) as exc:
+                print(f"error: {exc}")
+    except (EOFError, KeyboardInterrupt):
+        print()
+    finally:
+        try:
+            arm.home(); arm.wait_done()
+        except Exception as exc:
+            print(f"failed to home: {exc}")
+        arm.close()
 
 
 if __name__ == "__main__":

@@ -305,31 +305,41 @@ def preflight(arm, eeg, vision):
 def main():
     print("=== brainToArm shared-autonomy loop ===")
     force = "--force" in sys.argv
-    arm = ArmSerial()
-    eeg = EEGBridge().start()
-    errp = ErrPDetector()          # backend from config.ERRP_BACKEND
-    vision = Vision()              # mock/real from config.CAM_MOCK
-    policy = Policy()
-
-    arm.home(); arm.wait_done()
-    setup_scene(vision)
+    arm = eeg = vision = None
     try:
+        arm = ArmSerial()
+        eeg = EEGBridge().start()
+        errp = ErrPDetector()          # backend from config.ERRP_BACKEND
+        vision = Vision()              # mock/real from config.CAM_MOCK
+        policy = Policy()
+
+        arm.home(); arm.wait_done()
+        setup_scene(vision)
         if not preflight(arm, eeg, vision) and not force:
             print("Aborting. Fix the above, or pass --force to run anyway.")
-            return
+            return False
         ok = run_trial(arm, eeg, errp, vision, policy)
         print(f"[run] {'complete' if ok else 'aborted'}")
+        return ok
+    except KeyboardInterrupt:
+        print("\n[run] interrupted by user")
+        return False
+    except (RuntimeError, ValueError, TimeoutError, OSError) as exc:
+        print(f"[run] aborted: {type(exc).__name__}: {exc}")
+        return False
     finally:
-        eeg.stop()
-        try:
-            arm.home()
-            arm.wait_done()
-        except Exception as exc:
-            print(f"[arm] failed to return home during shutdown: {exc}")
-        arm.close()
-        if hasattr(vision, "close"):
+        if eeg is not None:
+            eeg.stop()
+        if arm is not None:
+            try:
+                arm.home()
+                arm.wait_done()
+            except Exception as exc:
+                print(f"[arm] failed to return home during shutdown: {exc}")
+            arm.close()
+        if vision is not None and hasattr(vision, "close"):
             vision.close()
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(0 if main() else 1)

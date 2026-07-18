@@ -13,34 +13,45 @@ def validate():
     errs, warns = [], []
 
     # --- servo arrays all length N_JOINTS ---
+    servo_arrays_ok = True
     for name in ("SERVO_OFFSET", "SERVO_DIRECTION", "SERVO_MIN", "SERVO_MAX", "HOME_POSE"):
         arr = getattr(config, name)
         if len(arr) != config.N_JOINTS:
             errs.append(f"{name} has {len(arr)} entries, expected N_JOINTS={config.N_JOINTS}")
+            servo_arrays_ok = False
     if not isinstance(config.ARM_MOCK, bool):
         errs.append("ARM_MOCK must be True or False")
     if not config.ARM_MOCK and not config.ARM_PORT:
         errs.append("ARM_PORT must be set when ARM_MOCK=False")
 
     # --- home pose within servo limits ---
-    for i, a in enumerate(config.HOME_POSE):
-        if config.SERVO_MIN[i] > config.SERVO_MAX[i]:
-            errs.append(f"SERVO_MIN[{i}] > SERVO_MAX[{i}]")
-        if not (config.SERVO_MIN[i] <= a <= config.SERVO_MAX[i]):
-            errs.append(f"HOME_POSE[{i}]={a} outside SERVO_MIN/MAX [{config.SERVO_MIN[i]},{config.SERVO_MAX[i]}]")
-        if config.SERVO_DIRECTION[i] not in (-1, 1):
-            errs.append(f"SERVO_DIRECTION[{i}] must be -1 or 1")
+    if servo_arrays_ok:
+        for i, a in enumerate(config.HOME_POSE):
+            if config.SERVO_MIN[i] > config.SERVO_MAX[i]:
+                errs.append(f"SERVO_MIN[{i}] > SERVO_MAX[{i}]")
+            if not (config.SERVO_MIN[i] <= a <= config.SERVO_MAX[i]):
+                errs.append(f"HOME_POSE[{i}]={a} outside SERVO_MIN/MAX [{config.SERVO_MIN[i]},{config.SERVO_MAX[i]}]")
+            if config.SERVO_DIRECTION[i] not in (-1, 1):
+                errs.append(f"SERVO_DIRECTION[{i}] must be -1 or 1")
+        for name, value in (("GRIP_OPEN", config.GRIP_OPEN),
+                            ("GRIP_CLOSED", config.GRIP_CLOSED)):
+            if not config.SERVO_MIN[config.J_GRIP] <= value <= config.SERVO_MAX[config.J_GRIP]:
+                errs.append(f"{name}={value} outside gripper safe range")
 
     # --- EEG channel map sane ---
     total = config.EEG_TOTAL_CHANNELS
+    if total is not None and (not isinstance(total, int) or isinstance(total, bool) or total <= 0):
+        errs.append("EEG_TOTAL_CHANNELS must be a positive integer or None")
     for slot in config.EEG_CHANNEL_MAP:
         if not isinstance(slot, int) or isinstance(slot, bool) or slot < 0:
             errs.append(f"EEG_CHANNEL_MAP slot {slot!r} must be a non-negative integer")
             continue
         if total is not None and slot >= total:
             errs.append(f"EEG_CHANNEL_MAP slot {slot} >= EEG_TOTAL_CHANNELS {total}")
-    if len(config.EEG_CHANNEL_MAP) != config.EEG_CHANNELS:
-        warns.append(f"EEG_CHANNEL_MAP has {len(config.EEG_CHANNEL_MAP)} slots but EEG_CHANNELS={config.EEG_CHANNELS}")
+    if not isinstance(config.EEG_CHANNELS, int) or isinstance(config.EEG_CHANNELS, bool) or config.EEG_CHANNELS <= 0:
+        errs.append("EEG_CHANNELS must be a positive integer")
+    elif len(config.EEG_CHANNEL_MAP) != config.EEG_CHANNELS:
+        errs.append(f"EEG_CHANNEL_MAP has {len(config.EEG_CHANNEL_MAP)} slots but EEG_CHANNELS={config.EEG_CHANNELS}")
     for ch in config.ERRP_FRONTOCENTRAL:
         if not isinstance(ch, int) or isinstance(ch, bool) or ch < 0:
             errs.append(f"ERRP_FRONTOCENTRAL ch {ch!r} must be a non-negative integer")
@@ -48,23 +59,51 @@ def validate():
             errs.append(f"ERRP_FRONTOCENTRAL ch {ch} >= EEG_CHANNELS {config.EEG_CHANNELS}")
     if len(set(config.EEG_CHANNEL_MAP)) != len(config.EEG_CHANNEL_MAP):
         errs.append("EEG_CHANNEL_MAP contains duplicate packet slots")
+    if not config.ERRP_FRONTOCENTRAL:
+        errs.append("ERRP_FRONTOCENTRAL must contain at least one channel")
+    elif len(set(config.ERRP_FRONTOCENTRAL)) != len(config.ERRP_FRONTOCENTRAL):
+        errs.append("ERRP_FRONTOCENTRAL contains duplicate channels")
 
     # --- ErrP band below Nyquist ---
-    if config.EEG_FS <= 0:
+    if not isinstance(config.EEG_FS, (int, float)) or config.EEG_FS <= 0:
         errs.append("EEG_FS must be > 0")
-    elif config.ERRP_BAND[1] >= config.EEG_FS / 2:
-        errs.append(f"ERRP_BAND high {config.ERRP_BAND[1]}Hz >= Nyquist {config.EEG_FS/2}Hz")
+    if (not isinstance(config.ERRP_BAND, (tuple, list)) or len(config.ERRP_BAND) != 2
+            or not all(isinstance(v, (int, float)) and math.isfinite(v)
+                       for v in config.ERRP_BAND)):
+        errs.append("ERRP_BAND must contain two finite numbers")
+    elif config.EEG_FS > 0:
+        lo, hi = config.ERRP_BAND
+        if not 0 < lo < hi:
+            errs.append("ERRP_BAND must satisfy 0 < low < high")
+        elif hi >= config.EEG_FS / 2:
+            errs.append(f"ERRP_BAND high {hi}Hz >= Nyquist {config.EEG_FS/2}Hz")
     if not (0 < config.EEG_MIN_EPOCH_FRACTION <= 1):
         errs.append("EEG_MIN_EPOCH_FRACTION must be in (0, 1]")
+    if config.ERRP_BASELINE_S <= 0 or config.ERRP_WINDOW_S <= 0:
+        errs.append("ERRP_BASELINE_S and ERRP_WINDOW_S must be > 0")
+    if not 0 <= config.ERRP_THRESHOLD <= 1:
+        errs.append("ERRP_THRESHOLD must be in [0, 1]")
+    if config.ADC_BITS <= 0 or not 0 <= config.ADC_ZERO < 2 ** config.ADC_BITS:
+        errs.append("ADC_BITS/ADC_ZERO are inconsistent")
+    if config.ADC_UV_PER_LSB <= 0:
+        errs.append("ADC_UV_PER_LSB must be > 0")
 
     # --- source selection valid ---
     if config.EEG_SOURCE not in ("mock", "serial", "tcp"):
         errs.append(f"EEG_SOURCE '{config.EEG_SOURCE}' invalid")
+    if config.EEG_SOURCE == "serial" and not config.EEG_PORT:
+        errs.append("EEG_PORT must be set for serial EEG")
+    if (not config.ARM_MOCK and config.EEG_SOURCE == "serial"
+            and config.ARM_PORT != "auto" and config.ARM_PORT == config.EEG_PORT):
+        errs.append("ARM_PORT and EEG_PORT refer to the same serial device")
     if config.OBJECT_METHOD not in ("bgsub", "yolo", "hsv", "aruco"):
         errs.append(f"OBJECT_METHOD '{config.OBJECT_METHOD}' invalid")
 
     # --- heights ordered sensibly ---
-    if not (config.Z_GRASP < config.Z_APPROACH <= config.Z_LIFT):
+    heights = (config.Z_GRASP, config.Z_APPROACH, config.Z_LIFT, config.Z_PLACE)
+    if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in heights):
+        errs.append("pick/place heights must be finite numbers")
+    elif not (config.Z_GRASP < config.Z_APPROACH <= config.Z_LIFT):
         warns.append(f"heights odd: expect Z_GRASP < Z_APPROACH <= Z_LIFT "
                      f"({config.Z_GRASP},{config.Z_APPROACH},{config.Z_LIFT})")
     if config.GRASP_RETRIES < 0:
@@ -83,16 +122,39 @@ def validate():
         errs.append("CAM_CALIB_IMAGE_PTS needs at least 4 points")
     if len(config.CAM_CALIB_IMAGE_PTS) != len(config.CAM_CALIB_WORLD_PTS):
         errs.append("camera image/world calibration point counts differ")
-
-    # --- place location reachable by IK ---
-    px, py = config.PLACE_LOCATION
-    if not kinematics.reachable(px, py, config.Z_PLACE):
-        errs.append(f"PLACE_LOCATION {config.PLACE_LOCATION} unreachable with current link lengths")
+    for name, points in (("CAM_CALIB_IMAGE_PTS", config.CAM_CALIB_IMAGE_PTS),
+                         ("CAM_CALIB_WORLD_PTS", config.CAM_CALIB_WORLD_PTS)):
+        try:
+            normalized = [tuple(float(v) for v in point) for point in points]
+            if any(len(point) != 2 or not all(math.isfinite(v) for v in point)
+                   for point in normalized):
+                raise ValueError
+            if len(set(normalized)) != len(normalized):
+                errs.append(f"{name} contains duplicate points")
+        except (TypeError, ValueError):
+            errs.append(f"{name} must contain finite 2D points")
 
     # --- link lengths positive ---
+    links_ok = True
     for name in ("L_BASE_HEIGHT", "L_UPPER", "L_FORE", "L_HAND"):
-        if getattr(config, name) <= 0:
+        value = getattr(config, name)
+        if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             errs.append(f"{name} must be > 0")
+            links_ok = False
+
+    # --- place locations reachable by IK ---
+    try:
+        px, py = config.PLACE_LOCATION
+        place_finite = all(math.isfinite(float(v)) for v in (px, py))
+    except (TypeError, ValueError):
+        place_finite = False
+    if not place_finite:
+        errs.append("PLACE_LOCATION must be a finite (x, y) pair")
+    elif links_ok:
+        for z in (config.Z_PLACE, config.Z_LIFT):
+            if not kinematics.reachable(px, py, z):
+                errs.append(
+                    f"PLACE_LOCATION {config.PLACE_LOCATION} unreachable at z={z}")
 
     return errs, warns
 
