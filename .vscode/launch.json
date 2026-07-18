@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "/Users/watson/Desktop/programming/playground/brainToArm",
+      "program": "/Users/watson/Desktop/programming/playground/brainToArm/build/Debug/outDebug"
+    }
+  ]
+}
