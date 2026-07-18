@@ -23,6 +23,10 @@ def validate():
         errs.append("ARM_MOCK must be True or False")
     if not config.ARM_MOCK and not config.ARM_PORT:
         errs.append("ARM_PORT must be set when ARM_MOCK=False")
+    if not isinstance(config.ARM_CALIBRATED, bool):
+        errs.append("ARM_CALIBRATED must be True or False")
+    elif not config.ARM_MOCK and not config.ARM_CALIBRATED:
+        errs.append("real arm requires ARM_CALIBRATED=True after arm_jog verification")
 
     # --- home pose within servo limits ---
     if servo_arrays_ok:
@@ -91,6 +95,10 @@ def validate():
     # --- source selection valid ---
     if config.EEG_SOURCE not in ("mock", "serial", "tcp"):
         errs.append(f"EEG_SOURCE '{config.EEG_SOURCE}' invalid")
+    if not isinstance(config.EEG_CONFIG_VERIFIED, bool):
+        errs.append("EEG_CONFIG_VERIFIED must be True or False")
+    elif config.EEG_SOURCE != "mock" and not config.EEG_CONFIG_VERIFIED:
+        errs.append("real EEG requires EEG_CONFIG_VERIFIED=True after rate/channel checks")
     if config.EEG_SOURCE == "serial" and not config.EEG_PORT:
         errs.append("EEG_PORT must be set for serial EEG")
     if (not config.ARM_MOCK and config.EEG_SOURCE == "serial"
@@ -98,6 +106,10 @@ def validate():
         errs.append("ARM_PORT and EEG_PORT refer to the same serial device")
     if config.OBJECT_METHOD not in ("bgsub", "yolo", "hsv", "aruco"):
         errs.append(f"OBJECT_METHOD '{config.OBJECT_METHOD}' invalid")
+    if not isinstance(config.CAM_MOCK, bool) or not isinstance(config.CAM_CALIBRATED, bool):
+        errs.append("CAM_MOCK and CAM_CALIBRATED must be True or False")
+    elif not config.CAM_MOCK and not config.CAM_CALIBRATED:
+        errs.append("real camera requires CAM_CALIBRATED=True after workspace calibration")
 
     # --- heights ordered sensibly ---
     heights = (config.Z_GRASP, config.Z_APPROACH, config.Z_LIFT, config.Z_PLACE)

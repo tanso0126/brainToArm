@@ -86,6 +86,16 @@ def test_ik():
         check(False, "unreachable target rejected")
     except ValueError:
         check(True, "unreachable target rejected")
+    calibrated = config.ARM_CALIBRATED
+    try:
+        config.ARM_CALIBRATED = True
+        try:
+            kinematics.joint_to_servo(config.J_BASE, 1000)
+            check(False, "calibrated servo saturation rejected")
+        except ValueError:
+            check(True, "calibrated servo saturation rejected")
+    finally:
+        config.ARM_CALIBRATED = calibrated
 
 
 def test_policy_veto_scope():
@@ -243,7 +253,7 @@ def test_servo_visibility_failure():
 
     class BlindVision:
         @staticmethod
-        def arm_tip():
+        def arm_tip(expected_xy=None):
             return None
 
     arm = ArmSerial(mock=True)

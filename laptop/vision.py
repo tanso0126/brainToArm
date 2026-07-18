@@ -53,6 +53,10 @@ class Vision:
         self._base_px = None      # arm base location in pixels
         self._yolo = None
         if not self.mock:
+            if not config.CAM_CALIBRATED:
+                raise RuntimeError(
+                    "real camera requested with CAM_CALIBRATED=False; run "
+                    "calibrate_workspace.py and confirm the pasted points")
             if not _HAVE_CV:
                 raise RuntimeError("opencv-python not installed; pip install opencv-python")
             self._init_camera()
@@ -189,14 +193,14 @@ class Vision:
             oid += 1
         return dets
 
-    def arm_tip(self) -> Optional[Tuple[float, float]]:
+    def arm_tip(self, expected_xy=None) -> Optional[Tuple[float, float]]:
         if self.mock:
             return sim.WORLD.tip()
         if config.OBJECT_METHOD == "aruco":
             return self._tip_aruco()
-        return self._tip_bgsub()
+        return self._tip_bgsub(expected_xy=expected_xy)
 
-    def _tip_bgsub(self) -> Optional[Tuple[float, float]]:
+    def _tip_bgsub(self, expected_xy=None) -> Optional[Tuple[float, float]]:
         """Arm tip without any marker: the arm is the large foreground blob that
         wasn't there in the empty background and isn't one of the known object
         boxes; its tip is the blob point farthest from the arm base."""
@@ -209,12 +213,19 @@ class Vision:
         cnts = [c for c in cnts if cv2.contourArea(c) > config.ARM_MIN_AREA]
         if not cnts:
             return None
-        arm = max(cnts, key=cv2.contourArea)
         bx, by = self._base_px
-        pts = arm.reshape(-1, 2)
-        d2 = (pts[:, 0] - bx) ** 2 + (pts[:, 1] - by) ** 2
-        tip_px = pts[int(d2.argmax())]                 # farthest from base = tip
-        return self._px_to_world(float(tip_px[0]), float(tip_px[1]))
+        candidates = []
+        for contour in cnts:
+            pts = contour.reshape(-1, 2)
+            d2 = (pts[:, 0] - bx) ** 2 + (pts[:, 1] - by) ** 2
+            tip_px = pts[int(d2.argmax())]             # farthest from base = tip candidate
+            tip_world = self._px_to_world(float(tip_px[0]), float(tip_px[1]))
+            candidates.append((cv2.contourArea(contour), tip_world))
+        if expected_xy is not None:
+            return min(candidates, key=lambda item:
+                       (item[1][0] - expected_xy[0]) ** 2
+                       + (item[1][1] - expected_xy[1]) ** 2)[1]
+        return max(candidates, key=lambda item: item[0])[1]
 
     # ---- optional marker path (kept for those who want it) ----
     def _detect_aruco(self) -> List[Detection]:

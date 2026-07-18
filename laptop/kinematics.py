@@ -22,6 +22,10 @@ def _clamp(v, lo, hi):
 def joint_to_servo(i, joint_deg):
     """Map an IK joint angle to a servo.write() value using per-joint calib."""
     cmd = config.SERVO_OFFSET[i] + config.SERVO_DIRECTION[i] * joint_deg
+    if config.ARM_CALIBRATED and not config.SERVO_MIN[i] <= cmd <= config.SERVO_MAX[i]:
+        raise ValueError(
+            f"IK requires joint {i + 1} servo command {cmd:.1f}, outside calibrated "
+            f"range [{config.SERVO_MIN[i]}, {config.SERVO_MAX[i]}]")
     return int(round(_clamp(cmd, config.SERVO_MIN[i], config.SERVO_MAX[i])))
 
 

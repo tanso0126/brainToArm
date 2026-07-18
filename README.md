@@ -495,13 +495,15 @@ pip install -r requirements.txt
 ```
 
 **1 — Arm.** Flash `firmware/arm_controller/arm_controller.ino` to the Arduino.
-Find its serial port, set `ARM_PORT` and `ARM_MOCK=False` in `config.py`. Measure your arm's link
+Find its serial port and set `ARM_PORT` in `config.py`. Measure your arm's link
 lengths with a ruler into `L_BASE_HEIGHT / L_UPPER / L_FORE / L_HAND`. Then:
 ```bash
 python3 laptop/arm_jog.py        # jog joints; fix SERVO_DIRECTION/OFFSET if a
                                  # joint runs backwards or neutral is off.
                                  # try `ik 0 15` and check the tip goes there.
 ```
+After geometry, offsets, directions, and safe limits are confirmed, set
+`ARM_CALIBRATED=True` and `ARM_MOCK=False`.
 
 **2 — EEG.** Plug in the PolyG-I and:
 ```bash
@@ -513,13 +515,15 @@ python3 laptop/eeg_detect.py     # new streaming serial port? -> Path A
 Confirm `EEG_FS` and `EEG_CHANNEL_MAP` (which slots are your 8 EEG electrodes)
 against TeleScan's live channel display. Set `ERRP_FRONTOCENTRAL` to the indices
 of the electrodes you placed at fronto-central sites (Fz/FCz/Cz).
+Then set `EEG_CONFIG_VERIFIED=True`.
 
 **3 — Camera.** Mount a phone overhead looking straight down. Set `CAM_MOCK=False`.
 ```bash
 python3 laptop/calibrate_workspace.py   # click 4 known cm points -> homography
 ```
 Paste the printed points into `config.py`. (Optionally run `camera_calibrate.py`
-if the lens visibly bends straight lines.)
+if the lens visibly bends straight lines.) The calibration tool also prints the
+required `CAM_CALIBRATED=True` confirmation flag.
 
 **4 — ErrP model.** The baseline heuristic already works, but for best accuracy:
 ```bash
@@ -542,7 +546,7 @@ no keyboard — the brain drives the veto directly.
 
 Grouped constants (see the file for full comments):
 
-- **Arm serial:** `ARM_PORT`, `ARM_BAUD`, `ARM_MOCK`, `N_JOINTS`, `HOME_POSE`, joint index
+- **Arm serial:** `ARM_PORT`, `ARM_BAUD`, `ARM_MOCK`, `ARM_CALIBRATED`, `N_JOINTS`, `HOME_POSE`, joint index
   names, `GRIP_OPEN/CLOSED`.
 - **Arm geometry & calibration:** `L_BASE_HEIGHT/L_UPPER/L_FORE/L_HAND`,
   `SERVO_OFFSET/DIRECTION/MIN/MAX`.

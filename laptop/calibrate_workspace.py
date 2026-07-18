@@ -79,6 +79,7 @@ def main():
     print("\n# paste into config.py:")
     print(f"CAM_CALIB_IMAGE_PTS = {[[int(x), int(y)] for x, y in clicks]}")
     print(f"CAM_CALIB_WORLD_PTS = {[list(p) for p in WORLD_PTS]}")
+    print("CAM_CALIBRATED = True")
     print(f"# mean reprojection error: {err:.2f} cm "
           f"({'good' if err < 1.0 else 'high — re-click more carefully'})")
 

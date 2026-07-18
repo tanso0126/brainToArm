@@ -126,6 +126,34 @@ hover pose, and prevent a blind or unconverged alignment from descending.
 - `python3 -m compileall -q laptop`
 - `python3 laptop/orchestrator.py --auto`
 
+## Patch 9 — explicit real-hardware calibration gates
+
+### Intent
+
+Keep documented placeholder geometry, channel maps, and homography points from
+being mistaken for confirmed hardware calibration during a live task.
+
+### Changes
+
+- Added `ARM_CALIBRATED`, `EEG_CONFIG_VERIFIED`, and `CAM_CALIBRATED` confirmation
+  flags. Real preflight fails until the corresponding bench procedure is complete.
+- Real `Vision` construction refuses placeholder camera calibration directly.
+- Once arm calibration is confirmed, IK servo saturation raises instead of
+  silently clamping to a pose that cannot reach the observed target. Calibration
+  jog remains available while the flag is false.
+- Markerless tip detection can use the expected object location to disambiguate
+  multiple large foreground contours.
+- Workspace calibration prints its confirmation flag, and bring-up documentation
+  now states when to set every gate.
+- Added a calibrated-servo saturation regression test.
+
+### Verification
+
+- `python3 laptop/test_pipeline.py`
+- `python3 laptop/validate.py`
+- `python3 -m compileall -q laptop`
+- `python3 laptop/orchestrator.py --auto`
+
 ## Patch 6 — reproducible ErrP datasets and configuration-bound models
 
 ### Intent

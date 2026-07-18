@@ -65,7 +65,7 @@ def servo_to_object(arm, vision, policy, target, z):
     for it in range(config.SERVO_MAX_ITERS):
         command_xy = (target.x + corr[0], target.y + corr[1])
         move_to(arm, policy, command_xy, z)
-        tip = vision.arm_tip()
+        tip = vision.arm_tip(expected_xy=(target.x, target.y))
         if tip is None:                       # tip not seen this frame; retry
             continue
         ex, ey = target.x - tip[0], target.y - tip[1]

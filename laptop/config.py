@@ -12,6 +12,7 @@ wrong constant here — no code changes.
 ARM_PORT = "auto"          # "auto" = first usb-serial, or e.g. "/dev/cu.usbmodem1101"
 ARM_BAUD = 115200
 ARM_MOCK = True             # explicit safety switch; False requires a real, responsive board
+ARM_CALIBRATED = False      # set True only after arm_jog confirms geometry/offset/direction/limits
 N_JOINTS = 7
 UNUSED_JOINT = 2           # servo3 index (0-based) — attached but not driven
 HOME_POSE = [90, 90, 90, 90, 90, 170, 180]
@@ -68,6 +69,7 @@ EEG_CHANNEL_MAP = [0, 1, 2, 3, 4, 5, 6, 7]   # packet slot -> EEG ch 0..7
 EEG_CHANNELS = 8
 EEG_FS = 256               # sampling rate (Hz) — confirm in TeleScan; 256 typical
 EEG_MIN_EPOCH_FRACTION = 0.80  # abort a decision if too many onset-locked samples are missing
+EEG_CONFIG_VERIFIED = False    # set True after confirming rate + packet/channel map on hardware
 
 # ADC scaling: raw 2-byte sample -> microvolts. LXSDF ships a 12-bit ADC value.
 # uV = (raw - ADC_ZERO) * ADC_UV_PER_LSB. Defaults center a 12-bit unipolar code
@@ -99,6 +101,7 @@ ERRP_THRESHOLD = 0.5       # decision threshold (tune with real data)
 # ======================================================================
 CAM_INDEX = 0              # cv2.VideoCapture index; 0 = default camera
 CAM_MOCK = True            # True until a real camera is wired; orchestrator uses mock scene
+CAM_CALIBRATED = False     # set True after pasting calibrate_workspace.py results
 # Detection method (MARKERLESS by default — no stickers, no props):
 #   "bgsub" : background subtraction. Snapshot the empty table once, then objects
 #             and the arm are foreground. Zero physical setup. DEFAULT, best for
