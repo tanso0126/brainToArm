@@ -126,51 +126,26 @@ hover pose, and prevent a blind or unconverged alignment from descending.
 - `python3 -m compileall -q laptop`
 - `python3 laptop/orchestrator.py --auto`
 
-## Patch 10 — honest calibration output and bounded Windows bridge
+## Patch 5 — task-scoped vetoes and strict reachability
 
 ### Intent
 
-Avoid presenting an exactly determined four-point homography fit as an independent
-accuracy measurement, and make the optional Windows EEG transport conservative by
-default and deterministic in cleanup.
+Keep the brain signal as a correction to the current ambiguous choice, not a
+permanent dislike of a table location, and never substitute an unreachable target
+with an unannounced different physical pose.
 
 ### Changes
 
-- Four-point workspace calibration now explains that near-zero fit error is not
-  validation; 6+ correspondences are recommended for a consistency residual.
-- Windows bridge defaults to localhost, exposes host/port/DLL CLI options, closes
-  client/server resources deterministically, handles Ctrl-C, declares the assumed
-  DLL read signature, and bounds/checks read sizes.
-- Updated markerless-tip, Path B, calibration, veto-scope, and obsolete example
-  comments to match current behavior.
-
-### Verification
-
-- `python3 -m compileall -q laptop`
-- `python3 laptop/windows_eeg_server.py --help` (requires Windows because
-  `ctypes.WinDLL` is instantiated only after argument parsing and server start)
-- Full hardware-free regression suite below.
-
-## Patch 9 — explicit real-hardware calibration gates
-
-### Intent
-
-Keep documented placeholder geometry, channel maps, and homography points from
-being mistaken for confirmed hardware calibration during a live task.
-
-### Changes
-
-- Added `ARM_CALIBRATED`, `EEG_CONFIG_VERIFIED`, and `CAM_CALIBRATED` confirmation
-  flags. Real preflight fails until the corresponding bench procedure is complete.
-- Real `Vision` construction refuses placeholder camera calibration directly.
-- Once arm calibration is confirmed, IK servo saturation raises instead of
-  silently clamping to a pose that cannot reach the observed target. Calibration
-  jog remains available while the flag is false.
-- Markerless tip detection can use the expected object location to disambiguate
-  multiple large foreground contours.
-- Workspace calibration prints its confirmation flag, and bring-up documentation
-  now states when to set every gate.
-- Added a calibrated-servo saturation regression test.
+- Reset rejected positions after each accepted delivery so a clear-table run can
+  begin a new human-goal selection.
+- Disabled cross-selection spatial preference by default with
+  `POLICY_SPATIAL_LEARNING`; it can be enabled only when the surrounding task gives
+  locations a stable meaning.
+- Filtered geometrically unreachable detections before selection and report them
+  separately from brain-vetoed candidates.
+- Made IK reject non-finite and unreachable targets instead of clamping them.
+- Added configuration and regression tests for veto scope and reachability.
+- Updated the README policy and IK descriptions.
 
 ### Verification
 
@@ -178,7 +153,6 @@ being mistaken for confirmed hardware calibration during a live task.
 - `python3 laptop/validate.py`
 - `python3 -m compileall -q laptop`
 - `python3 laptop/orchestrator.py --auto`
-
 ## Patch 6 — reproducible ErrP datasets and configuration-bound models
 
 ### Intent
@@ -268,26 +242,26 @@ not crash on the malformed values they are meant to report.
 - `python3 -m compileall -q laptop`
 - `python3 laptop/orchestrator.py --auto`
 
-## Patch 5 — task-scoped vetoes and strict reachability
+## Patch 9 — explicit real-hardware calibration gates
 
 ### Intent
 
-Keep the brain signal as a correction to the current ambiguous choice, not a
-permanent dislike of a table location, and never substitute an unreachable target
-with an unannounced different physical pose.
+Keep documented placeholder geometry, channel maps, and homography points from
+being mistaken for confirmed hardware calibration during a live task.
 
 ### Changes
 
-- Reset rejected positions after each accepted delivery so a clear-table run can
-  begin a new human-goal selection.
-- Disabled cross-selection spatial preference by default with
-  `POLICY_SPATIAL_LEARNING`; it can be enabled only when the surrounding task gives
-  locations a stable meaning.
-- Filtered geometrically unreachable detections before selection and report them
-  separately from brain-vetoed candidates.
-- Made IK reject non-finite and unreachable targets instead of clamping them.
-- Added configuration and regression tests for veto scope and reachability.
-- Updated the README policy and IK descriptions.
+- Added `ARM_CALIBRATED`, `EEG_CONFIG_VERIFIED`, and `CAM_CALIBRATED` confirmation
+  flags. Real preflight fails until the corresponding bench procedure is complete.
+- Real `Vision` construction refuses placeholder camera calibration directly.
+- Once arm calibration is confirmed, IK servo saturation raises instead of
+  silently clamping to a pose that cannot reach the observed target. Calibration
+  jog remains available while the flag is false.
+- Markerless tip detection can use the expected object location to disambiguate
+  multiple large foreground contours.
+- Workspace calibration prints its confirmation flag, and bring-up documentation
+  now states when to set every gate.
+- Added a calibrated-servo saturation regression test.
 
 ### Verification
 
@@ -295,3 +269,69 @@ with an unannounced different physical pose.
 - `python3 laptop/validate.py`
 - `python3 -m compileall -q laptop`
 - `python3 laptop/orchestrator.py --auto`
+
+## Patch 10 — honest calibration output and bounded Windows bridge
+
+### Intent
+
+Avoid presenting an exactly determined four-point homography fit as an independent
+accuracy measurement, and make the optional Windows EEG transport conservative by
+default and deterministic in cleanup.
+
+### Changes
+
+- Four-point workspace calibration now explains that near-zero fit error is not
+  validation; 6+ correspondences are recommended for a consistency residual.
+- Windows bridge defaults to localhost, exposes host/port/DLL CLI options, closes
+  client/server resources deterministically, handles Ctrl-C, declares the assumed
+  DLL read signature, and bounds/checks read sizes.
+- Updated markerless-tip, Path B, calibration, veto-scope, and obsolete example
+  comments to match current behavior.
+
+### Verification
+
+- `python3 -m compileall -q laptop`
+- `python3 laptop/windows_eeg_server.py --help` (works without loading the DLL)
+- Full hardware-free regression suite below.
+
+## Patch 11 — chronological ledger and final audit
+
+### Intent
+
+Make this requested patch record easy to follow and state precisely what was and
+was not verifiable without the physical arm, EEG device, camera, Windows DLL, and
+full training dependencies.
+
+### Changes
+
+- Reordered Patch 1–10 sections chronologically without changing their content.
+- Re-ran the complete hardware-free test, validation, compilation, and autonomous
+  mock workflow after all functional patches.
+- Recorded the remaining hardware-only checks below rather than representing
+  documented device assumptions as completed verification.
+
+### Final verification
+
+- `python3 laptop/test_pipeline.py` — passed; model roundtrip explicitly skipped
+  because `scikit-learn` is not installed in this bare environment.
+- `python3 laptop/validate.py` — `config OK`.
+- `python3 -m compileall -q laptop` — passed.
+- `python3 laptop/orchestrator.py --auto` — passed; three mock objects aligned,
+  grasped, verified, and delivered.
+- Two consecutive mock `record_errp.py` sessions produced three unique epochs and
+  one append-only `labels.csv` in a temporary directory.
+- `eeg_detect.py --help` and `windows_eeg_server.py --help` — passed without their
+  hardware dependencies.
+
+### Hardware-only verification remaining
+
+- Compile/flash the Arduino firmware and measure real servo safe limits.
+- Confirm the PolyG-I transport, exact LXSDF variant, sampling rate, channel map,
+  ADC scale, packet loss behavior, and electrode montage against TeleScan/specs.
+- Confirm the actual `LXSMWD12.dll` exported names, return semantics, and prototypes
+  against the vendor developer manual if Windows Path B is required.
+- Install the requirements and run model cross-validation/roundtrip with a real,
+  balanced participant dataset.
+- Calibrate and test the physical camera homography, markerless tip visibility,
+  grasp tolerance, arm geometry, and ErrP threshold before clearing the three
+  explicit live-hardware verification gates.
