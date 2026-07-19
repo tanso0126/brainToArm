@@ -4,8 +4,8 @@ __pycache__/
 
 # Locally recorded EEG sessions can be large and may contain participant data.
 data/
+recordings/
 
 # OS/editor transient files (shared VS Code project files remain tracked).
 .DS_Store
 *.swp
-

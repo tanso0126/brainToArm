@@ -14,6 +14,7 @@ import kinematics
 from errp import ErrPDetector
 from eeg_bridge import EEGBridge
 from polyg_hid import PolyGIHID, command_report, decode_report
+from eeg_dashboard import analyze_signal_quality, sanitize_recording_name
 
 
 def check(cond, msg):
@@ -135,6 +136,18 @@ def test_polyg_hid_protocol():
     ]
     check(fake_device.writes == expected,
           "initialization and cleanup reproduce the exact vendor command sequence")
+
+
+def test_eeg_dashboard_helpers():
+    print("[dashboard] safe filenames + honest signal-presence labels")
+    safe = sanitize_recording_name("../ 참가자 A / 세션 1")
+    check("/" not in safe and ".." not in safe, "recording filename traversal removed")
+    check(analyze_signal_quality([0] * 64)["state"] == "flat",
+          "constant channel is labeled flat")
+    check(analyze_signal_quality([32767, -32768] * 32)["state"] == "saturated",
+          "clipped channel is labeled saturated")
+    check(analyze_signal_quality([-100, 50, 120, -40] * 16)["state"] == "present",
+          "varying unclipped channel is labeled signal-present")
 
 
 def test_ik():
@@ -336,6 +349,7 @@ if __name__ == "__main__":
     test_lxsdf_drops()
     test_lxsdf_rejects_invalid_shapes()
     test_polyg_hid_protocol()
+    test_eeg_dashboard_helpers()
     test_ik()
     test_policy_veto_scope()
     test_arm_command_validation()

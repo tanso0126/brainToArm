@@ -390,3 +390,77 @@ emulation, or an unverified brute-force command sweep.
 Raw input is solved. Before brain-driven decisions, mount the actual electrodes,
 confirm Fz/FCz/Cz indices and per-channel signal quality, collect participant
 data, and only then set `EEG_CONFIG_VERIFIED=True`.
+
+## Patch 13 — local real-time PolyG-I monitoring interface
+
+### Intent
+
+Provide a polished, continuously usable EEG interface before robot-arm control is
+introduced, while keeping acquisition semantics honest: the current device yields
+raw signed counts, not calibrated microvolts or electrode-impedance measurements.
+
+### Changes
+
+- Added `laptop/eeg_dashboard.py`, a localhost-only acquisition service that owns
+  the PolyG-I HID handle, starts/stops the verified device sequence, keeps a
+  bounded 30-second sample buffer, estimates the sustained sampling rate and
+  missed reports, and closes the device deterministically.
+- Added JSON endpoints for device/status polling, incremental sample batches,
+  acquisition start/stop, CSV recording start/stop, event markers, recording
+  listing, and safe UTF-8 downloads. Recording names are sanitized and generated
+  participant data is ignored by Git under `recordings/`.
+- Anchored each session to the first sample in the first buffered HID report, so
+  the initial displayed/recorded sample starts at elapsed `0.0` rather than a
+  small negative device-buffer offset.
+- Added channel-level signal-presence proxies for flat, saturated, unusually wide,
+  and varying signals. The API and interface explicitly state that these are not
+  impedance or clinical-quality measurements.
+- Added `dashboard/`, a responsive React/Vinext instrumentation interface with
+  an eight-channel canvas waveform, channel visibility and selection, 2/5/10 s
+  windows, automatic/fixed count scales, display-only pause/resume, measured
+  cadence and loss summaries, selected-channel 0–45 Hz spectrum, relative
+  delta/theta/alpha/beta power, channel warnings, CSV controls, event presets,
+  recent-record downloads, protocol details, and API/device offline states.
+- Added one-command local launch via `python3 laptop/eeg_dashboard.py`; the UI is
+  intentionally local because a hosted page could not directly and safely own
+  this Mac's attached HID device.
+- Added a generated, text-free EEG field texture as a very low-opacity background
+  asset and retained Lucide icons for all functional controls.
+- Replaced disposable starter tests with final server-render checks, extended the
+  Python regression suite for filename and signal-label behavior, and documented
+  setup, caveats, and commands in `README.md`.
+
+### Physical verification
+
+- Started the new localhost API and opened the connected VID `0x0F1F` / PID
+  `0x0010` PolyG-I through the dashboard service.
+- Received live 8-channel rows at a measured `224.6 Hz` with zero estimated report
+  loss in the bounded test; the first returned rows had elapsed timestamps `0.0`
+  and `0.004444` seconds.
+- Started and stopped a CSV recording, inserted a Korean `눈 감음` event marker,
+  downloaded the Korean-named file through the API, and confirmed the marker was
+  stored on the next sample row. The generated test artifact was moved out of the
+  repository after verification.
+- Confirmed the service STOP path released the HID device cleanly; acquisition is
+  left stopped for handoff.
+
+### Regression verification
+
+- `python3 laptop/test_pipeline.py` — passed, including new dashboard helpers.
+- `python3 -m compileall -q laptop` — passed.
+- `cd dashboard && npm run lint` — passed.
+- `cd dashboard && npm test` — passed: production build plus two rendered-shell
+  tests.
+- `git diff --check` — passed.
+- `npm audit --omit=dev` reports two moderate advisories in Next's transitive
+  PostCSS. npm offers only a breaking, incorrect major downgrade; it was not
+  forced. This localhost UI renders repository-authored CSS and accepts no CSS
+  input from users, which limits exposure while upstream remains pinned.
+
+### Accuracy boundary
+
+Several unmounted/uncalibrated channels on the connected device currently show
+large excursions or near-constant DC-biased counts. The dashboard surfaces these
+conditions but does not reinterpret them as useful EEG. Electrode montage,
+per-channel response, grounding/reference, absolute voltage calibration, and
+participant-specific validation remain required before robot or ErrP decisions.

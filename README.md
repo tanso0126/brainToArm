@@ -220,6 +220,7 @@ still runs end-to-end.
 brainToArm/
 ├── README.md                      ← this document
 ├── requirements.txt               ← Python deps (pip install -r)
+├── dashboard/                     ← local real-time EEG web interface (React)
 ├── example.cpp                    ← the ORIGINAL hardcoded servo demo (obsolete;
 │                                    kept only as a reference to the motor map)
 ├── firmware/
@@ -234,6 +235,7 @@ brainToArm/
     ├── policy.py                  ← which object to pick + reach planning
     │
     ├── eeg_bridge.py              ← live EEG acquisition → timestamped buffer
+    ├── eeg_dashboard.py           ← PolyG-I live UI API + one-command launcher
     ├── polyg_hid.py               ← native PolyG-I start/stop + block decoder
     ├── lxsdf.py                   ← LXSDF T2A packet parser/encoder
     ├── eeg_detect.py              ← live PolyG-I HID bench diagnostic
@@ -499,6 +501,32 @@ and only constants, never code.
 
 ---
 
+### Live PolyG-I monitor
+
+The local dashboard is the recommended EEG bring-up surface before connecting
+the robot arm. It owns the HID device in one Python process and shows the eight
+raw channels, measured stream rate, report-loss estimate, relative spectrum,
+signal-presence warnings, CSV recording, and timestamped event markers.
+
+```bash
+pip install -r requirements.txt
+cd dashboard && npm install && cd ..       # first run only
+python3 laptop/eeg_dashboard.py
+```
+
+The launcher opens `http://localhost:3000` and serves the device API only on
+`127.0.0.1:8765`. Press **측정 시작** in the browser. `Ctrl-C` shuts down the
+stream and UI deterministically. CSV files are kept under the ignored local
+`recordings/` directory and can be downloaded from the interface.
+
+The waveform is deliberately labeled **raw count**, not μV. The channel badges
+only detect flat, clipped, or unusually wide raw signals; they are not electrode
+impedance measurements and they do not establish clinical signal quality. Use
+TeleScan/vendor calibration data or an independent calibrated source before
+claiming absolute voltage accuracy.
+
+---
+
 ## 9. Run it right now with zero hardware
 
 The checked-in source is now `EEG_SOURCE="hid"` for the connected device. For a
@@ -604,6 +632,9 @@ Grouped constants (see the file for full comments):
   LXSDF compatibility, IK, ErrP, and full mock pick-and-place tests.
 - **`python3 laptop/eeg_detect.py --seconds 5`** — physical HID start, live
   8-channel range/cadence report, and deterministic stop.
+- **`python3 laptop/eeg_dashboard.py`** — local live waveform, spectrum,
+  recording, marker, pause/resume, and device-status interface.
+- **`cd dashboard && npm run build`** — production build check for the interface.
 - **`python3 laptop/validate.py`** — currently reports the intentional
   `EEG_CONFIG_VERIFIED=False` live-montage gate; it prints `config OK` only after
   the electrode/rate validation described above (or in mock mode).
