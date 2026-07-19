@@ -507,6 +507,10 @@ The local dashboard is the recommended EEG bring-up surface before connecting
 the robot arm. It owns the HID device in one Python process and shows the eight
 raw channels, measured stream rate, report-loss estimate, relative spectrum,
 signal-presence warnings, CSV recording, and timestamped event markers.
+The default smooth renderer buffers only the display by 0.45 seconds and advances
+the waveform at the browser refresh rate; choose the 0.08-second low-latency mode
+when immediate feedback matters more than perfectly even motion. Neither mode
+interpolates or changes recorded samples.
 
 ```bash
 pip install -r requirements.txt

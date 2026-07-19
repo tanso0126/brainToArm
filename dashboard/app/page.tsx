@@ -127,39 +127,70 @@ function WaveformCanvas({
   selected,
   windowSeconds,
   fixedScale,
+  renderDelayMs,
+  paused,
 }: {
   rows: SampleRow[];
   visible: boolean[];
   selected: number;
   windowSeconds: number;
   fixedScale: number;
+  renderDelayMs: number;
+  paused: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rowsRef = useRef(rows);
+  const settingsRef = useRef({ visible, selected, windowSeconds, fixedScale, renderDelayMs, paused });
+  const playheadRef = useRef<number | null>(null);
+  const previousFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
+
+  useEffect(() => {
+    settingsRef.current = { visible, selected, windowSeconds, fixedScale, renderDelayMs, paused };
+  }, [visible, selected, windowSeconds, fixedScale, renderDelayMs, paused]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const draw = () => {
+    let animationFrame = 0;
+    let canvasWidth = 0;
+    let canvasHeight = 0;
+
+    const draw = (frameTime: number) => {
       const bounds = canvas.getBoundingClientRect();
       const ratio = window.devicePixelRatio || 1;
       const width = Math.max(1, bounds.width);
       const height = Math.max(1, bounds.height);
-      canvas.width = Math.floor(width * ratio);
-      canvas.height = Math.floor(height * ratio);
+      const nextCanvasWidth = Math.floor(width * ratio);
+      const nextCanvasHeight = Math.floor(height * ratio);
+      if (canvasWidth !== nextCanvasWidth || canvasHeight !== nextCanvasHeight) {
+        canvasWidth = nextCanvasWidth;
+        canvasHeight = nextCanvasHeight;
+        canvas.width = canvasWidth;
+        canvas.height = canvasHeight;
+      }
       const ctx = canvas.getContext("2d");
-      if (!ctx) return;
+      if (!ctx) {
+        animationFrame = requestAnimationFrame(draw);
+        return;
+      }
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
       ctx.clearRect(0, 0, width, height);
       ctx.fillStyle = "#07100f";
       ctx.fillRect(0, 0, width, height);
 
+      const currentRows = rowsRef.current;
+      const settings = settingsRef.current;
       const left = 56;
       const right = 16;
       const top = 16;
       const bottom = 28;
       const plotWidth = width - left - right;
       const plotHeight = height - top - bottom;
-      const shown = visible.flatMap((on, index) => (on ? [index] : []));
+      const shown = settings.visible.flatMap((on, index) => (on ? [index] : []));
 
       ctx.lineWidth = 1;
       ctx.strokeStyle = "rgba(133, 168, 158, .1)";
@@ -176,48 +207,82 @@ function WaveformCanvas({
         ctx.font = "13px var(--font-geist-sans)";
         ctx.textAlign = "center";
         ctx.fillText("표시할 채널을 선택하세요", width / 2, height / 2);
+        animationFrame = requestAnimationFrame(draw);
         return;
       }
 
       const laneHeight = plotHeight / shown.length;
       shown.forEach((channel, lane) => {
         const mid = top + laneHeight * (lane + 0.5);
-        ctx.strokeStyle = channel === selected ? "rgba(103, 232, 197, .22)" : "rgba(133, 168, 158, .08)";
+        ctx.strokeStyle = channel === settings.selected ? "rgba(103, 232, 197, .22)" : "rgba(133, 168, 158, .08)";
         ctx.beginPath();
         ctx.moveTo(left, mid);
         ctx.lineTo(width - right, mid);
         ctx.stroke();
         ctx.fillStyle = CHANNEL_COLORS[channel];
-        ctx.font = `${channel === selected ? 650 : 500} 11px var(--font-geist-mono)`;
+        ctx.font = `${channel === settings.selected ? 650 : 500} 11px var(--font-geist-mono)`;
         ctx.textAlign = "left";
         ctx.fillText(`CH ${channel + 1}`, 10, mid + 4);
       });
 
-      if (!rows.length) {
+      if (!currentRows.length) {
+        playheadRef.current = null;
+        previousFrameRef.current = frameTime;
         ctx.fillStyle = "#78928a";
         ctx.font = "13px var(--font-geist-sans)";
         ctx.textAlign = "center";
         ctx.fillText("측정을 시작하면 원시 파형이 표시됩니다", left + plotWidth / 2, height / 2);
+        animationFrame = requestAnimationFrame(draw);
         return;
       }
 
-      const newest = rows[rows.length - 1].elapsed;
-      const start = newest - windowSeconds;
-      const points = rows.filter((row) => row.elapsed >= start);
+      const firstAvailable = currentRows[0].elapsed;
+      const latestAvailable = currentRows[currentRows.length - 1].elapsed;
+      const renderDelay = settings.renderDelayMs / 1000;
+      const bufferedDuration = latestAvailable - firstAvailable;
+      if (bufferedDuration < renderDelay) {
+        playheadRef.current = null;
+        previousFrameRef.current = frameTime;
+        ctx.fillStyle = "#78928a";
+        ctx.font = "13px var(--font-geist-sans)";
+        ctx.textAlign = "center";
+        ctx.fillText(`부드러운 표시 버퍼 준비 중 · ${Math.round((bufferedDuration / renderDelay) * 100)}%`, left + plotWidth / 2, height / 2);
+        animationFrame = requestAnimationFrame(draw);
+        return;
+      }
+
+      const frameDelta = previousFrameRef.current === null
+        ? 0
+        : Math.min(0.1, Math.max(0, (frameTime - previousFrameRef.current) / 1000));
+      previousFrameRef.current = frameTime;
+      const initialPlayhead = latestAvailable - renderDelay;
+      const playheadIsOutsideBuffer = playheadRef.current === null
+        || playheadRef.current > latestAvailable
+        || latestAvailable - playheadRef.current > Math.max(2, settings.windowSeconds);
+      if (playheadIsOutsideBuffer) {
+        playheadRef.current = initialPlayhead;
+      } else if (!settings.paused) {
+        playheadRef.current = Math.min(latestAvailable - 0.025, playheadRef.current + frameDelta);
+      }
+
+      const newest = playheadRef.current ?? initialPlayhead;
+      playheadRef.current = newest;
+      const start = newest - settings.windowSeconds;
+      const points = currentRows.filter((row) => row.elapsed >= start && row.elapsed <= newest);
       shown.forEach((channel, lane) => {
         if (points.length < 2) return;
         const values = points.map((row) => row.values[channel]);
         const center = values.reduce((sum, value) => sum + value, 0) / values.length;
         const maxDelta = Math.max(1, ...values.map((value) => Math.abs(value - center)));
-        const scale = fixedScale > 0 ? fixedScale : Math.max(32, maxDelta * 1.12);
+        const scale = settings.fixedScale > 0 ? settings.fixedScale : Math.max(32, maxDelta * 1.12);
         const mid = top + laneHeight * (lane + 0.5);
         const amplitude = laneHeight * 0.39;
         ctx.strokeStyle = CHANNEL_COLORS[channel];
-        ctx.lineWidth = channel === selected ? 1.45 : 1;
-        ctx.globalAlpha = channel === selected ? 1 : 0.78;
+        ctx.lineWidth = channel === settings.selected ? 1.45 : 1;
+        ctx.globalAlpha = channel === settings.selected ? 1 : 0.78;
         ctx.beginPath();
         points.forEach((row, index) => {
-          const x = left + ((row.elapsed - start) / windowSeconds) * plotWidth;
+          const x = left + ((row.elapsed - start) / settings.windowSeconds) * plotWidth;
           const y = mid - ((row.values[channel] - center) / scale) * amplitude;
           if (index === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
@@ -230,15 +295,14 @@ function WaveformCanvas({
       ctx.font = "10px var(--font-geist-mono)";
       ctx.textAlign = "center";
       for (let i = 0; i <= 5; i += 1) {
-        const seconds = windowSeconds - (windowSeconds * i) / 5;
+        const seconds = settings.windowSeconds - (settings.windowSeconds * i) / 5;
         ctx.fillText(i === 5 ? "현재" : `-${seconds.toFixed(1)}s`, left + (plotWidth * i) / 5, height - 9);
       }
+      animationFrame = requestAnimationFrame(draw);
     };
-    draw();
-    const observer = new ResizeObserver(draw);
-    observer.observe(canvas);
-    return () => observer.disconnect();
-  }, [rows, visible, selected, windowSeconds, fixedScale]);
+    animationFrame = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(animationFrame);
+  }, []);
 
   return <canvas ref={canvasRef} className="waveform-canvas" role="img" aria-label="8채널 EEG 실시간 원시 파형" />;
 }
@@ -362,6 +426,7 @@ export default function Home() {
   const [visible, setVisible] = useState(() => Array(8).fill(true));
   const [windowSeconds, setWindowSeconds] = useState(5);
   const [fixedScale, setFixedScale] = useState(0);
+  const [renderDelayMs, setRenderDelayMs] = useState(450);
   const [displayPaused, setDisplayPaused] = useState(false);
   const [recordLabel, setRecordLabel] = useState("");
   const [customMarker, setCustomMarker] = useState("");
@@ -438,7 +503,7 @@ export default function Home() {
       }
     };
     pull();
-    const timer = window.setInterval(pull, 120);
+    const timer = window.setInterval(pull, 80);
     return () => window.clearInterval(timer);
   }, [displayPaused, status?.acquisition.running]);
 
@@ -462,6 +527,11 @@ export default function Home() {
 
   const toggleChannel = (index: number) => {
     setVisible((previous) => previous.map((value, channel) => (channel === index ? !value : value)));
+  };
+
+  const toggleDisplayPause = () => {
+    if (displayPaused) setRows([]);
+    setDisplayPaused(!displayPaused);
   };
 
   const addMarker = async (label: string) => {
@@ -553,6 +623,11 @@ export default function Home() {
               <h2>실시간 파형</h2>
             </div>
             <div className="toolbar">
+              <label>렌더링
+                <select value={renderDelayMs} onChange={(event) => { setRenderDelayMs(Number(event.target.value)); setRows([]); }}>
+                  <option value={450}>부드럽게 · 0.45초</option><option value={80}>저지연 · 0.08초</option>
+                </select>
+              </label>
               <label>시간창
                 <select value={windowSeconds} onChange={(event) => setWindowSeconds(Number(event.target.value))}>
                   <option value={2}>2초</option><option value={5}>5초</option><option value={10}>10초</option>
@@ -563,12 +638,12 @@ export default function Home() {
                   <option value={0}>채널별 자동</option><option value={250}>±250 count</option><option value={1000}>±1,000 count</option><option value={5000}>±5,000 count</option><option value={30000}>±30,000 count</option>
                 </select>
               </label>
-              <button className={`secondary-button ${displayPaused ? "active" : ""}`} onClick={() => setDisplayPaused((value) => !value)} disabled={!isRunning}>
+              <button className={`secondary-button ${displayPaused ? "active" : ""}`} onClick={toggleDisplayPause} disabled={!isRunning}>
                 {displayPaused ? <Play size={15} /> : <Pause size={15} />}{displayPaused ? "보기 재개" : "보기 일시정지"}
               </button>
             </div>
           </div>
-          <WaveformCanvas rows={rows} visible={visible} selected={selectedChannel} windowSeconds={windowSeconds} fixedScale={fixedScale} />
+          <WaveformCanvas rows={rows} visible={visible} selected={selectedChannel} windowSeconds={windowSeconds} fixedScale={fixedScale} renderDelayMs={renderDelayMs} paused={displayPaused} />
           <div className="channel-controls" aria-label="채널 표시 설정">
             {visible.map((on, index) => (
               <div className={`channel-control ${selectedChannel === index ? "selected" : ""}`} key={index}>
@@ -579,7 +654,7 @@ export default function Home() {
               </div>
             ))}
           </div>
-          <p className="data-note"><Sparkles size={13} />세로 위치는 채널 평균을 중심으로 정렬됩니다. 값은 교정되지 않은 ADC 원시 상대값이며 μV가 아닙니다.</p>
+          <p className="data-note"><Sparkles size={13} />화면은 {renderDelayMs / 1000}초 버퍼로 디스플레이 주사율에 맞춰 재생합니다. CSV 원본은 지연·보간 없이 저장되며 값은 μV가 아닌 ADC 원시 상대값입니다.</p>
         </article>
 
         <aside className="analysis-column">

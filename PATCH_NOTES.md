@@ -464,3 +464,36 @@ large excursions or near-constant DC-biased counts. The dashboard surfaces these
 conditions but does not reinterpret them as useful EEG. Electrode montage,
 per-channel response, grounding/reference, absolute voltage calibration, and
 participant-specific validation remain required before robot or ErrP decisions.
+
+## Patch 14 — smooth real-time waveform playback
+
+### Intent
+
+Remove the visibly stepped waveform motion caused by drawing each 64-sample HID
+report as one instantaneous UI update, without modifying, inventing, or
+interpolating acquisition samples.
+
+### Changes
+
+- Replaced report-triggered canvas redraws with a browser-refresh-rate animation
+  loop and a monotonic sample playhead.
+- Added a default 0.45-second display-only jitter buffer. The renderer reveals
+  real samples progressively as the playhead crosses their original timestamps,
+  so the 64-row / ~0.284-second USB block boundary is no longer presented as a
+  visual jump.
+- Added an explicit 0.08-second low-latency mode for tasks where immediacy matters
+  more than smoothness, and made the latency trade-off visible in the control.
+- Increased incremental API polling from 120 ms to 80 ms to reduce delivery
+  jitter, while preserving the physical device's verified report cadence.
+- Kept CSV recording entirely on the acquisition path: render buffering and
+  animation never alter timestamps or stored sample values.
+- Made display pause freeze the playhead immediately and clear stale buffered
+  display rows on resume, preventing a catch-up jump or a line across missing
+  visual time.
+
+### Verification
+
+- `cd dashboard && npm run lint` — passed.
+- `cd dashboard && npm test` — passed, including final production build and
+  smooth-renderer source assertions.
+- `git diff --check` — passed.

@@ -31,6 +31,8 @@ test("starter preview is removed and localhost API is explicit", async () => {
   ]);
   assert.match(page, /http:\/\/127\.0\.0\.1:8765/);
   assert.match(page, /raw_count/);
+  assert.match(page, /requestAnimationFrame/);
+  assert.match(page, /부드럽게 · 0\.45초/);
   assert.match(packageJson, /braintoarm-eeg-dashboard/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));
