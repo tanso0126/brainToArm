@@ -23,12 +23,13 @@ precise steps to bring it up. No other context is required.
 > - It **opens natively on macOS** via `hidapi`, so **"Path B" (the Windows
 >   `LXSMWD12.dll` bridge) is unnecessary**.
 > - The blocker is resolved. Static analysis of TeleScan's installed
->   `LXSM-D1WD6.dll` recovered the complete initialization sequence and its raw
->   report decoder. `python3 laptop/eeg_detect.py` starts the device and verifies
->   live 8-channel samples; `EEG_SOURCE="hid"` feeds them into `EEGBridge`.
-> - This HID stream is **not LXSDF**. Each 1,024-byte report is 64 time rows ×
->   8 interleaved signed samples with a vendor high-byte bias. LXSDF remains in
->   use for mock/serial/TCP compatibility paths.
+>   `LXSM-D1WD10.dll`, the official D1WD10 manual, and physical A/B captures
+>   recovered and verified the complete initialization sequence, decoder, and
+>   ADC-input voltage coefficient. `python3 laptop/eeg_detect.py` starts the
+>   device and `EEG_SOURCE="hid"` feeds its samples into `EEGBridge`.
+> - This HID stream is **not LXSDF**. Each 1,024-byte report holds 32 time rows ×
+>   16 physical channels; channels 1–8 are EEG. Selector 8 produces the specified
+>   and measured 256 Hz stream.
 > - TeleScan under CrossOver **cannot** reach the device (Wine filters
 >   vendor-defined HID); proven, not a configuration issue.
 >
@@ -174,11 +175,9 @@ is no network, no router, no UDP.
   EEG acquisition + ErrP detection, and the shared-autonomy loop.
 - **EEG** contributes only the veto signal.
 
-**Fallback path (only if needed):** if the PolyG-I refuses to stream as a plain
-USB serial port on macOS and can only be reached through its Windows driver DLL,
-a tiny helper (`windows_eeg_server.py`) runs on a Windows box/VM and forwards the
-raw EEG bytes to the laptop over a single localhost or direct-ethernet TCP link.
-Still no router. The **same** parser decodes both paths.
+**Compatibility path:** `windows_eeg_server.py` remains for a different supported
+Windows/LXSDF device if one is introduced later. It is neither needed nor used
+for this PID `0x0010` PolyG-I; its native HID protocol is already working.
 
 ---
 
@@ -316,12 +315,12 @@ brainToArm/
 ### EEG acquisition and the brain signal
 
 - **`eeg_bridge.py`** — `EEGBridge` runs a background thread that fills a
-  **timestamped** ring buffer of EEG samples (in microvolts). Batched transport
+  **timestamped** ring buffer of EEG samples. Batched transport
   reads are reconstructed at the configured device sample interval instead of
   assigning one arrival timestamp to every packet. Four
   interchangeable sources selected by `config.EEG_SOURCE`:
   - `"hid"` — the connected PID `0x0010` PolyG-I. Native macOS `hidapi`, the
-    recovered TeleScan initialization sequence, and 1,024-byte raw block decoder.
+    D1WD10 initialization sequence, and 1,024-byte/16-channel block decoder.
   - `"mock"` — synthetic 8-channel signal (widespread alpha + noise), with an
     injectable ErrP-like burst for testing. Goes through the **real** LXSDF
     encode+parse path so nothing downstream is special-cased.
@@ -333,9 +332,9 @@ brainToArm/
   hardware despite thread jitter.
 
 - **`polyg_hid.py`** — The verified real-device path. It enforces exact-one-device
-  discovery, sends STOP → mode → PID/gain → sample timer → START, checks every
-  HID write, decodes each report exactly as the vendor DLL does, and sends STOP
-  during cleanup even after an error.
+  discovery, sends STOP → 16 physical channels → 256 Hz → EEG-group PGA → START,
+  checks every HID write, removes the marking bit, decodes offset-binary words,
+  converts them to ADC-input mV, and sends STOP during cleanup after any error.
 
 - **`lxsdf.py`** — The compatibility/mock LXSDF T2A parser, written from LAXTHA's official
   spec. Packets start with sync bytes `0xFF 0xFE`, an 8-byte header (including a
@@ -442,8 +441,9 @@ brainToArm/
   the **choice** open.
 
 - **We read the HID device ourselves, not through TeleScan.** The installed
-  TeleScan DLL revealed the exact commands (`01 01 00` starts; `01 00 00` stops)
-  and raw int16 conversion. Native `hidapi` now reproduces that behavior on
+  D1WD10 DLL and official manual revealed the exact commands (`01 01 00` starts;
+  `01 00 00` stops), 16-channel layout, offset-binary conversion, marking bit,
+  and ADC voltage coefficient. Native `hidapi` reproduces that behavior on
   macOS; no Windows, CrossOver, screen scraping, or serial emulation is involved.
 
 - **No router / no UDP.** A previous student's rig needed a router only to
@@ -488,9 +488,9 @@ The parts that are written against **documented assumptions** and can only be
 | Area | Assumed value / behavior | How to confirm |
 |------|--------------------------|----------------|
 | EEG transport | **RESOLVED:** native USB HID, VID `0x0F1F` PID `0x0010` | `eeg_detect.py` passes on this Mac |
-| EEG start/stop | **RESOLVED:** vendor sequence recovered from `LXSM-D1WD6.dll` | bounded captures repeatedly start, stream, and stop |
-| EEG framing | **RESOLVED:** 1,024-byte raw block, 64 rows × 8 channels; not LXSDF | decoder matches DLL disassembly and hardware |
-| EEG rate / channel map | sustained ~225 rows/s measured; slots 1–8 are the acquisition channels | transport verified; confirm electrode montage before setting `EEG_CONFIG_VERIFIED=True` |
+| EEG start/stop | **RESOLVED:** D1WD10 vendor sequence | bounded captures repeatedly start, stream, and stop |
+| EEG framing | **RESOLVED:** 1,024-byte block, 32 rows × 16 physical channels; first 8 are EEG | decoder matches DLL, official manual, and hardware |
+| EEG rate / channel map | **RESOLVED transport:** selector 8 = 256 Hz; EEG source is physical channels 1–8 | confirm electrode montage before setting `EEG_CONFIG_VERIFIED=True` |
 | Arm geometry | link lengths `L_*`, servo offsets/directions | `arm_jog.py` |
 | Camera mapping | 4-point pixel↔cm homography | `calibrate_workspace.py` |
 | ErrP model | trained classifier (baseline heuristic works meanwhile) | `record_errp.py` + `errp_train.py` |
@@ -504,9 +504,9 @@ and only constants, never code.
 ### Live PolyG-I monitor
 
 The local dashboard is the recommended EEG bring-up surface before connecting
-the robot arm. It owns the HID device in one Python process and shows the eight
-raw channels, measured stream rate, report-loss estimate, relative spectrum,
-signal-presence warnings, CSV recording, and timestamped event markers.
+the robot arm. It owns the HID device in one Python process and shows all eight
+EEG channels in filtered ADC-input mV, measured stream rate, fixed-scale PSD,
+exact window statistics, ADC rail warnings, CSV recording, and event markers.
 The default smooth renderer buffers only the display by 0.45 seconds and advances
 the waveform at the browser refresh rate; choose the 0.08-second low-latency mode
 when immediate feedback matters more than perfectly even motion. Neither mode
@@ -523,11 +523,13 @@ The launcher opens `http://localhost:3000` and serves the device API only on
 stream and UI deterministically. CSV files are kept under the ignored local
 `recordings/` directory and can be downloaded from the interface.
 
-The waveform is deliberately labeled **raw count**, not μV. The channel badges
-only detect flat, clipped, or unusually wide raw signals; they are not electrode
-impedance measurements and they do not establish clinical signal quality. Use
-TeleScan/vendor calibration data or an independent calibrated source before
-claiming absolute voltage accuracy.
+Every channel uses the same user-selected, fixed Y-axis and a visible 0 mV line;
+there is no moving auto-scale or per-window recentering. The live path applies a
+stateful 60 Hz notch and 4th-order 0.5–45 Hz band-pass. The D1WD10 coefficient
+supports accurate **ADC-input mV**, but not electrode-input μV: the fixed analog
+front-end gain is not published or independently calibrated. RMS, peak-to-peak,
+DC offset and clipping are measurements, but they are not electrode impedance or
+clinical interpretations.
 
 ---
 

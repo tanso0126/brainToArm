@@ -13,8 +13,9 @@ from lxsdf import LXSDFParser, build_packet
 import kinematics
 from errp import ErrPDetector
 from eeg_bridge import EEGBridge
-from polyg_hid import PolyGIHID, command_report, decode_report
-from eeg_dashboard import analyze_signal_quality, sanitize_recording_name
+from polyg_hid import (
+    ADC_VOLTS_PER_COUNT, PolyGIHID, command_report, counts_to_adc_mv, decode_report)
+from eeg_dashboard import EEGSignalProcessor, analyze_signal_quality, sanitize_recording_name
 
 
 def check(cond, msg):
@@ -73,24 +74,31 @@ def test_lxsdf_rejects_invalid_shapes():
 
 
 def _encode_polyg_value(value):
-    word = value & 0xFFFF
-    return bytes([(((word >> 8) + 8) & 0xFF), word & 0xFF])
+    if value % 2:
+        raise ValueError("D1WD10 ADC counts must be even; bit 0 is the marker")
+    return bytes([((value // 256) + 0x80) & 0xFF, value & 0xFF])
 
 
 def test_polyg_hid_protocol():
-    print("[polyg-hid] command layout + vendor raw block decoder")
+    print("[polyg-hid] D1WD10 commands + offset-binary/marker-bit decoder")
     check(command_report(1, 1, 0) == bytes([0, 1, 1, 0, 0, 0, 0, 0, 0]),
           "start command has report ID plus 8-byte vendor payload")
-    pattern = [-32768, -1, 0, 1, 12345, 30000, 32767, -12345]
-    payload = b"".join(_encode_polyg_value(value) for value in pattern * 64)
-    rows = decode_report(payload, channels=8)
-    check(len(rows) == 64, "1024-byte report decodes to 64 eight-channel rows")
-    check(rows[0] == pattern and rows[-1] == pattern,
-          "high-byte bias and signed int16 conversion match vendor DLL")
-    check(decode_report(b"\x00" + payload, channels=8) == rows,
+    eeg_pattern = [-32768, -518, -2, 0, 2, 258, 12344, 32766]
+    physical_pattern = eeg_pattern + [1000] * 8
+    payload = b"".join(_encode_polyg_value(value) for value in physical_pattern * 32)
+    marked = bytearray(payload)
+    marked[1] |= 1
+    rows = decode_report(marked)
+    check(len(rows) == 32, "1024-byte report decodes to 32 rows over 16 channels")
+    check(rows[0] == eeg_pattern and rows[-1] == eeg_pattern,
+          "offset-binary conversion and marker-bit removal match D1WD10 DLL")
+    check(decode_report(b"\x00" + payload) == rows,
           "optional Windows report-ID byte is accepted")
+    mv = counts_to_adc_mv([32766, 0, -32768])
+    check(abs(mv[0] - 32766 * ADC_VOLTS_PER_COUNT * 1000) < 1e-12,
+          "embedded vendor coefficient converts counts to ADC millivolts")
     try:
-        decode_report(payload[:-1], channels=8)
+        decode_report(payload[:-1])
         check(False, "short HID report rejected")
     except ValueError:
         check(True, "short HID report rejected")
@@ -130,8 +138,8 @@ def test_polyg_hid_protocol():
     with PolyGIHID(hid_module=FakeHID) as device:
         device.start()
     expected = [
-        command_report(1, 0, 0), command_report(10, 0, 0),
-        command_report(2, 16, 9), command_report(4, 1, 0xD3),
+        command_report(1, 0, 0), command_report(5, 16, 0),
+        command_report(4, 8, 0), command_report(11, 6, 0),
         command_report(1, 1, 0), command_report(1, 0, 0),
     ]
     check(fake_device.writes == expected,
@@ -142,12 +150,45 @@ def test_eeg_dashboard_helpers():
     print("[dashboard] safe filenames + honest signal-presence labels")
     safe = sanitize_recording_name("../ 참가자 A / 세션 1")
     check("/" not in safe and ".." not in safe, "recording filename traversal removed")
-    check(analyze_signal_quality([0] * 64)["state"] == "flat",
+    check(analyze_signal_quality([0.0] * 64, [0] * 64)["state"] == "flat",
           "constant channel is labeled flat")
-    check(analyze_signal_quality([32767, -32768] * 32)["state"] == "saturated",
+    check(analyze_signal_quality([1.0, -1.0] * 32, [32766, -32768] * 32)["state"] == "saturated",
           "clipped channel is labeled saturated")
-    check(analyze_signal_quality([-100, 50, 120, -40] * 16)["state"] == "present",
+    check(analyze_signal_quality([-1.0, 0.5, 1.2, -0.4] * 16, [0] * 64)["state"] == "present",
           "varying unclipped channel is labeled signal-present")
+
+    processor = EEGSignalProcessor(fs=256, channels=8)
+    rows = []
+    for n in range(256 * 4):
+        value = 2000 * math.sin(2 * math.pi * 10 * n / 256)
+        rows.append([value] * 8)
+    _raw, filtered = processor.process(rows)
+    settled = [row[0] for row in filtered[512:]]
+    check(max(settled) - min(settled) > 50,
+          "stateful 0.5–45 Hz filter preserves a 10 Hz EEG-band signal")
+
+    chunked_processor = EEGSignalProcessor(fs=256, channels=8)
+    chunked = []
+    for start in range(0, len(rows), 32):
+        _raw_chunk, filtered_chunk = chunked_processor.process(rows[start:start + 32])
+        chunked.extend(filtered_chunk)
+    max_difference = max(
+        abs(expected[0] - actual[0])
+        for expected, actual in zip(filtered, chunked)
+    )
+    check(max_difference < 1e-9,
+          "filter state makes 32-row HID boundaries numerically continuous")
+
+    notch_processor = EEGSignalProcessor(fs=256, channels=8)
+    mains_rows = [
+        [2000 * math.sin(2 * math.pi * 60 * n / 256)] * 8
+        for n in range(256 * 4)
+    ]
+    _raw_mains, filtered_mains = notch_processor.process(mains_rows)
+    mains_rms = (sum(row[0] ** 2 for row in filtered_mains[512:]) / 512) ** 0.5
+    signal_rms = (sum(value ** 2 for value in settled) / len(settled)) ** 0.5
+    check(mains_rms < signal_rms * 0.1,
+          "60 Hz notch and 45 Hz low-pass strongly reject mains-frequency input")
 
 
 def test_ik():

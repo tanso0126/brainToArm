@@ -1,9 +1,11 @@
 """Native macOS/Linux HID transport for the LAXTHA PolyG-I (PID 0x0010).
 
-The protocol below was recovered from TeleScan's installed LXSM-D1WD6.dll and
-verified against the physical device on macOS.  This HID variant does *not* send
-LXSDF frames: each 1024-byte INPUT report contains 512 encoded signed 16-bit
-values, interleaved across eight acquisition channels.
+The protocol below was recovered from TeleScan's installed LXSM-D1WD10.dll,
+checked against LAXTHA's D1WD10 manual, and verified on the physical device.
+Each 1024-byte INPUT report contains 512 offset-binary ADC words.  PolyG-I has
+16 physical channels, so one report contains 32 time rows; channels 1..8 are
+the EEG group.  The least-significant bit is a digital marking bit, not ADC
+data, and must be cleared exactly as the vendor DLL does.
 """
 import time
 
@@ -16,16 +18,22 @@ except ImportError:
 VID = 0x0F1F
 PID = 0x0010
 REPORT_BYTES = 1024
+MAX_CHANNELS = 16
+EEG_CHANNELS = 8
+ROWS_PER_REPORT = REPORT_BYTES // 2 // MAX_CHANNELS
 
-# LXSM-D1WD6 Set_SampleFreq selector -> (command byte 1, command byte 2).
-# Selector 9 is the only setting used here: it produced a stable continuous
-# stream on the attached PolyG-I and corresponds to the installed PolyG-I
-# calibration file's nominal 256 Hz acquisition setting.
-SAMPLE_RATE_COMMANDS = {
-    7: (0x07, 0x48),
-    8: (0x03, 0xA4),
-    9: (0x01, 0xD3),
-}
+# Exact constant embedded at LXSM-D1WD10.dll .rdata:0x1000A180.  The vendor
+# float stream is ADC-input volts, not electrode-input volts; the unknown fixed
+# analogue front-end gain prevents an honest electrode-uV conversion.
+ADC_VOLTS_PER_COUNT = -1.25 / 32768.0
+PGA_GAINS = (
+    0.1, 0.2, 0.4, 0.7, 1.0, 1.36, 1.70, 2.55,
+    3.40, 4.25, 5.67, 6.80, 8.50, 10.20, 11.90, 17.00,
+)
+
+# D1WD10 defines sampling frequency as 2**selector Hz.  PolyG-I uses 16
+# physical channels, whose documented maximum is 512 Hz (selector 9).
+SAMPLE_SELECTORS = tuple(range(10))
 
 
 def command_report(command, arg1=0, arg2=0):
@@ -37,16 +45,21 @@ def command_report(command, arg1=0, arg2=0):
     return bytes([0, command, arg1, arg2, 0, 0, 0, 0, 0])
 
 
-def decode_report(report, channels=8):
-    """Decode one INPUT report to time-major rows of signed ADC counts.
+def decode_report(report, max_channels=MAX_CHANNELS, output_channels=EEG_CHANNELS):
+    """Decode one INPUT report to time-major EEG rows of signed ADC counts.
 
     Windows ReadFile includes a leading report-ID byte; hidapi on macOS normally
     removes it.  Accept both representations so captures and tests are portable.
-    LXSM-D1WD6 reconstructs each word as ``((high - 8) << 8) | low`` and then
-    interprets that word as signed int16.
+    LXSM-D1WD10 reconstructs each word as
+    ``(high - 0x80) * 256 + (low & 0xFE)``.  This removes the marking bit and
+    converts the device's offset-binary word to a signed count.
     """
-    if isinstance(channels, bool) or not isinstance(channels, int) or channels <= 0:
-        raise ValueError("channels must be a positive integer")
+    for name, value in (("max_channels", max_channels),
+                        ("output_channels", output_channels)):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{name} must be a positive integer")
+    if output_channels > max_channels:
+        raise ValueError("output_channels cannot exceed max_channels")
     payload = bytes(report)
     if len(payload) == REPORT_BYTES + 1 and payload[0] == 0:
         payload = payload[1:]
@@ -56,12 +69,18 @@ def decode_report(report, channels=8):
 
     values = []
     for offset in range(0, REPORT_BYTES, 2):
-        word = (((payload[offset] - 8) & 0xFF) << 8) | payload[offset + 1]
-        values.append(word - 0x10000 if word & 0x8000 else word)
-    if len(values) % channels:
+        high, low = payload[offset], payload[offset + 1]
+        values.append((high - 0x80) * 256 + (low & 0xFE))
+    if len(values) % max_channels:
         raise ValueError(
-            f"{len(values)} values cannot be divided into {channels} channels")
-    return [values[i:i + channels] for i in range(0, len(values), channels)]
+            f"{len(values)} values cannot be divided into {max_channels} channels")
+    return [values[i:i + output_channels]
+            for i in range(0, len(values), max_channels)]
+
+
+def counts_to_adc_mv(values):
+    """Convert D1WD10 counts to the vendor DLL's ADC-input millivolts."""
+    return [float(value) * ADC_VOLTS_PER_COUNT * 1000.0 for value in values]
 
 
 def enumerate_devices(hid_module=None):
@@ -74,12 +93,11 @@ def enumerate_devices(hid_module=None):
 class PolyGIHID:
     """Exact-one-device session with deterministic start/stop lifecycle."""
 
-    def __init__(self, channels=8, physical_pid=PID, gain_index=6,
-                 mode=0, sample_selector=9, hid_module=None):
+    def __init__(self, channels=EEG_CHANNELS, max_channels=MAX_CHANNELS,
+                 gain_index=6, sample_selector=8, hid_module=None):
         self.channels = channels
-        self.physical_pid = physical_pid
+        self.max_channels = max_channels
         self.gain_index = gain_index
-        self.mode = mode
         self.sample_selector = sample_selector
         self._hid = hid if hid_module is None else hid_module
         self.device = None
@@ -109,22 +127,25 @@ class PolyGIHID:
             raise OSError(f"short PolyG-I HID write: {written}/{len(report)} bytes")
 
     def start(self):
-        if self.sample_selector not in SAMPLE_RATE_COMMANDS:
+        if self.sample_selector not in SAMPLE_SELECTORS:
             raise ValueError(
                 f"unsupported PolyG-I sample selector {self.sample_selector}; "
-                f"expected one of {sorted(SAMPLE_RATE_COMMANDS)}")
+                f"expected one of {list(SAMPLE_SELECTORS)}")
+        if self.max_channels != MAX_CHANNELS:
+            raise ValueError("PolyG-I must be configured for 16 physical channels")
         if (isinstance(self.gain_index, bool)
                 or not isinstance(self.gain_index, int)
-                or not 0 <= self.gain_index <= 7):
-            raise ValueError("PolyG-I gain_index must be in [0, 7]")
+                or not 0 <= self.gain_index < len(PGA_GAINS)):
+            raise ValueError("PolyG-I gain_index must be in [0, 15]")
 
-        # Exact LXSM-D1WD6 initialization order.  Stop first so a process crash or
+        # Exact LXSM-D1WD10 initialization order. Stop first so a process crash or
         # a prior acquisition cannot leave stale reports racing this new session.
         self._write(0x01, 0x00, 0x00)
-        self._write(0x0A, self.mode, 0x00)
-        self._write(0x02, self.physical_pid, 15 - self.gain_index)
-        timer_hi, timer_lo = SAMPLE_RATE_COMMANDS[self.sample_selector]
-        self._write(0x04, timer_hi, timer_lo)
+        self._write(0x05, self.max_channels, 0x00)
+        self._write(0x04, self.sample_selector, 0x00)
+        # Command 0x0B sets one source group: arg1=gain, arg2=group. PolyG-I
+        # source group 0 is EEG channels 1..8, leaving ECG/EMG/etc untouched.
+        self._write(0x0B, self.gain_index, 0x00)
         self._write(0x01, 0x01, 0x00)
         self.streaming = True
 
@@ -136,7 +157,7 @@ class PolyGIHID:
 
     def read_rows(self):
         report = self.read_report()
-        return decode_report(report, self.channels) if report else []
+        return decode_report(report, self.max_channels, self.channels) if report else []
 
     def close(self):
         device, self.device = self.device, None

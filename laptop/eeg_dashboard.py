@@ -29,8 +29,21 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
+import numpy as np
+from scipy.signal import butter, iirnotch, lfilter, lfilter_zi, sosfilt, sosfilt_zi
+
 import config
-from polyg_hid import PID, REPORT_BYTES, VID, PolyGIHID, enumerate_devices
+from polyg_hid import (
+    ADC_VOLTS_PER_COUNT,
+    MAX_CHANNELS,
+    PGA_GAINS,
+    PID,
+    REPORT_BYTES,
+    ROWS_PER_REPORT,
+    VID,
+    PolyGIHID,
+    enumerate_devices,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -39,7 +52,10 @@ RECORDING_DIR = REPO_ROOT / "recordings"
 DEFAULT_API_PORT = 8765
 DEFAULT_UI_PORT = 3000
 CHANNELS = 8
-ROWS_PER_REPORT = REPORT_BYTES // 2 // CHANNELS
+FILTER_LOW_HZ = 0.5
+FILTER_HIGH_HZ = 45.0
+NOTCH_HZ = 60.0
+NOTCH_Q = 30.0
 
 
 def sanitize_recording_name(value):
@@ -49,30 +65,67 @@ def sanitize_recording_name(value):
     return value[:60]
 
 
-def analyze_signal_quality(values):
-    """Signal-presence proxy; deliberately not presented as electrode impedance."""
+def analyze_signal_quality(values, raw_counts=None, raw_adc_mv=None):
+    """Return exact two-second-window metrics, never electrode impedance."""
     if not values:
-        return {"state": "waiting", "std": 0.0, "peakToPeak": 0,
-                "clippingPercent": 0.0, "mean": 0.0}
-    mean = statistics.fmean(values)
-    std = statistics.pstdev(values) if len(values) > 1 else 0.0
+        return {"state": "waiting", "rmsMv": 0.0, "peakToPeakMv": 0.0,
+                "clippingPercent": 0.0, "dcOffsetMv": 0.0}
+    rms = (sum(value * value for value in values) / len(values)) ** 0.5
     peak_to_peak = max(values) - min(values)
-    clipping = 100.0 * sum(abs(value) >= 32700 for value in values) / len(values)
-    if clipping >= 1.0:
+    counts = raw_counts or []
+    clipping = (100.0 * sum(value <= -32768 or value >= 32766 for value in counts)
+                / len(counts) if counts else 0.0)
+    dc_offset = statistics.fmean(raw_adc_mv) if raw_adc_mv else 0.0
+    effective_lsb_mv = abs(ADC_VOLTS_PER_COUNT * 2 * 1000.0)
+    if clipping > 0.0:
         state = "saturated"
-    elif std < 3.0 or peak_to_peak < 8:
+    elif peak_to_peak <= effective_lsb_mv * 2:
         state = "flat"
-    elif peak_to_peak > 60000:
-        state = "unstable"
     else:
         state = "present"
     return {
         "state": state,
-        "std": round(std, 2),
-        "peakToPeak": int(peak_to_peak),
-        "clippingPercent": round(clipping, 2),
-        "mean": round(mean, 2),
+        "rmsMv": round(rms, 6),
+        "peakToPeakMv": round(peak_to_peak, 6),
+        "clippingPercent": round(clipping, 3),
+        "dcOffsetMv": round(dc_offset, 6),
     }
+
+
+class EEGSignalProcessor:
+    """Stateful real-time EEG display filter in verified ADC millivolts.
+
+    A second-order-per-edge Butterworth band-pass produces a fourth-order
+    band-pass overall. The 60 Hz notch is a separate second-order IIR. States
+    persist across HID reports, so block boundaries do not create artefacts.
+    """
+
+    def __init__(self, fs=config.EEG_FS, channels=CHANNELS):
+        self.fs = float(fs)
+        self.channels = channels
+        self._notch_b, self._notch_a = iirnotch(NOTCH_HZ, NOTCH_Q, fs=self.fs)
+        self._band_sos = butter(
+            2, (FILTER_LOW_HZ, FILTER_HIGH_HZ), btype="bandpass",
+            fs=self.fs, output="sos")
+        self._notch_state = None
+        self._band_state = None
+
+    def process(self, count_rows):
+        counts = np.asarray(count_rows, dtype=np.float64)
+        if counts.ndim != 2 or counts.shape[1] != self.channels:
+            raise ValueError(f"expected rows with {self.channels} EEG channels")
+        adc_mv = counts * (ADC_VOLTS_PER_COUNT * 1000.0)
+        if self._notch_state is None:
+            self._notch_state = (lfilter_zi(self._notch_b, self._notch_a)[:, None]
+                                 * adc_mv[0][None, :])
+        notched, self._notch_state = lfilter(
+            self._notch_b, self._notch_a, adc_mv, axis=0, zi=self._notch_state)
+        if self._band_state is None:
+            self._band_state = (sosfilt_zi(self._band_sos)[:, :, None]
+                                * notched[0][None, None, :])
+        filtered, self._band_state = sosfilt(
+            self._band_sos, notched, axis=0, zi=self._band_state)
+        return adc_mv.tolist(), filtered.tolist()
 
 
 class EEGDashboardService:
@@ -94,13 +147,16 @@ class EEGDashboardService:
         self._last_report_mono = None
         self._reports = 0
         self._samples = 0
-        self._missed_reports = 0
+        self._delayed_report_periods = 0
         self._record_file = None
         self._record_writer = None
         self._record_path = None
         self._record_started_mono = None
         self._record_rows = 0
         self._pending_marker = ""
+        self._processor = None
+        self._gain_index = config.EEG_HID_GAIN_INDEX
+        self._sample_selector = config.EEG_HID_SAMPLE_SELECTOR
 
     def device_available(self):
         with self._lock:
@@ -115,6 +171,10 @@ class EEGDashboardService:
         gain_index = config.EEG_HID_GAIN_INDEX if gain_index is None else gain_index
         sample_selector = (config.EEG_HID_SAMPLE_SELECTOR if sample_selector is None
                            else sample_selector)
+        if sample_selector != config.EEG_HID_SAMPLE_SELECTOR:
+            raise ValueError(
+                f"정확한 필터 시간축을 위해 sampleSelector는 "
+                f"{config.EEG_HID_SAMPLE_SELECTOR}(256 Hz)만 지원합니다")
         with self._lock:
             if self._running:
                 return self.status()
@@ -123,9 +183,8 @@ class EEGDashboardService:
 
         device = self._device_factory(
             channels=config.EEG_HID_CHANNELS,
-            physical_pid=config.EEG_HID_PID,
+            max_channels=config.EEG_HID_MAX_CHANNELS,
             gain_index=gain_index,
-            mode=config.EEG_HID_MODE,
             sample_selector=sample_selector,
         )
         device.open()
@@ -150,7 +209,10 @@ class EEGDashboardService:
             self._last_report_mono = now_mono
             self._reports = 0
             self._samples = 0
-            self._missed_reports = 0
+            self._delayed_report_periods = 0
+            self._processor = EEGSignalProcessor(config.EEG_FS, CHANNELS)
+            self._gain_index = gain_index
+            self._sample_selector = sample_selector
             self._thread = threading.Thread(
                 target=self._capture_loop, name="polyg-dashboard-capture", daemon=True)
             self._thread.start()
@@ -207,6 +269,7 @@ class EEGDashboardService:
     def _ingest_report(self, rows, arrival):
         dt = 1.0 / config.EEG_FS
         first_sample_t = arrival - (len(rows) - 1) * dt
+        raw_adc_mv_rows, filtered_rows = self._processor.process(rows)
         with self._lock:
             if self._reports == 0:
                 # The first HID block was already accumulating inside the device
@@ -219,18 +282,29 @@ class EEGDashboardService:
                 interval = arrival - self._report_arrivals[-1]
                 expected = ROWS_PER_REPORT / config.EEG_FS
                 if interval > expected * 1.8:
-                    self._missed_reports += max(0, round(interval / expected) - 1)
+                    # D1WD10 input blocks expose no report sequence counter. A
+                    # long host-arrival interval can be USB loss or scheduler
+                    # delay, so report the observable delay periods without
+                    # claiming that samples were definitely lost.
+                    self._delayed_report_periods += max(
+                        0, round(interval / expected) - 1)
             self._report_arrivals.append(arrival)
             self._last_report_mono = arrival
             self._reports += 1
 
-            for index, values in enumerate(rows):
+            for index, (raw_counts, raw_adc_mv, filtered_mv) in enumerate(zip(
+                    rows, raw_adc_mv_rows, filtered_rows)):
                 sample_t = first_sample_t + index * dt
                 self._sequence += 1
-                clean_values = [int(value) for value in values]
-                self._rows.append((self._sequence, sample_t, clean_values))
+                clean_counts = [int(value) for value in raw_counts]
+                clean_raw_mv = [float(value) for value in raw_adc_mv]
+                clean_filtered_mv = [float(value) for value in filtered_mv]
+                self._rows.append((
+                    self._sequence, sample_t, clean_counts,
+                    clean_raw_mv, clean_filtered_mv))
                 self._samples += 1
-                self._write_record_row_locked(sample_t, clean_values)
+                self._write_record_row_locked(
+                    sample_t, clean_counts, clean_raw_mv, clean_filtered_mv)
             if self._record_file is not None:
                 self._record_file.flush()
 
@@ -253,7 +327,11 @@ class EEGDashboardService:
             writer = csv.writer(record_file)
             writer.writerow([
                 "timestamp_utc", "elapsed_s", "sequence",
-                *[f"ch{channel}" for channel in range(1, CHANNELS + 1)], "marker",
+                *[f"ch{channel}_count" for channel in range(1, CHANNELS + 1)],
+                *[f"ch{channel}_adc_mv_raw" for channel in range(1, CHANNELS + 1)],
+                *[f"ch{channel}_eeg_mv_0p5_45_notch60"
+                  for channel in range(1, CHANNELS + 1)],
+                "marker",
             ])
             self._record_file = record_file
             self._record_writer = writer
@@ -279,7 +357,7 @@ class EEGDashboardService:
             self._pending_marker = label
         return {"marker": label, "accepted": True}
 
-    def _write_record_row_locked(self, sample_t, values):
+    def _write_record_row_locked(self, sample_t, counts, raw_adc_mv, filtered_mv):
         if self._record_writer is None or self._started_mono is None:
             return
         elapsed = sample_t - self._started_mono
@@ -287,7 +365,9 @@ class EEGDashboardService:
         marker, self._pending_marker = self._pending_marker, ""
         self._record_writer.writerow([
             timestamp.isoformat(timespec="milliseconds"), f"{elapsed:.6f}",
-            self._sequence, *values, marker,
+            self._sequence, *counts,
+            *[f"{value:.9f}" for value in raw_adc_mv],
+            *[f"{value:.9f}" for value in filtered_mv], marker,
         ])
         self._record_rows += 1
 
@@ -319,7 +399,7 @@ class EEGDashboardService:
             running = self._running
             duration = now - self._started_mono if self._started_mono else 0.0
             recent_cutoff = now - 2.0
-            recent = [row for _seq, sample_t, row in self._rows if sample_t >= recent_cutoff]
+            recent = [item for item in self._rows if item[1] >= recent_cutoff]
             arrivals = list(self._report_arrivals)
             if len(arrivals) >= 2:
                 intervals = [b - a for a, b in zip(arrivals, arrivals[1:])]
@@ -327,7 +407,11 @@ class EEGDashboardService:
             else:
                 measured_fs = 0.0
             qualities = [
-                analyze_signal_quality([row[channel] for row in recent])
+                analyze_signal_quality(
+                    [item[4][channel] for item in recent],
+                    [item[2][channel] for item in recent],
+                    [item[3][channel] for item in recent],
+                )
                 for channel in range(CHANNELS)
             ]
             recording = self.recording_status_locked()
@@ -340,6 +424,7 @@ class EEGDashboardService:
                     "productId": f"0x{PID:04X}",
                     "transport": "USB HID",
                     "channels": CHANNELS,
+                    "physicalChannels": MAX_CHANNELS,
                     "reportBytes": REPORT_BYTES,
                 },
                 "acquisition": {
@@ -351,10 +436,24 @@ class EEGDashboardService:
                     "measuredFs": round(measured_fs, 1),
                     "reports": self._reports,
                     "samples": self._samples,
-                    "missedReportsEstimate": self._missed_reports,
+                    "delayedReportPeriodsEstimate": self._delayed_report_periods,
                     "lastReportAgeSeconds": round(last_age, 3) if last_age is not None else None,
                     "error": self._error,
-                    "units": "raw_count",
+                    "units": "mV_ADC_filtered",
+                },
+                "signal": {
+                    "displayUnit": "mV (ADC input)",
+                    "conversionVoltsPerCount": ADC_VOLTS_PER_COUNT,
+                    "rawEncoding": "D1WD10 offset-binary; marker bit removed",
+                    "pipeline": "real-time causal IIR",
+                    "bandpassHz": [FILTER_LOW_HZ, FILTER_HIGH_HZ],
+                    "bandpassOrder": 4,
+                    "notchHz": NOTCH_HZ,
+                    "notchQ": NOTCH_Q,
+                    "metricWindowSeconds": 2.0,
+                    "pgaGainIndex": self._gain_index,
+                    "pgaGain": PGA_GAINS[self._gain_index],
+                    "electrodeUvCalibrated": False,
                 },
                 "recording": recording,
                 "quality": qualities,
@@ -377,9 +476,9 @@ class EEGDashboardService:
                     {
                         "sequence": seq,
                         "elapsed": round(sample_t - start_mono, 6) if start_mono else 0,
-                        "values": values,
+                        "values": [round(value, 6) for value in filtered_mv],
                     }
-                    for seq, sample_t, values in selected
+                    for seq, sample_t, _counts, _raw_mv, filtered_mv in selected
                 ],
             }
 

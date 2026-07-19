@@ -59,29 +59,27 @@ EEG_SOURCE = "hid"         # "hid" = this PID 0x0010 device; "mock" | "serial" |
 EEG_PORT = "auto"          # or e.g. "/dev/cu.usbserial-XXXX"; run eeg_detect.py
 EEG_BAUD = 115200          # confirm from LXSDF PDF; PolyG-I is high-rate, try 921600 too
 
-# This physical unit is vendor-defined USB HID, not serial.  The command sequence
-# and block decoder were recovered from TeleScan's LXSM-D1WD6.dll and verified on
-# the connected device.  Selector 9 is the stable continuous mode measured here;
-# TeleScan's installed PolyG-I calibration declares a nominal 256 Hz rate.
+# This physical unit is vendor-defined USB HID, not serial. The exact command
+# sequence, marking-bit removal, offset-binary decoder, and voltage coefficient
+# were recovered from LXSM-D1WD10.dll and checked on the connected device.
 EEG_HID_VID = 0x0F1F
 EEG_HID_PID = 0x0010
 EEG_HID_CHANNELS = 8
+EEG_HID_MAX_CHANNELS = 16
 EEG_HID_GAIN_INDEX = 6
-EEG_HID_MODE = 0
-EEG_HID_SAMPLE_SELECTOR = 9
+EEG_HID_SAMPLE_SELECTOR = 8  # D1WD10: 2**8 = 256 Hz
 EEG_HID_STALL_TIMEOUT_S = 2.0
-EEG_HID_UV_PER_COUNT = 1.0  # relative counts; ErrP baseline normalization is scale-invariant
+EEG_HID_ADC_UV_PER_COUNT = -38.14697265625  # ADC input only; not electrode input
 
 # The device28 config describes 16 physical polygraph signals, but this vendor
-# DLL exposes fixed eight-channel acquisition blocks. Its first signal group is
-# EEG inputs 1..8. EEG_CHANNEL_MAP selects/reorders those eight output slots.
+# DLL exposes 16-channel acquisition blocks. Its first signal group is EEG
+# inputs 1..8. EEG_CHANNEL_MAP selects/reorders those eight output slots.
 EEG_TOTAL_CHANNELS = None  # LXSDF sources only: None = auto-detect; HID has 8 fixed slots
 EEG_CHANNEL_MAP = [0, 1, 2, 3, 4, 5, 6, 7]   # packet slot -> EEG ch 0..7
 EEG_CHANNELS = 8
-# TeleScan's installed PolyG-I file says 256 Hz, but this physical unit delivers
-# 64 rows every ~0.2843 s: 225.1 Hz sustained.  Use the measured clock so epochs,
-# filters, and missing-sample checks match reality rather than the nominal label.
-EEG_FS = 225
+# D1WD10 selector 8 is 256 Hz. Physical A/B capture measured 255.9–256.2 Hz;
+# each 1024-byte report contains 32 rows across 16 physical channels.
+EEG_FS = 256
 EEG_MIN_EPOCH_FRACTION = 0.80  # abort a decision if too many onset-locked samples are missing
 EEG_CONFIG_VERIFIED = False    # transport works; set True only after montage/rate signal validation
 

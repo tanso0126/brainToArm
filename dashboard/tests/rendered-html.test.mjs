@@ -20,7 +20,7 @@ test("server-renders the PolyG-I dashboard shell", async () => {
   const html = await response.text();
   assert.match(html, /<title>brainToArm · PolyG-I EEG Monitor<\/title>/i);
   assert.match(html, /PolyG-I Live Monitor/);
-  assert.match(html, /실시간 파형/);
+  assert.match(html, /실시간 EEG 파형/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
 
@@ -30,7 +30,9 @@ test("starter preview is removed and localhost API is explicit", async () => {
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
   assert.match(page, /http:\/\/127\.0\.0\.1:8765/);
-  assert.match(page, /raw_count/);
+  assert.match(page, /mV_ADC_filtered/);
+  assert.match(page, /공통 고정 축/);
+  assert.doesNotMatch(page, /채널별 자동/);
   assert.match(page, /requestAnimationFrame/);
   assert.match(page, /부드럽게 · 0\.45초/);
   assert.match(packageJson, /braintoarm-eeg-dashboard/);

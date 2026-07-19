@@ -497,3 +497,121 @@ interpolating acquisition samples.
 - `cd dashboard && npm test` — passed, including final production build and
   smooth-renderer source assertions.
 - `git diff --check` — passed.
+
+## Patch 15 — correct D1WD10 acquisition, calibrated ADC display, and fixed axes
+
+### Intent
+
+Replace the earlier D1WD6-based interpretation with the protocol that actually
+matches physical PID `0x0010`, then make every live comparison use a documented
+timebase, voltage unit, filter, and fixed visual scale. TeleScan itself does not
+need to run: its installed device DLL can be analyzed directly and the recovered
+behavior can be verified against the connected hardware.
+
+This patch supersedes Patch 12–14 statements that describe 8 physical channels,
+64 rows/report, approximately 225 Hz, D1WD6 initialization, or raw-count display.
+
+### Protocol and physical-device corrections
+
+- Identified official module `LXSM-D1WD10` as the PID `0x0010` implementation.
+  The official product-ID table maps PolyG-I to 16; D1WD6 was the wrong family.
+- Recovered the D1WD10 ADC decoder from installed `LXSM-D1WD10.dll` at
+  `0x10001950..0x1000199e`:
+  `(high - 0x80) * 256 + (low & 0xFE)`. The low bit is the marker bit and is no
+  longer misread as ADC data.
+- Corrected report shape to 512 words / 16 physical channels = 32 time rows per
+  1,024-byte HID report. Physical channels 1–8 are the EEG source group.
+- Replaced the old command sequence with STOP → max-channels 16 → sample
+  selector 8 → EEG-group PGA → START: `01 00 00`, `05 10 00`, `04 08 00`,
+  `0B <gain> 00`, `01 01 00`.
+- Used the D1WD10 definition `sample rate = 2^selector`; selector 8 is exactly
+  256 Hz. Repeated A/B physical captures measured approximately
+  255.93–256.22 rows/s and 0.125-second report cadence with the corrected
+  protocol. The previous approximately-225-Hz conclusion was an artifact of the
+  wrong module and row shape.
+- Compared PGA index 6 and 15 on the device. Index 15 produced more rail
+  saturation, so the documented PolyG-I default index 6 (×1.70) remains the UI
+  default. Gain is selectable only while acquisition is stopped.
+
+### Signal conversion and processing
+
+- Recovered the DLL float coefficient near `.rdata:0x1000A180` and implemented
+  `-1.25 / 32768 V/count`, matching the manual's fixed ADC input range.
+- Labeled this value honestly as **ADC-input mV**. It is not electrode-input µV:
+  the fixed analog preamplifier gain is neither published in the examined
+  material nor independently calibrated, so the UI does not invent a system
+  gain.
+- Added a stateful causal 60 Hz second-order notch (Q=30), followed by a
+  Butterworth 0.5–45 Hz band-pass (second order per edge, fourth order overall).
+  Filter state survives every 32-row HID boundary, preventing block artifacts.
+- Changed CSV sessions to retain raw D1WD10 count, raw ADC mV, and filtered ADC
+  mV for all eight EEG channels, plus the existing timestamps and event marker.
+- Added exact recent-window RMS, peak-to-peak, raw DC offset, and ADC-rail
+  clipping percentage. These values are explicitly not impedance or clinical
+  quality measurements.
+- Renamed the report-gap metric to delayed report periods. D1WD10 blocks contain
+  no sequence counter, so a long host-arrival interval cannot honestly prove
+  sample loss; the UI reports observable scheduling/USB delay without calling
+  it a dropped report.
+
+### Interface changes
+
+- Removed moving auto-scaling and per-window recentering. Every visible channel
+  uses the same user-selected fixed Y-axis and an explicit 0 mV baseline, making
+  amplitude comparable across channels and time.
+- Added fixed ranges from ±0.10 mV through ±5000 mV. The default is ±100 mV,
+  chosen from the connected unmounted device's current non-saturated channels;
+  the scale never changes itself. Out-of-range traces are clipped visually and
+  marked `OVER` without changing the underlying samples.
+- Preserved refresh-rate playback and the selectable 0.45 s smooth / 0.08 s
+  low-latency display buffer, now using the correct 256 Hz timestamps and
+  0.125-second physical report cadence.
+- Replaced the approximate spectrum with a 256-point Hann, one-sided
+  PSD normalized in `mV²/Hz`, on a fixed −80..40 dB axis. Delta, Theta, Alpha,
+  Beta, and Gamma percentages use the same fixed 0.5–45 Hz total-power basis.
+- Exposed D1WD10 protocol, physical/EEG channel counts, voltage coefficient,
+  active PGA, and exact filter definitions in the UI. Added the full RMS, p-p,
+  clipping, and raw-DC metrics to every channel row.
+- Hardened the status UI against an older API payload that lacks the new
+  `signal` object while a local service is being restarted.
+
+### Code and documentation
+
+- Reworked `laptop/polyg_hid.py`, `laptop/config.py`, `laptop/eeg_bridge.py`,
+  `laptop/eeg_dashboard.py`, and `laptop/validate.py` around D1WD10 invariants.
+- Expanded `laptop/test_pipeline.py` for exact command order, 16-channel report
+  shape, marker removal, offset-binary extremes, ADC conversion, stateful
+  32-row boundary equivalence, and 60 Hz rejection.
+- Updated the React dashboard, CSS, rendered-shell assertions, root README, and
+  dashboard README.
+- Rewrote `docs/EEG_DEVICE_COMMS.md` so the incorrect D1WD6/225-Hz findings
+  cannot be mistaken for current guidance; it records local binary evidence,
+  physical A/B measurements, formulas, limitations, and reproduction commands.
+
+### Physical and regression verification
+
+- Restarted the localhost acquisition service with the patched implementation.
+- Started the connected VID `0x0F1F` / PID `0x0010` PolyG-I at gain index 6.
+- After 3.3 seconds: nominal `256 Hz`, measured `256.0 Hz`, 26 reports, 832
+  time rows, and zero long arrival gaps. A later check measured `255.8 Hz` with
+  the stream still continuous. During CPU-heavy production builds, two delayed
+  host-arrival periods were observed; because the device has no report counter,
+  they are not asserted as data loss.
+- Confirmed the API reports 16 physical / 8 EEG channels, D1WD10 conversion,
+  filter metadata, PGA ×1.70, and filtered ADC-mV rows spaced by 0.003906 s.
+- The live health metrics correctly identify several currently unmounted inputs
+  as ADC-rail saturated; this is surfaced rather than hidden by auto-scale.
+- `python3 laptop/test_pipeline.py` — passed.
+- `python3 -m compileall -q laptop` — passed.
+- `cd dashboard && npm run lint` — passed.
+- `cd dashboard && npm test` — passed (production build and rendered-shell
+  tests).
+- `git diff --check` — passed.
+
+### Remaining physiological gate
+
+Communication, sample timing, ADC conversion, and display math are resolved.
+Before robot decisions, install the intended electrodes/reference/ground,
+eliminate rail-saturated or floating channels, map Fz/FCz/Cz empirically, and
+collect participant-specific labeled ErrP trials. `EEG_CONFIG_VERIFIED=False`
+remains intentional until those signal-level checks are complete.

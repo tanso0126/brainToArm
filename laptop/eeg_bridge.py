@@ -48,9 +48,9 @@ def _select_eeg(all_channels, convert=_raw_to_uv):
 
 
 def _polyg_raw_to_uv(raw):
-    # Absolute uV calibration is not available, but the ErrP pipeline normalizes
-    # against each session's resting baseline and is therefore scale-invariant.
-    return raw * config.EEG_HID_UV_PER_COUNT
+    # This is ADC-input uV, not electrode-input uV. The ErrP pipeline normalizes
+    # against each session's baseline, so the unknown fixed front gain cancels.
+    return raw * config.EEG_HID_ADC_UV_PER_COUNT
 
 
 class RingBuffer:
@@ -262,9 +262,8 @@ class EEGBridge:
     def _run_hid(self):
         with PolyGIHID(
                 channels=config.EEG_HID_CHANNELS,
-                physical_pid=config.EEG_HID_PID,
+                max_channels=config.EEG_HID_MAX_CHANNELS,
                 gain_index=config.EEG_HID_GAIN_INDEX,
-                mode=config.EEG_HID_MODE,
                 sample_selector=config.EEG_HID_SAMPLE_SELECTOR) as device:
             device.start()
             print(f"[eeg] hid VID=0x{config.EEG_HID_VID:04X} "

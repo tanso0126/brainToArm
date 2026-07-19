@@ -312,7 +312,7 @@ select { min-height: 34px; padding: 0 30px 0 9px; font-size: 11px; }
 .quality-list { padding: 4px 0; }
 .quality-row {
   width: 100%;
-  min-height: 38px;
+  min-height: 47px;
   display: grid;
   grid-template-columns: 9px 44px 1fr auto;
   align-items: center;
@@ -327,7 +327,7 @@ select { min-height: 34px; padding: 0 30px 0 9px; font-size: 11px; }
 .quality-row:last-child { border-bottom: 0; }
 .quality-row:hover, .quality-row.selected { background: rgba(103, 232, 197, .035); }
 .quality-row strong { font: 550 10px var(--font-mono), monospace; }
-.quality-row small { color: var(--faint); font: 9px var(--font-mono), monospace; }
+.quality-row small { display: flex; flex-direction: column; gap: 3px; color: var(--faint); font: 9px var(--font-mono), monospace; }
 
 .lower-grid {
   display: grid;

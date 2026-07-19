@@ -34,10 +34,10 @@ type QualityState = "waiting" | "present" | "flat" | "saturated" | "unstable";
 
 type Quality = {
   state: QualityState;
-  std: number;
-  peakToPeak: number;
+  rmsMv: number;
+  peakToPeakMv: number;
   clippingPercent: number;
-  mean: number;
+  dcOffsetMv: number;
 };
 
 type DashboardStatus = {
@@ -59,10 +59,24 @@ type DashboardStatus = {
     measuredFs: number;
     reports: number;
     samples: number;
-    missedReportsEstimate: number;
+    delayedReportPeriodsEstimate: number;
     lastReportAgeSeconds: number | null;
     error: string | null;
-    units: "raw_count";
+    units: "mV_ADC_filtered";
+  };
+  signal: {
+    displayUnit: string;
+    conversionVoltsPerCount: number;
+    rawEncoding: string;
+    pipeline: string;
+    bandpassHz: [number, number];
+    bandpassOrder: number;
+    notchHz: number;
+    notchQ: number;
+    metricWindowSeconds: number;
+    pgaGainIndex: number;
+    pgaGain: number;
+    electrodeUvCalibrated: boolean;
   };
   recording: {
     active: boolean;
@@ -78,10 +92,10 @@ type Recording = { filename: string; bytes: number; modifiedAt: string; download
 
 const EMPTY_QUALITY: Quality = {
   state: "waiting",
-  std: 0,
-  peakToPeak: 0,
+  rmsMv: 0,
+  peakToPeakMv: 0,
   clippingPercent: 0,
-  mean: 0,
+  dcOffsetMv: 0,
 };
 
 function formatDuration(seconds: number) {
@@ -184,7 +198,7 @@ function WaveformCanvas({
 
       const currentRows = rowsRef.current;
       const settings = settingsRef.current;
-      const left = 56;
+      const left = 88;
       const right = 16;
       const top = 16;
       const bottom = 28;
@@ -214,6 +228,7 @@ function WaveformCanvas({
       const laneHeight = plotHeight / shown.length;
       shown.forEach((channel, lane) => {
         const mid = top + laneHeight * (lane + 0.5);
+        const amplitude = laneHeight * 0.4;
         ctx.strokeStyle = channel === settings.selected ? "rgba(103, 232, 197, .22)" : "rgba(133, 168, 158, .08)";
         ctx.beginPath();
         ctx.moveTo(left, mid);
@@ -222,8 +237,18 @@ function WaveformCanvas({
         ctx.fillStyle = CHANNEL_COLORS[channel];
         ctx.font = `${channel === settings.selected ? 650 : 500} 11px var(--font-geist-mono)`;
         ctx.textAlign = "left";
-        ctx.fillText(`CH ${channel + 1}`, 10, mid + 4);
+        ctx.fillText(`CH ${channel + 1}`, 8, mid + 4);
+        ctx.fillStyle = "#607870";
+        ctx.font = "8px var(--font-geist-mono)";
+        ctx.textAlign = "right";
+        ctx.fillText(`+${settings.fixedScale.toFixed(2)}`, left - 5, mid - amplitude + 3);
+        ctx.fillText("0", left - 5, mid + 3);
+        ctx.fillText(`−${settings.fixedScale.toFixed(2)}`, left - 5, mid + amplitude + 3);
       });
+      ctx.fillStyle = "#78928a";
+      ctx.font = "8px var(--font-geist-mono)";
+      ctx.textAlign = "right";
+      ctx.fillText("mV ADC", left - 5, 9);
 
       if (!currentRows.length) {
         playheadRef.current = null;
@@ -231,7 +256,7 @@ function WaveformCanvas({
         ctx.fillStyle = "#78928a";
         ctx.font = "13px var(--font-geist-sans)";
         ctx.textAlign = "center";
-        ctx.fillText("측정을 시작하면 원시 파형이 표시됩니다", left + plotWidth / 2, height / 2);
+        ctx.fillText("측정을 시작하면 필터링된 EEG 파형이 표시됩니다", left + plotWidth / 2, height / 2);
         animationFrame = requestAnimationFrame(draw);
         return;
       }
@@ -272,9 +297,7 @@ function WaveformCanvas({
       shown.forEach((channel, lane) => {
         if (points.length < 2) return;
         const values = points.map((row) => row.values[channel]);
-        const center = values.reduce((sum, value) => sum + value, 0) / values.length;
-        const maxDelta = Math.max(1, ...values.map((value) => Math.abs(value - center)));
-        const scale = settings.fixedScale > 0 ? settings.fixedScale : Math.max(32, maxDelta * 1.12);
+        const scale = settings.fixedScale;
         const mid = top + laneHeight * (lane + 0.5);
         const amplitude = laneHeight * 0.39;
         ctx.strokeStyle = CHANNEL_COLORS[channel];
@@ -283,12 +306,19 @@ function WaveformCanvas({
         ctx.beginPath();
         points.forEach((row, index) => {
           const x = left + ((row.elapsed - start) / settings.windowSeconds) * plotWidth;
-          const y = mid - ((row.values[channel] - center) / scale) * amplitude;
+          const normalized = Math.max(-1, Math.min(1, row.values[channel] / scale));
+          const y = mid - normalized * amplitude;
           if (index === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
         });
         ctx.stroke();
         ctx.globalAlpha = 1;
+        if (values.some((value) => Math.abs(value) > scale)) {
+          ctx.fillStyle = "#fb7185";
+          ctx.font = "8px var(--font-geist-mono)";
+          ctx.textAlign = "right";
+          ctx.fillText("OVER", width - right - 3, mid - amplitude + 8);
+        }
       });
 
       ctx.fillStyle = "#6f8981";
@@ -304,23 +334,28 @@ function WaveformCanvas({
     return () => cancelAnimationFrame(animationFrame);
   }, []);
 
-  return <canvas ref={canvasRef} className="waveform-canvas" role="img" aria-label="8채널 EEG 실시간 원시 파형" />;
+  return <canvas ref={canvasRef} className="waveform-canvas" role="img" aria-label="고정 축 8채널 EEG 실시간 필터 파형" />;
 }
 
 function calculateSpectrum(rows: SampleRow[], channel: number, fs: number) {
-  let size = 256;
-  while (size > rows.length) size /= 2;
-  if (size < 64 || fs <= 0) return { bins: [] as { hz: number; power: number }[], bands: [] as { name: string; value: number }[] };
+  const size = 256;
+  if (rows.length < size || fs <= 0) return { bins: [] as { hz: number; db: number }[], bands: [] as { name: string; value: number }[] };
   const values = rows.slice(-size).map((row) => row.values[channel]);
   const mean = values.reduce((sum, value) => sum + value, 0) / size;
-  const bins: { hz: number; power: number }[] = [];
+  const bins: { hz: number; db: number }[] = [];
   const bandDefs = [
     ["Delta", 0.5, 4],
     ["Theta", 4, 8],
     ["Alpha", 8, 13],
     ["Beta", 13, 30],
+    ["Gamma", 30, 45],
   ] as const;
-  const sums = [0, 0, 0, 0];
+  const sums = bandDefs.map(() => 0);
+  const windowPower = Array.from({ length: size }, (_, n) => {
+    const weight = 0.5 - 0.5 * Math.cos((2 * Math.PI * n) / (size - 1));
+    return weight * weight;
+  }).reduce((sum, value) => sum + value, 0);
+  const df = fs / size;
   for (let k = 1; k < size / 2; k += 1) {
     const hz = (k * fs) / size;
     if (hz > 45) break;
@@ -332,10 +367,10 @@ function calculateSpectrum(rows: SampleRow[], channel: number, fs: number) {
       real += windowed * Math.cos(angle);
       imaginary -= windowed * Math.sin(angle);
     }
-    const power = real * real + imaginary * imaginary;
-    bins.push({ hz, power });
+    const psd = (2 * (real * real + imaginary * imaginary)) / (fs * windowPower);
+    bins.push({ hz, db: 10 * Math.log10(Math.max(psd, 1e-12)) });
     bandDefs.forEach(([, low, high], index) => {
-      if (hz >= low && hz < high) sums[index] += power;
+      if (hz >= low && hz < high) sums[index] += psd * df;
     });
   }
   const total = sums.reduce((sum, value) => sum + value, 0) || 1;
@@ -345,7 +380,7 @@ function calculateSpectrum(rows: SampleRow[], channel: number, fs: number) {
   };
 }
 
-function SpectrumCanvas({ bins }: { bins: { hz: number; power: number }[] }) {
+function SpectrumCanvas({ bins }: { bins: { hz: number; db: number }[] }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -359,7 +394,7 @@ function SpectrumCanvas({ bins }: { bins: { hz: number; power: number }[] }) {
       if (!ctx) return;
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
       ctx.clearRect(0, 0, bounds.width, bounds.height);
-      const left = 28;
+      const left = 42;
       const bottom = 24;
       const top = 12;
       const width = bounds.width - left - 8;
@@ -377,6 +412,18 @@ function SpectrumCanvas({ bins }: { bins: { hz: number; power: number }[] }) {
         ctx.textAlign = "center";
         ctx.fillText(String(hz), x, bounds.height - 7);
       });
+      const dbMin = -80;
+      const dbMax = 40;
+      [-80, -40, 0, 40].forEach((db) => {
+        const y = top + ((dbMax - db) / (dbMax - dbMin)) * height;
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(left + width, y);
+        ctx.stroke();
+        ctx.fillStyle = "#6f8981";
+        ctx.textAlign = "right";
+        ctx.fillText(String(db), left - 4, y + 3);
+      });
       if (!bins.length) {
         ctx.fillStyle = "#78928a";
         ctx.font = "12px var(--font-geist-sans)";
@@ -384,13 +431,10 @@ function SpectrumCanvas({ bins }: { bins: { hz: number; power: number }[] }) {
         ctx.fillText("스펙트럼 계산 대기", left + width / 2, top + height / 2);
         return;
       }
-      const logarithmic = bins.map((bin) => Math.log10(Math.max(bin.power, 1)));
-      const min = Math.min(...logarithmic);
-      const max = Math.max(...logarithmic);
       ctx.beginPath();
       bins.forEach((bin, index) => {
         const x = left + (bin.hz / 45) * width;
-        const normalized = (logarithmic[index] - min) / Math.max(0.001, max - min);
+        const normalized = (Math.max(dbMin, Math.min(dbMax, bin.db)) - dbMin) / (dbMax - dbMin);
         const y = top + height - normalized * height;
         if (index === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
@@ -409,13 +453,19 @@ function SpectrumCanvas({ bins }: { bins: { hz: number; power: number }[] }) {
       ctx.fillStyle = "#6f8981";
       ctx.textAlign = "right";
       ctx.fillText("Hz", bounds.width - 8, bounds.height - 7);
+      ctx.save();
+      ctx.translate(9, top + height / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.textAlign = "center";
+      ctx.fillText("dB(mV²/Hz)", 0, 0);
+      ctx.restore();
     };
     draw();
     const observer = new ResizeObserver(draw);
     observer.observe(canvas);
     return () => observer.disconnect();
   }, [bins]);
-  return <canvas ref={canvasRef} className="spectrum-canvas" role="img" aria-label="선택 채널의 0~45 헤르츠 상대 스펙트럼" />;
+  return <canvas ref={canvasRef} className="spectrum-canvas" role="img" aria-label="선택 채널의 고정 dB 축 파워 스펙트럼 밀도" />;
 }
 
 export default function Home() {
@@ -425,7 +475,8 @@ export default function Home() {
   const [selectedChannel, setSelectedChannel] = useState(0);
   const [visible, setVisible] = useState(() => Array(8).fill(true));
   const [windowSeconds, setWindowSeconds] = useState(5);
-  const [fixedScale, setFixedScale] = useState(0);
+  const [fixedScale, setFixedScale] = useState(100);
+  const [gainIndex, setGainIndex] = useState(6);
   const [renderDelayMs, setRenderDelayMs] = useState(450);
   const [displayPaused, setDisplayPaused] = useState(false);
   const [recordLabel, setRecordLabel] = useState("");
@@ -549,7 +600,7 @@ export default function Home() {
     }
   };
 
-  const fs = status?.acquisition.measuredFs || status?.acquisition.nominalFs || 225;
+  const fs = status?.acquisition.measuredFs || status?.acquisition.nominalFs || 256;
   const spectrum = useMemo(() => calculateSpectrum(rows, selectedChannel, fs), [rows, selectedChannel, fs]);
   const quality = status?.quality[selectedChannel] ?? EMPTY_QUALITY;
   const isRunning = Boolean(status?.acquisition.running);
@@ -572,7 +623,7 @@ export default function Home() {
             {!apiOnline ? "로컬 API 오프라인" : deviceReady ? "PolyG-I 연결됨" : "장치 미감지"}
           </div>
           {!isRunning ? (
-            <button className="primary-button" disabled={busy || !apiOnline || !deviceReady} onClick={() => perform("/api/acquisition/start")}>
+            <button className="primary-button" disabled={busy || !apiOnline || !deviceReady} onClick={() => perform("/api/acquisition/start", { gainIndex })}>
               <Play size={16} fill="currentColor" /> 측정 시작
             </button>
           ) : (
@@ -601,12 +652,12 @@ export default function Home() {
         <article className="metric-card">
           <div className="metric-icon"><Gauge size={17} /></div>
           <div><span>실측 샘플링</span><strong>{status?.acquisition.measuredFs ? `${status.acquisition.measuredFs.toFixed(1)} Hz` : "—"}</strong></div>
-          <small>명목 {status?.acquisition.nominalFs ?? 225} Hz</small>
+          <small>설정 {status?.acquisition.nominalFs ?? 256} Hz · D1WD10</small>
         </article>
         <article className="metric-card">
           <div className="metric-icon"><HardDrive size={17} /></div>
           <div><span>수신 샘플</span><strong>{(status?.acquisition.samples ?? 0).toLocaleString()}</strong></div>
-          <small>누락 추정 {status?.acquisition.missedReportsEstimate ?? 0} reports</small>
+          <small>긴 수신 간격 +{status?.acquisition.delayedReportPeriodsEstimate ?? 0} periods · 누락 단정 안 함</small>
         </article>
         <article className={`metric-card ${isRecording ? "recording" : ""}`}>
           <div className="metric-icon"><Square size={15} fill={isRecording ? "currentColor" : "none"} /></div>
@@ -619,8 +670,8 @@ export default function Home() {
         <article className="panel waveform-panel">
           <div className="panel-header waveform-header">
             <div>
-              <p className="panel-kicker"><span className={isRunning ? "live-dot" : "idle-dot"} />RAW STREAM · 8 CHANNEL</p>
-              <h2>실시간 파형</h2>
+              <p className="panel-kicker"><span className={isRunning ? "live-dot" : "idle-dot"} />EEG 0.5–45 HZ · NOTCH 60 HZ</p>
+              <h2>실시간 EEG 파형 · 공통 고정 축</h2>
             </div>
             <div className="toolbar">
               <label>렌더링
@@ -633,9 +684,14 @@ export default function Home() {
                   <option value={2}>2초</option><option value={5}>5초</option><option value={10}>10초</option>
                 </select>
               </label>
-              <label>스케일
+              <label>공통 Y축
                 <select value={fixedScale} onChange={(event) => setFixedScale(Number(event.target.value))}>
-                  <option value={0}>채널별 자동</option><option value={250}>±250 count</option><option value={1000}>±1,000 count</option><option value={5000}>±5,000 count</option><option value={30000}>±30,000 count</option>
+                  <option value={0.1}>±0.10 mV</option><option value={0.25}>±0.25 mV</option><option value={0.5}>±0.50 mV</option><option value={1}>±1.00 mV</option><option value={2.5}>±2.50 mV</option><option value={5}>±5.00 mV</option><option value={10}>±10.00 mV</option><option value={25}>±25.00 mV</option><option value={50}>±50.00 mV</option><option value={100}>±100.00 mV</option><option value={250}>±250.00 mV</option><option value={500}>±500.00 mV</option><option value={1000}>±1000.00 mV</option><option value={2500}>±2500.00 mV</option><option value={5000}>±5000.00 mV</option>
+                </select>
+              </label>
+              <label>EEG PGA
+                <select value={gainIndex} disabled={isRunning} onChange={(event) => setGainIndex(Number(event.target.value))}>
+                  <option value={4}>index 4 · ×1.00</option><option value={5}>index 5 · ×1.36</option><option value={6}>index 6 · ×1.70</option><option value={7}>index 7 · ×2.55</option><option value={8}>index 8 · ×3.40</option><option value={9}>index 9 · ×4.25</option><option value={10}>index 10 · ×5.67</option><option value={11}>index 11 · ×6.80</option><option value={12}>index 12 · ×8.50</option><option value={13}>index 13 · ×10.20</option><option value={14}>index 14 · ×11.90</option><option value={15}>index 15 · ×17.00</option>
                 </select>
               </label>
               <button className={`secondary-button ${displayPaused ? "active" : ""}`} onClick={toggleDisplayPause} disabled={!isRunning}>
@@ -654,24 +710,24 @@ export default function Home() {
               </div>
             ))}
           </div>
-          <p className="data-note"><Sparkles size={13} />화면은 {renderDelayMs / 1000}초 버퍼로 디스플레이 주사율에 맞춰 재생합니다. CSV 원본은 지연·보간 없이 저장되며 값은 μV가 아닌 ADC 원시 상대값입니다.</p>
+          <p className="data-note"><Sparkles size={13} />모든 채널은 같은 고정 Y축과 0 mV 기준선을 씁니다. 값은 D1WD10 전압계수로 환산한 ADC 입력 mV이며, 실시간 4차 0.5–45 Hz band-pass + 60 Hz notch 결과입니다.</p>
         </article>
 
         <aside className="analysis-column">
           <article className="panel spectrum-panel">
             <div className="panel-header compact">
-              <div><p className="panel-kicker">FREQUENCY · CH {selectedChannel + 1}</p><h2>상대 스펙트럼</h2></div>
+              <div><p className="panel-kicker">PSD · CH {selectedChannel + 1}</p><h2>파워 스펙트럼 밀도</h2></div>
               <span className={`quality-badge ${quality.state}`}>{qualityLabel(quality.state)}</span>
             </div>
             <SpectrumCanvas bins={spectrum.bins} />
             <div className="band-list">
               {spectrum.bands.length ? spectrum.bands.map((band) => (
                 <div className="band-row" key={band.name}><span>{band.name}</span><div><i style={{ width: `${Math.max(2, band.value)}%` }} /></div><strong>{band.value.toFixed(1)}%</strong></div>
-              )) : ["Delta", "Theta", "Alpha", "Beta"].map((band) => (
+              )) : ["Delta", "Theta", "Alpha", "Beta", "Gamma"].map((band) => (
                 <div className="band-row muted" key={band}><span>{band}</span><div><i /></div><strong>—</strong></div>
               ))}
             </div>
-            <p className="fine-print">Hann 창·0–45 Hz 상대 파워. 임상 판독이나 진단 지표가 아닙니다.</p>
+            <p className="fine-print">256점 Hann 창 · one-sided PSD(mV²/Hz) · 고정 −80~40 dB축. 밴드는 0.5–45 Hz 총 파워 대비 비율이며 진단 지표가 아닙니다.</p>
           </article>
 
           <article className="panel quality-panel">
@@ -681,12 +737,12 @@ export default function Home() {
                 <button className={`quality-row ${selectedChannel === index ? "selected" : ""}`} key={index} onClick={() => setSelectedChannel(index)}>
                   <span className="channel-color" style={{ background: CHANNEL_COLORS[index] }} />
                   <strong>CH {index + 1}</strong>
+                  <small><span>RMS {item.rmsMv.toFixed(3)} · p-p {item.peakToPeakMv.toFixed(3)} mV</span><span>clip {item.clippingPercent.toFixed(3)}% · raw DC {item.dcOffsetMv.toFixed(3)} mV</span></small>
                   <span className={`quality-state ${item.state}`}>{qualityLabel(item.state)}</span>
-                  <small>p-p {item.peakToPeak.toLocaleString()}</small>
                 </button>
               ))}
             </div>
-            <p className="fine-print warning"><AlertTriangle size={13} />이 표시는 평탄·포화 여부를 보는 신호 존재 프록시입니다. 전극 임피던스 측정값이 아닙니다.</p>
+            <p className="fine-print warning"><AlertTriangle size={13} />최근 2.0초 필터 출력의 RMS/p-p와 ADC rail 포화율을 계산합니다. 전극 임피던스 측정값은 아닙니다.</p>
           </article>
         </aside>
       </section>
@@ -728,13 +784,16 @@ export default function Home() {
             <div><dt>장치</dt><dd>{status?.device.name ?? "PolyG-I"}</dd></div>
             <div><dt>전송</dt><dd>{status?.device.transport ?? "USB HID"} · {status?.device.reportBytes ?? 1024} B/report</dd></div>
             <div><dt>식별자</dt><dd>{status?.device.vendorId ?? "0x0F1F"} : {status?.device.productId ?? "0x0010"}</dd></div>
-            <div><dt>데이터</dt><dd>8 × signed 16-bit · raw count</dd></div>
+            <div><dt>프로토콜</dt><dd>D1WD10 · 16 physical / 8 EEG</dd></div>
+            <div><dt>전압 환산</dt><dd>−1.25 / 32768 V/count</dd></div>
+            <div><dt>EEG PGA</dt><dd>index {status?.signal?.pgaGainIndex ?? gainIndex} · ×{status?.signal?.pgaGain?.toFixed(2) ?? "1.70"}</dd></div>
+            <div><dt>처리</dt><dd>BP 0.5–45 Hz (4th) · N60 Q30</dd></div>
           </dl>
-          <p className="fine-print">현재 프로토콜은 실기기 관찰로 검증한 HID 명령·블록 구조를 사용합니다. 절대 전압 환산과 임상적 정확도는 별도 교정 전까지 보장하지 않습니다.</p>
+          <p className="fine-print">ADC 입력 전압까지는 TeleScan D1WD10 DLL과 공식 문서에 맞춰 환산합니다. 전극 입력 µV는 장치의 고정 전치증폭 이득이 공개·교정되지 않아 표시하지 않습니다.</p>
         </article>
       </section>
 
-      <footer><span>localhost 전용 · 데이터는 이 Mac 밖으로 전송되지 않습니다.</span><span>PolyG-I acquisition core / 8 ch / raw signed int16</span></footer>
+      <footer><span>localhost 전용 · 데이터는 이 Mac 밖으로 전송되지 않습니다.</span><span>PolyG-I / D1WD10 / 256 Hz / 8 EEG / ADC mV</span></footer>
     </main>
   );
 }

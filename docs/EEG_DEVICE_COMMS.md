@@ -1,440 +1,224 @@
 # PolyG-I EEG — device communication findings
 
-Everything established about how the LAXTHA PolyG-I actually talks to the
-laptop, what works, what is ruled out, and what is still unknown. Written so
-another engineer (or agent) can continue without repeating the investigation.
+LAXTHA PolyG-I를 macOS에서 TeleScan 없이 직접 구동하기 위해 확인한 USB,
+HID 명령, 표본 형식, 전압 환산 및 표시 규칙이다. 이전 조사에서
+`LXSM-D1WD6.dll`을 적용한 내용은 잘못이었으며, 2026-07-19에 공식 D1WD10
+문서, 설치된 TeleScan 바이너리, 실제 장치 A/B 측정을 함께 사용해 바로잡았다.
 
-**Status in one line:** **resolved and working natively on macOS.** TeleScan's
-installed `LXSM-D1WD6.dll` revealed the initialization commands and report
-decoder; repeated live captures now receive continuous 8-channel data and stop
-the device cleanly.
+**현재 상태:** macOS에서 네이티브로 연결·시작·수신·정지된다. PolyG-I는
+16개 물리 입력 중 1–8번이 EEG이고, 현재 대시보드는 이 8개 채널을 정확히
+256 Hz로 표시한다.
 
-The earlier conclusion that Cmd0's MSB must be 1 was the decisive error. That
-rule belongs to LXSDF serial framing, while this PID `0x0010` HID protocol uses
-low command bytes such as `0x01`, `0x02`, `0x04`, and `0x0A`.
+## 1. 확인된 장치 정체
 
----
-
-## 1. Physical topology
-
-```
-MacBook (Apple silicon, macOS)
-  └─ USB-C port
-       └─ Belkin USB-C 7-in-1 Multiport Adapter   (idVendor 0x050D)
-            └─ VIA Labs USB2.0 Hub                (idVendor 0x2109)
-                 └─ PolyG-I LAXTHA Inc.           (idVendor 0x0F1F, idProduct 0x0010)
-```
-
-The PolyG-I connects by a **plain USB cable from the device body** to the hub.
-There is **no wireless dongle** — the "dongle" is just the USB-C hub adapter the
-MacBook needs because it has no USB-A port.
-
-The device is **bus powered and enumerates successfully**, so power/cabling are
-not the problem.
-
----
-
-## 2. USB identity (verified with `ioreg`)
-
-| Field | Value |
+| 항목 | 값 |
 |---|---|
-| USB Product Name | `PolyG-I LAXTHA Inc.` |
-| USB Vendor Name | `LAXTHA Inc.` |
-| idVendor | **0x0F1F** (3871) |
-| idProduct | **0x0010** (16) |
-| bDeviceClass | 0 (class defined at interface level) |
-| bcdUSB | 0x0110 (USB 1.1) |
-| Speed | Full Speed, 12 Mbps |
-| bNumConfigurations | 1 |
-| iSerialNumber | 0 (no serial string) |
-| **bInterfaceClass** | **3 = HID** |
-| bInterfaceSubClass / Protocol | 0 / 0 (not a boot device) |
-| bNumEndpoints | 2 |
-| Bound driver (macOS) | `AppleUserUSBHostHIDDevice` (OS built-in) |
+| 제품 | `PolyG-I LAXTHA Inc.` |
+| VID / PID | `0x0F1F` / `0x0010` (16) |
+| USB interface | vendor-defined HID, usage page `0xFF00` |
+| HID OUTPUT | 8 bytes (명령) |
+| HID INPUT | 1,024 bytes (512 ADC words) |
+| 물리 채널 | 16 |
+| EEG 채널 | 물리 채널 1–8 |
+| 보고서당 시간행 | 512 words / 16 = 32 rows |
+| 표본률 | selector 8 = `2^8` = 256 Hz |
 
-Reproduce:
+공식 `LXSM-D1WD10` 개발자 문서의 product-ID 표는 PolyG-I를 16으로
+명시한다. 같은 문서에서 표본률은 `2^selector`, PolyG-I 최대 물리 채널은
+16, 첫 8개 source는 EEG로 정의한다. 따라서 PID 숫자와 이름이 비슷하다는
+이유로 D1WD6 모듈을 고른 이전 추론은 성립하지 않는다.
+
+물리 연결은 다음과 같다.
+
+```text
+MacBook → USB-C hub → PolyG-I (USB HID, VID 0x0F1F / PID 0x0010)
+```
+
+별도 동글이나 가상 COM 포트는 없다. macOS 기본 HID 드라이버와 `hidapi`로
+직접 연다.
 
 ```bash
 ioreg -p IOUSB -w0 -l -r -n "PolyG-I LAXTHA Inc."
-ioreg -p IOService -w0 -l -r -c IOUSBHostInterface | grep -A20 -i laxtha
+python3 -m pip install hidapi
+python3 laptop/eeg_detect.py --seconds 5
 ```
 
----
+## 2. HID report descriptor
 
-## 3. HID report descriptor (decoded)
+장치 descriptor의 핵심은 다음과 같다.
 
-Raw descriptor from IOKit:
-
-```
-06 00 FF 09 01 A1 01 19 01 29 01 15 00 26 FF 00 95 08 75 08 91 02
+```text
+06 00 FF 09 01 A1 01
+19 01 29 01 15 00 26 FF 00 95 08 75 08 91 02
 19 01 29 01 15 00 26 FF 00 95 80 75 40 81 02 C0
 ```
 
-Decoded:
+- OUTPUT: `8 × 8 bit` = 8 bytes
+- INPUT: `128 × 64 bit` = 1,024 bytes
+- report ID는 descriptor에 없다. `hidapi.write()` 버퍼에는 API 규칙에 따라
+  선두 `0x00` report-ID 자리를 붙이므로 총 9 bytes를 넘긴다.
+- macOS `hidapi.read()`는 1,024-byte payload만 돌려준다. Windows 캡처처럼
+  선두 0이 포함된 1,025-byte 입력도 디코더가 허용한다.
 
-```
-06 00 FF   Usage Page (Vendor-Defined 0xFF00)
-09 01      Usage (0x01)
-A1 01      Collection (Application)
-  19 01 29 01 15 00 26 FF 00     Usage 1..1, Logical 0..255
-  95 08 75 08 91 02              OUTPUT: ReportCount 8  x ReportSize 8 bit  = 8 bytes
-  19 01 29 01 15 00 26 FF 00     Usage 1..1, Logical 0..255
-  95 80 75 40 81 02              INPUT : ReportCount 128 x ReportSize 64 bit = 1024 bytes
-C0         End Collection
-```
+장치는 열기만 하면 데이터를 보내지 않는다. 아래 초기화 명령이 필요하다.
 
-Consequences:
+## 3. D1WD10 명령 형식과 시작 순서
 
-- **OUTPUT report = 8 bytes** → host → device commands.
-- **INPUT report = 1024 bytes** → device → host stream (this is where EEG data
-  will arrive). Matches IOKit `MaxInputReportSize = 1024`, `MaxOutputReportSize = 8`.
-- No Report IDs are declared, so hidapi writes need a leading `0x00` byte.
-- `ReportInterval = 1000` µs (1 ms polling).
-- Vendor-defined usage page `0xFF00` — a raw data pipe, not a keyboard/mouse.
+모든 vendor payload는 다음 8 bytes이다.
 
----
-
-## 4. What works on macOS
-
-The device **opens natively with no driver install and no special permission**:
-
-```bash
-pip install hidapi
-```
-
-```python
-import hid
-d = hid.device()
-d.open(0x0F1F, 0x0010)          # succeeds
-print(d.get_manufacturer_string())   # 'LAXTHA Inc.'
-print(d.get_product_string())        # 'PolyG-I LAXTHA Inc.'
-```
-
-`hid.enumerate()` reports:
-
-```
-vendor_id: 3871, product_id: 16, manufacturer_string: 'LAXTHA Inc.',
-product_string: 'PolyG-I LAXTHA Inc.', usage_page: 65280, usage: 1,
-interface_number: 0, path: b'DevSrvsID:...'
-```
-
-Writes are accepted by the OS (`write()` returns the byte count).
-
-**This means Windows is not required.** The earlier plan's "Path B" (a Windows
-box running `LXSMWD12.dll` and forwarding over TCP) is unnecessary.
-
----
-
-## 5. Passive behavior versus initialized streaming
-
-- 6 s non-blocking read: **0 reports**.
-- 10 s blocking read (`timeout_ms=10000`): **0 bytes**.
-- `get_feature_report(0)` and `(1)`: **read error** (no feature reports).
-
-So the device powers up, enumerates, and accepts an open, but correctly transmits
-nothing until initialized. IOKit later showed one INPUT report per earlier probe,
-which also disproved the original "completely silent" interpretation.
-
-With the recovered initialization sequence, a 3-second native capture produced:
-
-```
-PASS: 10 reports, 640 8-channel samples in 3.00s
-median report interval=0.2843s (~225.1 sample rows/s)
-```
-
-Every INPUT report is 1,024 bytes. Repeated starts and stops are deterministic.
-
----
-
-## 6. PolyG-I HID command and input formats — recovered
-
-`LXSM-D1WD6.dll` constructs every command as an 8-byte HID OUTPUT payload:
-
-```
+```text
 command, arg1, arg2, 00, 00, 00, 00, 00
 ```
 
-hidapi requires a leading report-ID byte, so the actual `write()` buffer is nine
-bytes: `00 | command arg1 arg2 00 00 00 00 00`.
+현재 PolyG-I의 정확한 초기화 순서는 다음과 같다.
 
-Verified initialization for this PolyG-I:
+| 순서 | payload 앞 3 bytes | 의미 |
+|---:|---|---|
+| 1 | `01 00 00` | STOP / 이전 stream 정리 |
+| 2 | `05 10 00` | 최대 물리 채널 16 설정 |
+| 3 | `04 08 00` | selector 8, 256 Hz 설정 |
+| 4 | `0B 06 00` | source group 0(EEG 1–8)의 PGA index 6 설정 |
+| 5 | `01 01 00` | START |
 
-| purpose | 3 meaningful bytes | evidence |
-|---|---|---|
-| stop/reset prior stream | `01 00 00` | `Stop_Stream` export |
-| mode 0 | `0A 00 00` | `Set_ModeChange(0)` |
-| physical PID 16, gain index 6 | `02 10 09` | `Set_PGAs(16, 6)` stores `15-6` |
-| working sample timer | `04 01 D3` | `Set_SampleFreq(9)` |
-| start | `01 01 00` | `Start_Stream` export |
+정지/예외 cleanup은 항상 `01 00 00`을 보낸다. `0x0B`의 인자는
+`arg1=gain index`, `arg2=source group`이다. 기본 index 6은 공식 표에서
+PGA ×1.70이다. 대시보드에서 측정 정지 중 0–15를 선택할 수 있다.
 
-The full order is STOP → mode → PID/gain → timer → START. Sending START alone
-can produce only one response block instead of the continuous configured stream.
+### 실제 장치 A/B 검증
 
-The DLL also exposes timer selectors 7 (`04 07 48`) and 8 (`04 03 A4`). On this
-unit selector 9 is the stable high-rate mode. Although TeleScan's `polyg-i.txt`
-labels the calibration 256 Hz, sustained USB delivery measured 225.1 rows/s, so
-the application uses the measured 225 Hz clock for epoch timing.
+- 잘못된 D1WD6 명령 및 8채널 해석: 약 225 rows/s로 보이는 비정상 cadence와
+  맞지 않는 값이 관측됐다.
+- 위 D1WD10 순서 및 16채널 해석: 반복 측정에서 약 255.93–256.22 rows/s,
+  보고서 간격 약 0.125 s(32 rows / 256 Hz)를 얻었다.
+- gain index 6과 15를 비교하면 15에서 포화가 더 늘었다. 초기 설정 파일과
+  동작 여유를 고려해 기본값은 6으로 유지한다.
 
-### INPUT report decoder
+따라서 애플리케이션 시간축은 실측값을 임의로 225 Hz에 맞추지 않고 명세의
+정확한 256 Hz를 사용한다. 화면의 measured rate는 별도로 보여 전송 상태를
+감시한다.
 
-`LXSM-D1WD6.dll` reads 1,025 bytes on Windows (report ID plus 1,024-byte payload),
-skips the ID, and decodes 512 consecutive words:
+## 4. INPUT decoder
+
+설치된 다음 파일을 정적으로 분석했다.
+
+```text
+~/Library/Application Support/CrossOver/Bottles/Steam/drive_c/
+Program Files (x86)/TeleScan/LXSM-D1WD10.dll
+```
+
+`0x10001950..0x1000199e`의 변환 루프는 2 bytes를 다음처럼 복원한다.
 
 ```python
-word = (((high_byte - 8) & 0xFF) << 8) | low_byte
-sample = word - 65536 if word & 0x8000 else word
+count = (high_byte - 0x80) * 256 + (low_byte & 0xFE)
 ```
 
-The DLL treats the result as 64 time rows × 8 interleaved acquisition channels.
-macOS hidapi already removes the report ID and returns exactly 1,024 bytes.
+- `0x80`은 offset-binary 중심값이다.
+- low byte의 bit 0은 ADC가 아니라 marking bit이므로 `& 0xFE`로 제거한다.
+- 1,024 bytes = 512 words이고, 16 물리 채널로 나누면 보고서당 32시간행이다.
+- 각 행에서 앞 8개 값만 EEG 대시보드로 보낸다. 나머지는 ECG/EMG/EOG 등
+  PolyG-I의 다른 source group이다.
 
-### Why the original probe failed
+이 구현은 [`laptop/polyg_hid.py`](../laptop/polyg_hid.py)에 있다.
 
-The original investigation incorrectly applied the LXSDF Cmd0 MSB rule and only
-tried `0x80–0xFF`. It used `Cmd1 = Cmd2 = 0x00`, in both placements
-inside the 8-byte OUTPUT report:
+## 5. 전압 환산: 가능한 것과 불가능한 것
 
-| layout | report bytes | result |
-|---|---|---|
-| head | `00 | c0 c1 c2 00 00 00 00 00` | no response (128 tries) |
-| tail | `00 | 00 00 00 00 00 c0 c1 c2` | no response (128 tries) |
+D1WD10 DLL의 `.rdata:0x1000A180`에는 다음 float 계수가 들어 있다.
 
-(leading `00` = hidapi report-ID byte). The real commands begin with `01`, `02`,
-`04`, and `0A`, so none was present in that search space. Blind brute force was
-neither necessary nor appropriate; static analysis supplied the exact bytes.
-
----
-
-## 7. Ruled out — and why
-
-### 7.1 Virtual COM port (the old "Path A") — WRONG for this unit
-
-No `/dev/cu.*` or `/dev/tty.usb*` node ever appears. That is **correct
-behaviour**, not a fault: this unit is the HID variant.
-
-LAXTHA ships **two USB variants**. Their own driver package
-(`github.com/LAXTHA/DeviceDriver` → `LXUSBCDC.zip` → `LXUSBCDC.inf`) binds:
-
-```
-[DeviceList.NTx86]
-%DESCRIPTION%=DriverInstall, USB\VID_0F1F&PID_002A     ; -> usbser.sys
-DESCRIPTION="LX USBCDC"
-SERVICE="USB UART"
+```text
+-3.814813680946827e-05 V/count ≈ -1.25 / 32768 V/count
 ```
 
-- **PID 0x002A** = CDC variant → appears as a virtual COM port (usbser.sys).
-- **PID 0x0010** = our unit → **HID**, never a COM port on any OS.
+공식 문서 역시 DLL float output을 PGA 설정과 무관한 ADC 입력 범위
+`-1.25..+1.25 V`로 설명한다. 따라서 화면과 CSV의 ADC 입력 전압은 다음처럼
+고정 환산한다.
 
-So `EEG_SOURCE="serial"` can never work for this hardware.
-
-### 7.2 TeleScan under CrossOver/Wine — IMPOSSIBLE
-
-TeleScan is installed in the CrossOver bottle named `Steam`:
-
-```
-~/Library/Application Support/CrossOver/Bottles/Steam/drive_c/Program Files (x86)/TeleScan
+```python
+adc_mv = count * (-1.25 / 32768) * 1000
 ```
 
-It launches and runs, but reports **"device connection failed"**. Reason —
-Wine's HID enumeration in that bottle contains only:
+low bit을 marking에 사용하므로 실질 전압 간격은 약 0.0762939 mV이다.
 
-```
-HKLM\System\CurrentControlSet\Enum\HID\VID_2563&PID_0575
-HKLM\System\CurrentControlSet\Enum\HID\VID_845E&PID_0001
-HKLM\System\CurrentControlSet\Enum\HID\VID_845E&PID_0002
-```
+**중요한 한계:** 이것은 전극 입력 µV가 아니라 **ADC 입력 mV**이다. 전극과
+ADC 사이의 고정 전치증폭 이득이 공식 D1WD10 자료에 수치로 제공되지 않았고
+독립 교정도 하지 않았으므로, 임의 계수를 곱해 µV라고 표시하지 않는다.
+PGA ×1.70만으로 전체 system gain을 역산하는 것도 잘못이다.
 
-`VID_0F1F&PID_0010` is **absent**. Wine's macOS HID backend only exposes
-Generic-Desktop usage pages (gamepads/joysticks) and filters out
-vendor-defined page `0xFF00`. **This is not fixable by configuration.**
+## 6. 실시간 처리 및 그래프 규칙
 
-Verify:
+`laptop/eeg_dashboard.py`는 보고서 경계를 넘어 상태를 유지하는 causal IIR
+필터를 사용한다.
+
+1. 60 Hz notch, 2차, Q=30
+2. Butterworth 0.5–45 Hz band-pass: edge당 2차, 전체 4차
+
+UI/CSV는 다음 값을 구분한다.
+
+- 원시 D1WD10 ADC count
+- 환산된 원시 ADC mV
+- 위 필터를 통과한 ADC mV
+
+파형은 모든 채널에 **동일한 고정 Y축**과 0 mV 기준선을 쓴다. 새 데이터가
+들어올 때마다 auto-scale하거나 채널별로 중심을 옮기지 않는다. 사용자가
+고른 고정 범위 안에서만 그리므로 시간·채널 사이의 진폭을 직접 비교할 수
+있다. 표본은 256 Hz 시간축으로 연속 재생하며, HID 보고서가 0.125초마다
+묶여 와도 canvas가 보고서 단위로 점프하지 않도록 짧은 display buffer와
+브라우저 refresh animation을 쓴다. 이 보간은 표시 위치에만 적용되고 CSV
+표본을 생성하거나 바꾸지 않는다.
+
+스펙트럼은 선택 채널의 최근 데이터에 256-point Hann window를 적용한
+one-sided PSD(`mV²/Hz`)다. 축은 항상 -80..40 dB로 고정하고 Delta/Theta/
+Alpha/Beta/Gamma는 0.5–45 Hz 총 power 대비 비율로 표시한다.
+
+품질 카드의 RMS, peak-to-peak, DC offset, rail clipping %는 최근 2초 표본에서
+직접 계산한다. 이는 접촉 임피던스나 임상 판정이 아니다. ADC rail에 닿으면
+그래프와 카드에 포화를 명확히 표시한다.
+
+## 7. TeleScan과 CrossOver
+
+TeleScan UI가 장치를 표시하거나 그래프를 띄울 필요는 없다. 앱 실행 대신
+설치 DLL의 코드·상수·설정 파일을 분석했으며, 복원한 동작을 실제 장치에서
+검증했다.
+
+CrossOver/Wine에서 TeleScan이 `VID_0F1F&PID_0010`을 열지 못하는 것은 현재
+bottle의 HID 열거에 vendor-defined usage page `0xFF00` 장치가 들어오지 않기
+때문이다. 이 프로젝트는 화면 자동화나 Wine 설정에 의존하지 않는다.
+
+또한 PID `0x002A`용 LAXTHA USB CDC 드라이버는 이 PID `0x0010` 장치와 다른
+변형이다. `/dev/cu.*`가 생기지 않는 것은 정상이며 `EEG_SOURCE="serial"`은
+이 장치에 사용하지 않는다. LXSDF parser도 mock/serial/TCP 호환 경로용일 뿐,
+PID `0x0010`의 1,024-byte HID report에는 적용하지 않는다.
+
+## 8. 재현 및 검증
 
 ```bash
-CX=/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine
-"$CX" --bottle "Steam" reg query 'HKLM\System\CurrentControlSet\Enum\HID'
-```
+# 장치 식별
+ioreg -p IOUSB -w0 -l -r -n "PolyG-I LAXTHA Inc."
 
-#### Side fix that was needed to get TeleScan to launch at all
-
-TeleScan prompts *"<Visual C++ 2015 Redistributable(x86)> will be installed!"*
-and the install is then blocked as a duplicate. Cause: the bottle already has a
-**newer** VC++ runtime (v14.51 / 2022), so the 2015 (14.0) installer refuses;
-the actual runtime DLLs (`msvcp140.dll`, `vcruntime140.dll`, `ucrtbase.dll`,
-`concrt140.dll`) are already present in both `system32` and `syswow64`. The
-install is therefore unnecessary. Fix applied:
-
-```bash
-CX=/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine
-K='HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x86'
-"$CX" --bottle "Steam" reg add "$K" /v Installed /t REG_DWORD /d 1 /f
-"$CX" --bottle "Steam" reg add "$K" /v Major /t REG_DWORD /d 14 /f
-"$CX" --bottle "Steam" reg add "$K" /v Minor /t REG_DWORD /d 51 /f
-"$CX" --bottle "Steam" reg add "$K" /v Bld /t REG_DWORD /d 36247 /f
-"$CX" --bottle "Steam" reg add "$K" /v Version /t REG_SZ /d "v14.51.36247.00" /f
-
-# then launch the exe directly, bypassing the prerequisite wrapper:
-"$CX" --bottle "Steam" --wait-children "C:/Program Files (x86)/TeleScan/TeleScan.exe"
-```
-
-(Only worth doing on a machine where Wine *can* see the device — i.e. not this
-one. Recorded for completeness.)
-
-### 7.3 Vendor Windows APIs don't cover PolyG
-
-- **LXDeviceAPI** (`LXE64_LXDeviceAPI_DeveloperManual_en.pdf`) has exactly the
-  functions we'd want (`StartStream`, `StopStream`, `GetStreamData`,
-  `SetSampleFrequency`, …) but its *Supporting Devices* appendix lists only
-  QEEG-32FX and QEEG-64FX(8…64ch). **PolyG-I is not supported.**
-- **LXSMWD12** (`LXE33_ubpulse_USBHID_Developer_Manual_LXSMWD12_en.pdf`) is
-  "ubpulse HRV API … USB HID communication" and covers PIDs 33 / 58 / 56 only.
-  It does confirm the architecture: *"USB HID Class Driver (OS default driver)"* —
-  i.e. the vendor DLL is a thin wrapper over ordinary HID, which is exactly what
-  we already do natively on macOS.
-
-### 7.4 Static analysis of TeleScan — completed enough to solve acquisition
-
-Installed TeleScan components relevant to devices:
-
-| File | Role |
-|---|---|
-| `TeleScan.exe` | contains the device table; the only `LXSM*` name string in it is `LXSMWD4` |
-| `LXEXDLL_DEVICESELECT.dll` | holds the device-name list (`PolyG-U`, **`PolyG-I`**, `PolyG-E`, `PolyG-A`, QEEG…, ubpulse…) |
-| `LXSM-D1WD5/6/7/8/10.dll`, `LXSMWD2/5/6/7/8.dll` | **HID** device modules — all import `hid.dll`, `HidD_*`, `HidP_*`, `SetupDiGetClassDevs` |
-| `LXSMWD4.dll` | **serial** module — uses `SetCommState`, `SetCommTimeouts`, `SetupComm` (serves the CDC/PID-0x002A models, not ours) |
-| `LXDeviceAPI.dll` | modern API, pushes PIDs 0x04 / 0x06 / 0x42 |
-| `SLABHIDDevice.dll`, `ftd2xx.dll` | Silicon Labs HID and FTDI helpers |
-
-`deviceIDinfo.txt` maps PolyG-I to TeleScan device 28, and
-`device/device28config.sys` identifies physical PID 16, a 16-signal polygraph,
-initial gain index 6, and the first eight signals as EEG. `LXEXDLL_D1WD6.dll` is
-the only extension in this family with `SetDeviceID` and `SetModeChange`; it
-imports `LXSM-D1WD6.dll` directly.
-
-Disassembling the small exported functions in `LXSM-D1WD6.dll` recovered:
-
-- command buffer construction at RVA `0x1370`;
-- PID/gain command at `Set_PGAs` RVA `0x1550`;
-- sample timer table at `Set_SampleFreq` RVA `0x13D0`;
-- stop at RVA `0x1690` and start at RVA `0x1870`;
-- ReadFile size `0x401`, 512-word conversion loop, and the eight-channel ×
-  64-row memory layout.
-
-Those results were then verified against the live device before being added to
-the codebase. No modification of TeleScan or Windows execution was required.
-
-Note: the installer `TeleScan_Setup.exe` is a **Setup Factory** package
-(`irsetup.exe` + `lua5.1.dll`); 7-Zip cannot open it and only installer-infra PEs
-are stored uncompressed in its overlay. Extraction is unnecessary anyway — the
-app is already installed in the bottle.
-
----
-
-## 8. LXSDF protocol reference (not used by this HID stream)
-
-The stream format is **LXSDF T2A** ("LX Serial Data Format"), documented at
-<http://laxtha.net/packet-lxsdf-t2a/> and in `github.com/LAXTHA/LXSDF`.
-
-Stream-mode Tx packet, one byte per index:
-
-| index | value | meaning |
-|---|---|---|
-| 0 | 255 (0xFF) | SyncByte0 |
-| 1 | 254 (0xFE) | SyncByte1 |
-| 2 | 0–15 | PPD — Packet Property Data (0–15 = stream mode; 16–254 = non-stream) |
-| 3 | 0–254 | PUD0 |
-| 4 | 0–255 | **PC — Packet Count** (+1 per packet; use for drop detection) |
-| 5 | 0–253 | PUD1 |
-| 6 | 0–255 | PCD — Packet Cyclic Data |
-| 7 | 0–253 | CRD (bit 6) / PUD2 (bits 5–3) / PCDT (bits 2–0) |
-| 8 | 0–253 | PSD1 — channel 0 **high** byte |
-| 9 | 0–255 | PSD0 — channel 0 **low** byte |
-| 10, 11 | | channel 1 high, low |
-| … | | 2 bytes per channel, high then low |
-
-Sync bytes `FF FE` occur only at a packet start (high bytes are constrained to
-≤253), so a receiver resynchronises by scanning for that pair.
-
-Other useful details from the spec:
-
-- `PCD[28]` = **number of channels** in the packet's stream area.
-- `PCD[27]` = **number of samples** in the packet's stream area.
-- When `PCDT = 0`, **PC wraps at 31**, not 255. ⚠️ `laptop/lxsdf.py` currently
-  assumes 8-bit wraparound for drop counting — revisit once the real PCDT is known.
-- `ComPath` values: 0 = UART, 1 = USB CDC, 2 = Bluetooth SPP, 3 = BLE SPS.
-
-`laptop/lxsdf.py` implements this framing for mock, CDC/serial, and TCP
-compatibility sources. It must **not** parse PID `0x0010` HID reports: live blocks
-contain no `FF FE` headers, and the vendor DLL confirms the separate raw format.
-
----
-
-## 9. Implemented codebase changes
-
-1. `EEG_SOURCE="hid"` selects native PID `0x0010` acquisition.
-2. `laptop/polyg_hid.py` owns exact discovery, command writes, report decoding,
-   and deterministic STOP cleanup.
-3. `EEGBridge` timestamps the 64 decoded rows per report and feeds the existing
-   scale-invariant ErrP pipeline without using `LXSDFParser`.
-4. `eeg_detect.py` performs a bounded live HID capture by default and preserves
-   an explicit `--port` serial compatibility mode.
-5. `requirements.txt` includes `hidapi`; validation understands the HID settings.
-6. Unit tests cover command length, high-byte bias, signed conversion, optional
-   Windows report ID, and malformed report rejection.
-
----
-
-## 10. Remaining signal-level validation
-
-USB communication is no longer blocked. The remaining work is physiological
-calibration, not transport reverse engineering:
-
-1. Mount the real electrodes and confirm which acquisition indices correspond
-   to Fz/FCz/Cz for `ERRP_FRONTOCENTRAL`.
-2. Observe known signal changes/artifacts per electrode and verify no channel is
-   flat, duplicated by cabling, or saturated.
-3. Re-measure sustained row rate during a longer mounted session; keep `EEG_FS`
-   aligned to the physical clock.
-4. Record participant-specific labeled ErrP trials and train/validate the model.
-5. Only then set `EEG_CONFIG_VERIFIED=True`; the guard is intentionally still
-   false even though raw input now works.
-
----
-
-## 11. Reproduction cheat-sheet
-
-```bash
-# 1. Is the device present and what is it?
-ioreg -p IOUSB -w0 -l | grep -iE '"USB Product Name"|idVendor|idProduct'
-
-# 2. Interface class (3 = HID) and report descriptor
-ioreg -p IOService -w0 -l -r -c IOUSBHostInterface | grep -A25 -i laxtha
-
-# 3. Any serial port? (expected: none for PID 0x0010)
-ls /dev/cu.* /dev/tty.usb* 2>/dev/null
-
-# 4. Start, capture, decode, report cadence/ranges, and STOP safely
+# 제한 시간 동안 실제 시작/수신/정지
 python3 laptop/eeg_detect.py --seconds 5
 
-# 5. Exercise the exact background bridge used by the application
-python3 laptop/eeg_bridge.py
+# 전체 단위·통합 테스트
+python3 laptop/test_pipeline.py
 
-# 6. Confirm Wine cannot see it (historical diagnosis only)
-CX=/Applications/CrossOver.app/Contents/SharedSupport/CrossOver/bin/wine
-"$CX" --bottle "Steam" reg query 'HKLM\System\CurrentControlSet\Enum\HID'
+# 로컬 대시보드
+python3 laptop/eeg_dashboard.py
 ```
 
----
+USB transport와 ADC 입력 환산은 해결됐다. 로봇팔 ErrP에 쓰기 전에는 실제
+전극 장착 상태에서 Fz/FCz/Cz mapping, reference/ground 배치, 각 채널 포화,
+피험자별 labeled ErrP 데이터를 별도로 검증해야 한다. 이 조건이 확인될
+때까지 `EEG_CONFIG_VERIFIED=False` 안전 gate는 유지한다.
 
-## 12. Sources
+## 9. 출처
 
-- PolyG-I product page — <http://www.laxtha.com/ProductView.asp?Model=PolyG-I>
-- LXSDF spec repo — <https://github.com/LAXTHA/LXSDF>
-  (`LXD12_LXSDFT2_CommunicationStandard.pdf`, `LXD10_LXSDFT2A_CommunicationStandard.pdf`)
-- LXSDF T2A packet layout — <http://laxtha.net/packet-lxsdf-t2a/>
-- LXDeviceAPI + developer manual — <http://laxtha.net/lxdeviceapi/>,
-  <https://github.com/LAXTHA/LXDeviceAPI>
-- LXSMWD12 USB-HID developer manual —
-  <https://github.com/ubpulse/ubpulse-H3> (`LXE33_ubpulse_USBHID_Developer_Manual_LXSMWD12_en.pdf`)
-- LAXTHA CDC driver (PID 0x002A) — <https://github.com/LAXTHA/DeviceDriver> (`LXUSBCDC.zip`)
-- TeleScan — <https://github.com/LAXTHA/TeleScan>
+- LAXTHA, `LXSM-D1WD10` developer manual:
+  <https://www.laxtha.com/DB_Files/ReleaseFile/LXSM-D1WD10-DRV3.pdf>
+- PolyG-I product page:
+  <https://www.laxtha.com/ProductView.asp?Model=PolyG-I>
+- LAXTHA LXSDF compatibility reference:
+  <https://github.com/LAXTHA/LXSDF>
+- LAXTHA CDC driver (different PID `0x002A`):
+  <https://github.com/LAXTHA/DeviceDriver>
+
+로컬 바이너리 주소와 물리 A/B 수치는 이 저장소를 작업한 Mac의 설치본 및
+연결된 PolyG-I에서 직접 얻었다.

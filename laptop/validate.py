@@ -106,24 +106,30 @@ def validate():
             errs.append("HID VID/PID must match the verified PolyG-I 0x0F1F/0x0010")
         if config.EEG_HID_CHANNELS != 8:
             errs.append("verified PolyG-I HID decoder requires EEG_HID_CHANNELS=8")
+        if config.EEG_HID_MAX_CHANNELS != 16:
+            errs.append("verified PolyG-I D1WD10 decoder requires EEG_HID_MAX_CHANNELS=16")
         if (isinstance(config.EEG_HID_SAMPLE_SELECTOR, bool)
                 or not isinstance(config.EEG_HID_SAMPLE_SELECTOR, int)
-                or config.EEG_HID_SAMPLE_SELECTOR not in (7, 8, 9)):
-            errs.append("EEG_HID_SAMPLE_SELECTOR must be 7, 8, or 9")
+                or config.EEG_HID_SAMPLE_SELECTOR != 8):
+            errs.append("verified PolyG-I dashboard requires EEG_HID_SAMPLE_SELECTOR=8")
+        elif config.EEG_FS != 2 ** config.EEG_HID_SAMPLE_SELECTOR:
+            errs.append("EEG_FS must equal 2**EEG_HID_SAMPLE_SELECTOR (256 Hz)")
         if (isinstance(config.EEG_HID_GAIN_INDEX, bool)
                 or not isinstance(config.EEG_HID_GAIN_INDEX, int)
-                or not 0 <= config.EEG_HID_GAIN_INDEX <= 7):
-            errs.append("EEG_HID_GAIN_INDEX must be in [0, 7]")
+                or not 0 <= config.EEG_HID_GAIN_INDEX <= 15):
+            errs.append("EEG_HID_GAIN_INDEX must be in [0, 15]")
         if (not isinstance(config.EEG_HID_STALL_TIMEOUT_S, (int, float))
                 or isinstance(config.EEG_HID_STALL_TIMEOUT_S, bool)
                 or not math.isfinite(config.EEG_HID_STALL_TIMEOUT_S)
                 or config.EEG_HID_STALL_TIMEOUT_S <= 0):
             errs.append("EEG_HID_STALL_TIMEOUT_S must be > 0")
-        if (not isinstance(config.EEG_HID_UV_PER_COUNT, (int, float))
-                or isinstance(config.EEG_HID_UV_PER_COUNT, bool)
-                or not math.isfinite(config.EEG_HID_UV_PER_COUNT)
-                or config.EEG_HID_UV_PER_COUNT <= 0):
-            errs.append("EEG_HID_UV_PER_COUNT must be > 0")
+        if (not isinstance(config.EEG_HID_ADC_UV_PER_COUNT, (int, float))
+                or isinstance(config.EEG_HID_ADC_UV_PER_COUNT, bool)
+                or not math.isfinite(config.EEG_HID_ADC_UV_PER_COUNT)
+                or not math.isclose(config.EEG_HID_ADC_UV_PER_COUNT,
+                                    -1.25 / 32768 * 1_000_000,
+                                    rel_tol=0.0, abs_tol=1e-12)):
+            errs.append("EEG_HID_ADC_UV_PER_COUNT must match the D1WD10 ADC coefficient")
     if (not config.ARM_MOCK and config.EEG_SOURCE == "serial"
             and config.ARM_PORT != "auto" and config.ARM_PORT == config.EEG_PORT):
         errs.append("ARM_PORT and EEG_PORT refer to the same serial device")
