@@ -2,15 +2,16 @@
 
 Sources (config.EEG_SOURCE):
   "mock"   : synthetic 8ch signal, no hardware. mark_error() injects an ErrP-like
-             burst so the full loop is testable. Goes through the SAME LXSDF
-             encode+parse path as real data, so nothing downstream is special-cased.
-  "serial" : Path A. Read raw LXSDF bytes off the PolyG-I USB COM port (macOS
-             native, pyserial) -> LXSDFParser -> samples.
-  "tcp"    : Path B. Windows helper (windows_eeg_server.py, LXSMWD12.dll) forwards
-             the raw LXSDF byte stream over localhost/ethernet -> same parser.
+             burst so the full loop is testable. Exercises the LXSDF compatibility
+             parser used by serial/TCP sources.
+  "serial" : Read raw LXSDF bytes from a CDC-capable LAXTHA variant (pyserial).
+  "tcp"    : A Windows helper forwards a legacy raw LXSDF stream -> same parser.
+  "hid"    : Native PolyG-I PID 0x0010 HID. Sends the recovered TeleScan start
+             sequence and decodes its fixed 1024-byte raw acquisition blocks.
 
-Output: a thread-safe ring buffer of EEG samples in microvolts, shape
-(n, EEG_CHANNELS). Consumers call snapshot(seconds).
+Output: a thread-safe ring buffer of scaled EEG samples, shape
+(n, EEG_CHANNELS). HID values remain relative until uV calibration is supplied.
+Consumers call snapshot(seconds).
 """
 import time
 import glob
@@ -22,6 +23,7 @@ import random
 
 import config
 from lxsdf import LXSDFParser, build_packet
+from polyg_hid import PolyGIHID
 
 try:
     import serial
@@ -34,7 +36,7 @@ def _raw_to_uv(raw):
     return (raw - config.ADC_ZERO) * config.ADC_UV_PER_LSB
 
 
-def _select_eeg(all_channels):
+def _select_eeg(all_channels, convert=_raw_to_uv):
     """Pick the 8 EEG slots out of the full interleaved channel list."""
     missing = [slot for slot in config.EEG_CHANNEL_MAP
                if slot < 0 or slot >= len(all_channels)]
@@ -42,7 +44,13 @@ def _select_eeg(all_channels):
         raise ValueError(
             f"EEG_CHANNEL_MAP slots {missing} outside parsed packet with "
             f"{len(all_channels)} channels")
-    return [_raw_to_uv(all_channels[slot]) for slot in config.EEG_CHANNEL_MAP]
+    return [convert(all_channels[slot]) for slot in config.EEG_CHANNEL_MAP]
+
+
+def _polyg_raw_to_uv(raw):
+    # Absolute uV calibration is not available, but the ErrP pipeline normalizes
+    # against each session's resting baseline and is therefore scale-invariant.
+    return raw * config.EEG_HID_UV_PER_COUNT
 
 
 class RingBuffer:
@@ -90,6 +98,8 @@ class EEGBridge:
         self.source = config.EEG_SOURCE
         self.ring = RingBuffer(capacity=self.fs * 12)   # 12s history
         self.parser = LXSDFParser(total_channels=config.EEG_TOTAL_CHANNELS)
+        self.input_channels = (config.EEG_HID_CHANNELS if self.source == "hid"
+                               else config.EEG_TOTAL_CHANNELS)
         self._stop = threading.Event()
         self._error_burst_until = 0.0
         self._error_burst_start = 0.0
@@ -137,6 +147,14 @@ class EEGBridge:
         if not packets:
             return
 
+        self.input_channels = self.parser.total_channels
+        self._emit_samples([_select_eeg(all_channels)
+                            for all_channels, _pc in packets])
+
+    def _emit_samples(self, samples):
+        if not samples:
+            return
+
         # A serial/TCP read commonly contains several device packets. Giving all
         # of them the read-completion time collapses tens of milliseconds into one
         # instant and corrupts onset epoching. Reconstruct nominal device time from
@@ -144,28 +162,29 @@ class EEGBridge:
         now = time.monotonic()
         dt = 1.0 / self.fs
         if self._next_sample_t is None:
-            first_t = now - (len(packets) - 1) * dt
+            first_t = now - (len(samples) - 1) * dt
         else:
-            predicted_end = self._next_sample_t + (len(packets) - 1) * dt
+            predicted_end = self._next_sample_t + (len(samples) - 1) * dt
             clock_error = now - predicted_end
             if abs(clock_error) > 0.25:
                 # Reconnect, a cleared OS buffer, or a badly stalled source: align
                 # the new batch to arrival time instead of carrying a stale clock.
-                first_t = now - (len(packets) - 1) * dt
+                first_t = now - (len(samples) - 1) * dt
             else:
                 correction = max(-0.1 * dt, min(0.1 * dt, 0.02 * clock_error))
                 first_t = self._next_sample_t + correction
 
-        for i, (all_channels, _pc) in enumerate(packets):
-            self.ring.push(_select_eeg(all_channels), first_t + i * dt)
-        self._next_sample_t = first_t + len(packets) * dt
+        for i, sample in enumerate(samples):
+            self.ring.push(sample, first_t + i * dt)
+        self._next_sample_t = first_t + len(samples) * dt
 
     # ---- sources ----
     def _run(self):
         try:
             {"mock": self._run_mock,
              "serial": self._run_serial,
-             "tcp": self._run_tcp}[self.source]()
+             "tcp": self._run_tcp,
+             "hid": self._run_hid}[self.source]()
         except Exception as e:
             self.last_error = e
             print(f"[eeg] source thread died: {e}")
@@ -240,6 +259,31 @@ class EEGBridge:
                 if data:
                     self._emit_from_bytes(data)
 
+    def _run_hid(self):
+        with PolyGIHID(
+                channels=config.EEG_HID_CHANNELS,
+                physical_pid=config.EEG_HID_PID,
+                gain_index=config.EEG_HID_GAIN_INDEX,
+                mode=config.EEG_HID_MODE,
+                sample_selector=config.EEG_HID_SAMPLE_SELECTOR) as device:
+            device.start()
+            print(f"[eeg] hid VID=0x{config.EEG_HID_VID:04X} "
+                  f"PID=0x{config.EEG_HID_PID:04X} selector={config.EEG_HID_SAMPLE_SELECTOR}")
+            last_report = time.monotonic()
+            while not self._stop.is_set():
+                rows = device.read_rows()
+                if rows:
+                    last_report = time.monotonic()
+                    samples = [
+                        _select_eeg(row, convert=_polyg_raw_to_uv) for row in rows]
+                    self._emit_samples(samples)
+                elif time.monotonic() - last_report > config.EEG_HID_STALL_TIMEOUT_S:
+                    raise TimeoutError(
+                        f"PolyG-I HID produced no report for "
+                        f"{config.EEG_HID_STALL_TIMEOUT_S:.1f}s")
+                else:
+                    self._stop.wait(0.001)
+
     def _run_tcp(self):
         while not self._stop.is_set():
             try:
@@ -267,5 +311,5 @@ if __name__ == "__main__":
     for _ in range(3):
         time.sleep(1)
         print(f"buffered {len(eeg.snapshot(1.0))} samples/1s, "
-              f"parser ch={eeg.parser.total_channels} dropped={eeg.parser.dropped}")
+              f"input ch={eeg.input_channels} dropped={eeg.parser.dropped}")
     eeg.stop()

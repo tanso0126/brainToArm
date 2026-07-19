@@ -93,7 +93,7 @@ def validate():
         errs.append("ADC_UV_PER_LSB must be > 0")
 
     # --- source selection valid ---
-    if config.EEG_SOURCE not in ("mock", "serial", "tcp"):
+    if config.EEG_SOURCE not in ("mock", "serial", "tcp", "hid"):
         errs.append(f"EEG_SOURCE '{config.EEG_SOURCE}' invalid")
     if not isinstance(config.EEG_CONFIG_VERIFIED, bool):
         errs.append("EEG_CONFIG_VERIFIED must be True or False")
@@ -101,6 +101,29 @@ def validate():
         errs.append("real EEG requires EEG_CONFIG_VERIFIED=True after rate/channel checks")
     if config.EEG_SOURCE == "serial" and not config.EEG_PORT:
         errs.append("EEG_PORT must be set for serial EEG")
+    if config.EEG_SOURCE == "hid":
+        if config.EEG_HID_VID != 0x0F1F or config.EEG_HID_PID != 0x0010:
+            errs.append("HID VID/PID must match the verified PolyG-I 0x0F1F/0x0010")
+        if config.EEG_HID_CHANNELS != 8:
+            errs.append("verified PolyG-I HID decoder requires EEG_HID_CHANNELS=8")
+        if (isinstance(config.EEG_HID_SAMPLE_SELECTOR, bool)
+                or not isinstance(config.EEG_HID_SAMPLE_SELECTOR, int)
+                or config.EEG_HID_SAMPLE_SELECTOR not in (7, 8, 9)):
+            errs.append("EEG_HID_SAMPLE_SELECTOR must be 7, 8, or 9")
+        if (isinstance(config.EEG_HID_GAIN_INDEX, bool)
+                or not isinstance(config.EEG_HID_GAIN_INDEX, int)
+                or not 0 <= config.EEG_HID_GAIN_INDEX <= 7):
+            errs.append("EEG_HID_GAIN_INDEX must be in [0, 7]")
+        if (not isinstance(config.EEG_HID_STALL_TIMEOUT_S, (int, float))
+                or isinstance(config.EEG_HID_STALL_TIMEOUT_S, bool)
+                or not math.isfinite(config.EEG_HID_STALL_TIMEOUT_S)
+                or config.EEG_HID_STALL_TIMEOUT_S <= 0):
+            errs.append("EEG_HID_STALL_TIMEOUT_S must be > 0")
+        if (not isinstance(config.EEG_HID_UV_PER_COUNT, (int, float))
+                or isinstance(config.EEG_HID_UV_PER_COUNT, bool)
+                or not math.isfinite(config.EEG_HID_UV_PER_COUNT)
+                or config.EEG_HID_UV_PER_COUNT <= 0):
+            errs.append("EEG_HID_UV_PER_COUNT must be > 0")
     if (not config.ARM_MOCK and config.EEG_SOURCE == "serial"
             and config.ARM_PORT != "auto" and config.ARM_PORT == config.EEG_PORT):
         errs.append("ARM_PORT and EEG_PORT refer to the same serial device")

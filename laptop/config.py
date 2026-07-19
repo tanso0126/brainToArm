@@ -53,25 +53,39 @@ SERVO_MIN       = [0, 0, 0, 0, 0, 0, 0]
 SERVO_MAX       = [180, 180, 180, 180, 180, 180, 180]
 
 # ======================================================================
-# EEG (LAXTHA PolyG-I) — LXSDF T2A serial/USB stream
+# EEG (LAXTHA PolyG-I)
 # ======================================================================
-EEG_SOURCE = "mock"        # "mock" | "serial" (Path A) | "tcp" (Path B win bridge)
+EEG_SOURCE = "hid"         # "hid" = this PID 0x0010 device; "mock" | "serial" | "tcp"
 EEG_PORT = "auto"          # or e.g. "/dev/cu.usbserial-XXXX"; run eeg_detect.py
 EEG_BAUD = 115200          # confirm from LXSDF PDF; PolyG-I is high-rate, try 921600 too
 
-# PolyG-I streams up to 16 (14+AUX2) channels interleaved in each LXSDF packet:
-# EEG x8, ECG, EMG x2, PPG, GSR, RESP, AUX x2. The parser AUTO-DETECTS how many
-# 2-byte channel slots each packet carries. You then say which slots are the 8
-# EEG channels. DEFAULT GUESS: EEG is the first 8 slots. Fix if the montage or
-# device ordering differs (check against TeleScan's live channel display).
-EEG_TOTAL_CHANNELS = None  # None = auto-detect from packet length; or force an int
+# This physical unit is vendor-defined USB HID, not serial.  The command sequence
+# and block decoder were recovered from TeleScan's LXSM-D1WD6.dll and verified on
+# the connected device.  Selector 9 is the stable continuous mode measured here;
+# TeleScan's installed PolyG-I calibration declares a nominal 256 Hz rate.
+EEG_HID_VID = 0x0F1F
+EEG_HID_PID = 0x0010
+EEG_HID_CHANNELS = 8
+EEG_HID_GAIN_INDEX = 6
+EEG_HID_MODE = 0
+EEG_HID_SAMPLE_SELECTOR = 9
+EEG_HID_STALL_TIMEOUT_S = 2.0
+EEG_HID_UV_PER_COUNT = 1.0  # relative counts; ErrP baseline normalization is scale-invariant
+
+# The device28 config describes 16 physical polygraph signals, but this vendor
+# DLL exposes fixed eight-channel acquisition blocks. Its first signal group is
+# EEG inputs 1..8. EEG_CHANNEL_MAP selects/reorders those eight output slots.
+EEG_TOTAL_CHANNELS = None  # LXSDF sources only: None = auto-detect; HID has 8 fixed slots
 EEG_CHANNEL_MAP = [0, 1, 2, 3, 4, 5, 6, 7]   # packet slot -> EEG ch 0..7
 EEG_CHANNELS = 8
-EEG_FS = 256               # sampling rate (Hz) — confirm in TeleScan; 256 typical
+# TeleScan's installed PolyG-I file says 256 Hz, but this physical unit delivers
+# 64 rows every ~0.2843 s: 225.1 Hz sustained.  Use the measured clock so epochs,
+# filters, and missing-sample checks match reality rather than the nominal label.
+EEG_FS = 225
 EEG_MIN_EPOCH_FRACTION = 0.80  # abort a decision if too many onset-locked samples are missing
-EEG_CONFIG_VERIFIED = False    # set True after confirming rate + packet/channel map on hardware
+EEG_CONFIG_VERIFIED = False    # transport works; set True only after montage/rate signal validation
 
-# ADC scaling: raw 2-byte sample -> microvolts. LXSDF ships a 12-bit ADC value.
+# Compatibility-source scaling: LXSDF ships a 12-bit ADC value.
 # uV = (raw - ADC_ZERO) * ADC_UV_PER_LSB. Defaults center a 12-bit unipolar code
 # and use a placeholder gain; set ADC_UV_PER_LSB from the device datasheet for
 # absolute uV. Relative values already work for ErrP without exact scaling.
@@ -79,9 +93,8 @@ ADC_BITS = 12
 ADC_ZERO = 2048            # midpoint of a 12-bit unipolar code (0..4095)
 ADC_UV_PER_LSB = 1.0       # placeholder; datasheet gives the real Vref/gain
 
-# Path B (only if PolyG-I refuses to be a plain COM port): a Windows helper
-# calling LXSMWD12.dll forwards the RAW LXSDF byte stream here over localhost /
-# a direct ethernet cable. Same parser runs on both paths. No router.
+# Legacy/alternate-device compatibility: a Windows helper calling LXSMWD12.dll
+# forwards a raw LXSDF stream here. PID 0x0010 uses the native HID path above.
 EEG_TCP_HOST = "127.0.0.1"
 EEG_TCP_PORT = 9000
 

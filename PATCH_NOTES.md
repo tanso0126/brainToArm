@@ -335,3 +335,58 @@ full training dependencies.
 - Calibrate and test the physical camera homography, markerless tip visibility,
   grasp tolerance, arm geometry, and ErrP threshold before clearing the three
   explicit live-hardware verification gates.
+
+## Patch 12 — native PolyG-I HID acquisition
+
+### Intent
+
+Remove the real-device input blocker on macOS without a Windows bridge, serial
+emulation, or an unverified brute-force command sweep.
+
+### Root cause
+
+- The connected PolyG-I is vendor-defined USB HID (VID `0x0F1F`, PID `0x0010`),
+  not a CDC serial device.
+- The prior investigation applied LXSDF's Cmd0-MSB rule to this different HID
+  protocol and therefore probed only `0x80–0xFF`. The real vendor commands begin
+  with `0x01`, `0x02`, `0x04`, and `0x0A`.
+- PID `0x0010` INPUT reports are raw acquisition blocks, not LXSDF packets, so
+  feeding them to `LXSDFParser` would never synchronize.
+
+### Changes
+
+- Reverse-engineered the installed TeleScan `LXEXDLL_D1WD6.dll` /
+  `LXSM-D1WD6.dll` exports and verified the result on the physical device.
+- Added `polyg_hid.py` with exact-one-device discovery, checked HID writes, the
+  recovered STOP → mode → PID/gain → timer → START sequence, deterministic STOP
+  cleanup, and the vendor's 1,024-byte signed sample decoder.
+- Added the `"hid"` EEG source and generic sample-batch timestamping to
+  `EEGBridge`; serial/TCP/mock LXSDF compatibility remains intact.
+- Set the repository's active source to HID. Kept `EEG_CONFIG_VERIFIED=False` so
+  working USB input cannot be confused with a verified electrode montage.
+- Used the sustained physical clock (64 rows per ~0.2843 s = ~225 Hz) for epoch
+  timing instead of TeleScan's nominal 256 Hz calibration label.
+- Rebuilt `eeg_detect.py` as a bounded live HID diagnostic that reports cadence
+  and eight channel ranges and always stops the device. Explicit `--port` keeps
+  the CDC compatibility probe.
+- Added `hidapi`, HID config validation, command/decoder/lifecycle regression
+  tests, and corrected README/device-communications documentation.
+
+### Physical verification
+
+- `python3 laptop/eeg_detect.py --seconds 3` — passed: 10 reports, 640 decoded
+  eight-channel rows, median 0.2843 s report interval, clean STOP.
+- `python3 laptop/eeg_bridge.py` — passed: native HID background thread received
+  and timestamped live rows in each one-second health window.
+
+### Regression verification
+
+- `python3 laptop/test_pipeline.py`
+- `python3 -m compileall -q laptop`
+- `git diff --check`
+
+### Remaining safety gate
+
+Raw input is solved. Before brain-driven decisions, mount the actual electrodes,
+confirm Fz/FCz/Cz indices and per-channel signal quality, collect participant
+data, and only then set `EEG_CONFIG_VERIFIED=True`.

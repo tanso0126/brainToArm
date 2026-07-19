@@ -12,6 +12,29 @@ bottom tells you what the project is, why it is built this way, exactly what
 every file does, what already works, what still needs real hardware, and the
 precise steps to bring it up. No other context is required.
 
+> ### ✅ PolyG-I input works natively on this Mac
+>
+> The device has now been examined on real hardware. Findings that override
+> several statements later in this file:
+>
+> - The PolyG-I on hand is **USB HID** (VID `0x0F1F`, PID `0x0010`), **not** a
+>   virtual COM port. **"Path A" (`EEG_SOURCE="serial"`) can never work for it** —
+>   LAXTHA's COM-port variant is a different product ID (`0x002A`).
+> - It **opens natively on macOS** via `hidapi`, so **"Path B" (the Windows
+>   `LXSMWD12.dll` bridge) is unnecessary**.
+> - The blocker is resolved. Static analysis of TeleScan's installed
+>   `LXSM-D1WD6.dll` recovered the complete initialization sequence and its raw
+>   report decoder. `python3 laptop/eeg_detect.py` starts the device and verifies
+>   live 8-channel samples; `EEG_SOURCE="hid"` feeds them into `EEGBridge`.
+> - This HID stream is **not LXSDF**. Each 1,024-byte report is 64 time rows ×
+>   8 interleaved signed samples with a vendor high-byte bias. LXSDF remains in
+>   use for mock/serial/TCP compatibility paths.
+> - TeleScan under CrossOver **cannot** reach the device (Wine filters
+>   vendor-defined HID); proven, not a configuration issue.
+>
+> Full evidence, commands, and the corrected earlier findings are recorded in
+> [`docs/EEG_DEVICE_COMMS.md`](docs/EEG_DEVICE_COMMS.md).
+
 ---
 
 ## Table of contents
@@ -106,9 +129,10 @@ pick another," otherwise we finish the grasp and delivery.**
 
 - **EEG device:** [LAXTHA PolyG-I](https://www.laxtha.com/ProductView.asp?Model=PolyG-I),
   an 8-channel EEG amplifier (part of a 16-channel polygraph). Connects by USB.
-  Its data uses LAXTHA's **LXSDF** ("LX Serial Data Format") packet protocol.
-  The vendor's official app (TeleScan) is Windows-only and has no live-export
-  API we can use directly, so we read the device stream ourselves (see §7).
+  This PID `0x0010` model uses vendor-defined **USB HID** with fixed raw blocks;
+  it does not expose a COM port or LXSDF framing. The vendor's official app
+  (TeleScan) is Windows-only, so the Mac implementation reproduces its HID
+  initialization and decoder directly (see §7).
 
 - **Camera:** any cheap overhead camera — a **phone used as a webcam** is ideal
   (a laptop cam can't easily point straight down). 720p is plenty. Precision does
@@ -124,7 +148,7 @@ Everything runs on one laptop, connected to the arm and the EEG over USB. There
 is no network, no router, no UDP.
 
 ```
-  ┌─────────────────┐  USB (LXSDF packets)   ┌──────────────────────────────┐
+  ┌─────────────────┐  USB HID (raw blocks)  ┌──────────────────────────────┐
   │  PolyG-I  EEG    │───────────────────────▶│           LAPTOP             │
   │  (8 channels)    │                        │                              │
   └─────────────────┘                        │  eeg_bridge ─▶ errp          │
@@ -210,9 +234,10 @@ brainToArm/
     ├── policy.py                  ← which object to pick + reach planning
     │
     ├── eeg_bridge.py              ← live EEG acquisition → timestamped buffer
+    ├── polyg_hid.py               ← native PolyG-I start/stop + block decoder
     ├── lxsdf.py                   ← LXSDF T2A packet parser/encoder
-    ├── eeg_detect.py              ← bench tool: is the EEG on Path A or B?
-    ├── windows_eeg_server.py      ← Path B: Windows DLL → TCP bridge
+    ├── eeg_detect.py              ← live PolyG-I HID bench diagnostic
+    ├── windows_eeg_server.py      ← legacy/alternate-device DLL → TCP bridge
     ├── errp.py                    ← ErrP detector (the brain-signal classifier)
     ├── record_errp.py             ← collect labeled ErrP training data
     ├── errp_train.py              ← train the ErrP model from that data
@@ -291,21 +316,26 @@ brainToArm/
 - **`eeg_bridge.py`** — `EEGBridge` runs a background thread that fills a
   **timestamped** ring buffer of EEG samples (in microvolts). Batched transport
   reads are reconstructed at the configured device sample interval instead of
-  assigning one arrival timestamp to every packet. Three
+  assigning one arrival timestamp to every packet. Four
   interchangeable sources selected by `config.EEG_SOURCE`:
+  - `"hid"` — the connected PID `0x0010` PolyG-I. Native macOS `hidapi`, the
+    recovered TeleScan initialization sequence, and 1,024-byte raw block decoder.
   - `"mock"` — synthetic 8-channel signal (widespread alpha + noise), with an
     injectable ErrP-like burst for testing. Goes through the **real** LXSDF
     encode+parse path so nothing downstream is special-cased.
-  - `"serial"` — Path A: read raw LXSDF bytes straight off the PolyG-I USB serial
-    port on macOS.
-  - `"tcp"` — Path B: receive the raw LXSDF byte stream from the Windows DLL
-    bridge over localhost/ethernet.
+  - `"serial"` — compatibility path for LAXTHA CDC variants, not PID `0x0010`.
+  - `"tcp"` — compatibility path for a Windows DLL bridge.
   Provides `mark_onset()` (timestamp the action) and `wait_and_epoch(onset)`
   (block until the response has developed, then return the time-aligned epoch) —
   this timestamp-based epoching is what keeps ErrP correctly aligned on real
   hardware despite thread jitter.
 
-- **`lxsdf.py`** — The LXSDF T2A packet parser, written from LAXTHA's official
+- **`polyg_hid.py`** — The verified real-device path. It enforces exact-one-device
+  discovery, sends STOP → mode → PID/gain → sample timer → START, checks every
+  HID write, decodes each report exactly as the vendor DLL does, and sends STOP
+  during cleanup even after an error.
+
+- **`lxsdf.py`** — The compatibility/mock LXSDF T2A parser, written from LAXTHA's official
   spec. Packets start with sync bytes `0xFF 0xFE`, an 8-byte header (including a
   packet counter), then 2 bytes per channel (high, low). `LXSDFParser.feed()`
   takes raw bytes from any transport, resynchronizes on the sync bytes,
@@ -313,15 +343,14 @@ brainToArm/
   samples. `build_packet()` encodes packets (used by the mock and tests, so the
   exact same parser is exercised with and without hardware).
 
-- **`eeg_detect.py`** — Bench tool. Plug in the PolyG-I; it lists serial ports
-  before/after and dumps raw bytes only from a newly appeared port (or an explicit
-  `--port`), telling you whether the
-  device streams as a plain serial port (**Path A** works) or not (**Path B**).
+- **`eeg_detect.py`** — Bench tool. It finds PID `0x0010`, starts a bounded live
+  acquisition, reports report cadence and all eight channel ranges, then stops
+  cleanly. `--port` retains an explicit CDC compatibility probe.
 
-- **`windows_eeg_server.py`** — Path B only. Runs on Windows, calls the LAXTHA
+- **`windows_eeg_server.py`** — Legacy/alternate-device path. Runs on Windows, calls the LAXTHA
   `LXSMWD12.dll`, and forwards the raw LXSDF bytes to the laptop over TCP. The
   ctypes function names follow LAXTHA's documented API pattern; confirm them
-  against the LXSMWD12 developer manual if Path B is needed.
+  against the LXSMWD12 developer manual if that compatibility path is needed.
 
 - **`errp.py`** — `ErrPDetector`: the brain-signal classifier. Given an EEG epoch
   around an action onset, returns `p_error` ∈ [0,1] (probability the human judged
@@ -410,11 +439,10 @@ brainToArm/
   carries real information. Detection therefore reports **positions** and leaves
   the **choice** open.
 
-- **We read the device stream ourselves (LXSDF), not through TeleScan.** The
-  vendor app is Windows-only with no live API. LXSDF is a documented serial
-  packet format, so on macOS we can often read the USB stream directly with
-  `pyserial` (Path A) — no Windows, no Crossover, no screen-scraping. Path B (the
-  Windows DLL over TCP) exists only as a fallback.
+- **We read the HID device ourselves, not through TeleScan.** The installed
+  TeleScan DLL revealed the exact commands (`01 01 00` starts; `01 00 00` stops)
+  and raw int16 conversion. Native `hidapi` now reproduces that behavior on
+  macOS; no Windows, CrossOver, screen scraping, or serial emulation is involved.
 
 - **No router / no UDP.** A previous student's rig needed a router only to
   synchronize three separate PCs over UDP. We run everything on one machine, so
@@ -450,16 +478,17 @@ brainToArm/
 shared-autonomy loop — detect, select, hover, ErrP veto, visual-servo align,
 grasp, verify, transport, place, repeat until the table is clear — executes end
 to end, and all unit tests pass. The data pipeline (record → train → load model)
-is verified. 19 Python modules, all compile.
+is verified. All Python modules compile.
 
 The parts that are written against **documented assumptions** and can only be
 *confirmed* (not written) once the physical hardware is present:
 
 | Area | Assumed value / behavior | How to confirm |
 |------|--------------------------|----------------|
-| EEG transport | PolyG-I streams LXSDF over a USB serial port (Path A) | `eeg_detect.py` |
-| EEG framing | standard LXSDF T2A packet layout, channel count auto-detected | parser auto-detects; check sample values vs TeleScan |
-| EEG rate / channel map | `EEG_FS`, which packet slots are the 8 EEG electrodes | compare to TeleScan's live display |
+| EEG transport | **RESOLVED:** native USB HID, VID `0x0F1F` PID `0x0010` | `eeg_detect.py` passes on this Mac |
+| EEG start/stop | **RESOLVED:** vendor sequence recovered from `LXSM-D1WD6.dll` | bounded captures repeatedly start, stream, and stop |
+| EEG framing | **RESOLVED:** 1,024-byte raw block, 64 rows × 8 channels; not LXSDF | decoder matches DLL disassembly and hardware |
+| EEG rate / channel map | sustained ~225 rows/s measured; slots 1–8 are the acquisition channels | transport verified; confirm electrode montage before setting `EEG_CONFIG_VERIFIED=True` |
 | Arm geometry | link lengths `L_*`, servo offsets/directions | `arm_jog.py` |
 | Camera mapping | 4-point pixel↔cm homography | `calibrate_workspace.py` |
 | ErrP model | trained classifier (baseline heuristic works meanwhile) | `record_errp.py` + `errp_train.py` |
@@ -471,6 +500,9 @@ and only constants, never code.
 ---
 
 ## 9. Run it right now with zero hardware
+
+The checked-in source is now `EEG_SOURCE="hid"` for the connected device. For a
+hardware-free demo, temporarily set it to `"mock"` in `laptop/config.py`, then:
 
 ```bash
 cd brainToArm
@@ -510,16 +542,14 @@ After geometry, offsets, directions, and safe limits are confirmed, set
 
 **2 — EEG.** Plug in the PolyG-I and:
 ```bash
-python3 laptop/eeg_detect.py     # new streaming serial port? -> Path A
+python3 laptop/eeg_detect.py --seconds 5
+python3 laptop/eeg_bridge.py
 ```
-- Path A: set `EEG_SOURCE="serial"`, `EEG_PORT`, `EEG_BAUD`.
-- Path B (nothing appeared): run `windows_eeg_server.py` on Windows, set
-  `EEG_SOURCE="tcp"`. It listens on localhost by default; use `--host 0.0.0.0`
-  only when forwarding to a separate directly connected Mac.
-Confirm `EEG_FS` and `EEG_CHANNEL_MAP` (which slots are your 8 EEG electrodes)
-against TeleScan's live channel display. Set `ERRP_FRONTOCENTRAL` to the indices
-of the electrodes you placed at fronto-central sites (Fz/FCz/Cz).
-Then set `EEG_CONFIG_VERIFIED=True`.
+Both commands must show live 8-channel data. `EEG_SOURCE="hid"` is already set
+for this unit. Set `ERRP_FRONTOCENTRAL` to the indices of the electrodes actually
+placed at Fz/FCz/Cz, verify signal response and the sustained rate with the
+headset mounted, then set `EEG_CONFIG_VERIFIED=True`. The gate intentionally
+distinguishes “USB input works” from “this participant's montage is trustworthy.”
 
 **3 — Camera.** Mount a phone overhead looking straight down. Set `CAM_MOCK=False`.
 ```bash
@@ -556,8 +586,8 @@ Grouped constants (see the file for full comments):
   `SERVO_OFFSET/DIRECTION/MIN/MAX`.
 - **Pick-and-place:** `Z_APPROACH/GRASP/LIFT/PLACE`, `PLACE_LOCATION`,
   `PLACE_ZONES`, `GRASP_VERIFY`, `GRASP_RETRIES`.
-- **EEG:** `EEG_SOURCE`, `EEG_PORT/BAUD`, `EEG_TOTAL_CHANNELS` (None = auto),
-  `EEG_CHANNEL_MAP`, `EEG_CHANNELS`, `EEG_FS`, `ADC_*` scaling, `EEG_TCP_*`.
+- **EEG:** `EEG_SOURCE`, `EEG_HID_*`, `EEG_CHANNEL_MAP`, `EEG_CHANNELS`,
+  measured `EEG_FS`, relative scaling, plus legacy `EEG_PORT/BAUD`/`EEG_TCP_*`.
 - **ErrP:** `ERRP_BACKEND`, `ERRP_MODEL_PATH`, `ERRP_FRONTOCENTRAL`,
   `ERRP_WINDOW_S`, `ERRP_BASELINE_S`, `ERRP_BAND`, `ERRP_THRESHOLD`.
 - **Vision:** `CAM_INDEX`, `CAM_MOCK`, `OBJECT_METHOD` (`bgsub`/`yolo`/`hsv`/
@@ -570,11 +600,16 @@ Grouped constants (see the file for full comments):
 
 ## 12. Testing and verification
 
-- **`python3 laptop/test_pipeline.py`** — must pass: LXSDF roundtrip/resync/drop,
-  IK range + aim, ErrP separation, full mock pick-and-place.
-- **`python3 laptop/validate.py`** — config self-consistency; should print
-  `config OK`.
-- **`python3 laptop/orchestrator.py --auto`** — full mock run, clears the table.
+- **`python3 laptop/test_pipeline.py`** — must pass: PolyG-I command/decoder,
+  LXSDF compatibility, IK, ErrP, and full mock pick-and-place tests.
+- **`python3 laptop/eeg_detect.py --seconds 5`** — physical HID start, live
+  8-channel range/cadence report, and deterministic stop.
+- **`python3 laptop/validate.py`** — currently reports the intentional
+  `EEG_CONFIG_VERIFIED=False` live-montage gate; it prints `config OK` only after
+  the electrode/rate validation described above (or in mock mode).
+- **`python3 laptop/orchestrator.py --auto`** — full mock run after selecting
+  `EEG_SOURCE="mock"`; the active HID configuration fails closed at preflight
+  until its montage gate is cleared.
 - Direct detector check (false-alarm rate on synthetic epochs) is in the project
   history; the current numbers are ~1% false positive, ~0% false negative.
 

@@ -17,7 +17,7 @@ Run with everything mocked (no hardware, no headset):
     python orchestrator.py
 It will pick the "big nail", you (as the mock brain) veto, it moves to the next.
 
-Go live by flipping config: EEG_SOURCE='serial'|'tcp', and construct
+Go live by selecting config EEG_SOURCE='hid' (PID 0x0010), and construct
 Vision(mock=False), ArmSerial() with a real board. The loop code is unchanged.
 """
 import time
@@ -76,7 +76,6 @@ def servo_to_object(arm, vision, policy, target, z):
         corr[0] += config.SERVO_GAIN * ex
         corr[1] += config.SERVO_GAIN * ey
     return command_xy, err, False
-
 
 def grasp_object(arm, vision, policy, target, grasp_xy=None):
     """Descend, close, lift, and verify the object was actually picked up.
@@ -281,7 +280,7 @@ def preflight(arm, eeg, vision):
         exp = int(0.6 * config.EEG_FS)
         tag = "OK" if n >= exp else "LOW"
         print(f"  eeg    : {tag} ({n} samples/s, source={config.EEG_SOURCE}, "
-              f"parser_ch={eeg.parser.total_channels})")
+              f"input_ch={eeg.input_channels})")
         if tag == "LOW":
             print("           ! fewer samples than EEG_FS suggests — check EEG_FS/baud")
 

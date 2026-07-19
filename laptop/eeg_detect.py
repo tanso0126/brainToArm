@@ -1,88 +1,108 @@
-"""Bench test #1 — the single most important unknown.
+"""Bench diagnostic for the connected LAXTHA PolyG-I.
 
-Question: does the LAXTHA PolyG-I expose a plain USB virtual COM port (Path A,
-clean, macOS-native) or does it require the Windows LXSMWD12.dll (Path B)?
-
-Plug the device in (USB, powered on) and run:
-    python eeg_detect.py
-
-It lists serial ports before/after and dumps raw bytes from any new port so you
-can eyeball whether LXSDF packets are streaming. If a new /dev/cu.usbserial-*
-appears and spews bytes -> Path A works, no Windows needed.
+The verified PID 0x0010 unit is USB HID.  With no arguments this tool finds it,
+sends the recovered TeleScan initialization sequence, captures real samples,
+and always sends STOP before closing.  ``--port`` retains a conservative serial
+probe for other LAXTHA variants such as the PID 0x002A CDC model.
 """
+import argparse
+import statistics
 import sys
 import time
-import argparse
+
+from polyg_hid import PolyGIHID, enumerate_devices
 
 try:
     import serial
-    from serial.tools import list_ports
 except ImportError:
     serial = None
-    list_ports = None
 
 
-def list_serial():
-    return {p.device: (p.description, p.hwid) for p in list_ports.comports()}
+def probe_hid(seconds):
+    matches = enumerate_devices()
+    if not matches:
+        print("PolyG-I HID not found (expected VID=0x0F1F PID=0x0010).")
+        return 1
+    item = matches[0]
+    print("PolyG-I HID found:")
+    print(f"  product={item.get('product_string')!r}")
+    print(f"  manufacturer={item.get('manufacturer_string')!r}")
+    print(f"  path={item.get('path')!r}")
+
+    reports = 0
+    rows = []
+    arrivals = []
+    with PolyGIHID() as device:
+        device.start()
+        print("  stream=STARTED (mode=0, PID/gain=0x10/6, sample selector=9)")
+        started = time.monotonic()
+        deadline = started + seconds
+        while time.monotonic() < deadline:
+            block = device.read_rows()
+            if block:
+                reports += 1
+                rows.extend(block)
+                arrivals.append(time.monotonic() - started)
+            else:
+                time.sleep(0.001)
+
+    if not rows:
+        print(f"FAIL: no HID INPUT report arrived in {seconds:.1f}s.")
+        return 1
+    elapsed = max(seconds, arrivals[-1] if arrivals else seconds)
+    print(f"PASS: {reports} reports, {len(rows)} 8-channel samples in {elapsed:.2f}s")
+    if len(arrivals) >= 2:
+        intervals = [b - a for a, b in zip(arrivals, arrivals[1:])]
+        median_interval = statistics.median(intervals)
+        measured_fs = 64.0 / median_interval
+        print(f"  median report interval={median_interval:.4f}s "
+              f"(~{measured_fs:.1f} sample rows/s)")
+    print("  channel ranges (raw signed counts):")
+    for channel in range(8):
+        values = [row[channel] for row in rows]
+        print(f"    ch{channel + 1}: {min(values):6d} .. {max(values):6d}")
+    print("  stream=STOPPED cleanly")
+    return 0
 
 
-def dump(port, baud, seconds=3.0):
-    print(f"\n--- raw dump {port} @ {baud} for {seconds}s ---")
-    try:
-        s = serial.Serial(port, baud, timeout=0.2)
-    except Exception as e:
-        print(f"  open failed: {e}")
-        return
-    t0 = time.time()
-    total = 0
-    while time.time() - t0 < seconds:
-        data = s.read(64)
-        if data:
-            total += len(data)
-            print("  " + " ".join(f"{b:02X}" for b in data[:32]))
-    s.close()
-    print(f"  got {total} bytes in {seconds}s "
-          f"({'STREAMING — Path A viable' if total else 'silent — check baud / try Path B'})")
-
-
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--port", help="probe this exact port instead of waiting for a new one")
-    ap.add_argument("--baud", type=int, action="append",
-                    help="baud to try (repeatable; defaults to common LAXTHA rates)")
-    args = ap.parse_args()
+def probe_serial(port, baud, seconds):
     if serial is None:
         print("pyserial not installed. Run: pip install pyserial")
         return 1
-    bauds = args.baud or [115200, 921600, 460800, 256000, 57600]
-
-    before = list_serial()
-    print("Ports BEFORE (unplug device, note these):")
-    for d, (desc, hw) in before.items():
-        print(f"  {d}  {desc}  [{hw}]")
-
-    if args.port:
-        cands = [args.port]
-    else:
-        input("\nNow plug in + power on the PolyG-I, then press Enter...")
-    after = list_serial()
-    print("\nPorts AFTER:")
-    for d, (desc, hw) in after.items():
-        print(f"  {d}  {desc}  [{hw}]")
-
-    if not args.port:
-        # Probe only ports that appeared after the prompt. Opening every serial
-        # device could reset or command the Arduino arm.
-        cands = sorted(set(after) - set(before))
-    if not cands:
-        print("\nNo new virtual COM port appeared. If the EEG was already plugged in,")
-        print("rerun with --port /dev/...; otherwise investigate Windows Path B.")
+    print(f"Serial compatibility probe: {port} @ {baud} for {seconds:.1f}s")
+    try:
+        with serial.Serial(port, baud, timeout=0.2) as device:
+            started = time.monotonic()
+            total = 0
+            while time.monotonic() - started < seconds:
+                data = device.read(256)
+                if data:
+                    total += len(data)
+                    print("  " + " ".join(f"{byte:02X}" for byte in data[:32]))
+    except Exception as exc:
+        print(f"FAIL: serial open/read failed: {exc}")
         return 1
+    print(f"{'PASS' if total else 'FAIL'}: received {total} serial bytes")
+    return 0 if total else 1
 
-    for port in cands:
-        for baud in bauds:
-            dump(port, baud, seconds=2.0)
-    return 0
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seconds", type=float, default=4.0,
+                        help="capture duration (default: 4 seconds)")
+    parser.add_argument("--port", help="probe a CDC/serial variant instead of HID")
+    parser.add_argument("--baud", type=int, default=115200,
+                        help="serial baud used with --port (default: 115200)")
+    args = parser.parse_args()
+    if args.seconds <= 0:
+        parser.error("--seconds must be > 0")
+    if args.port:
+        return probe_serial(args.port, args.baud, args.seconds)
+    try:
+        return probe_hid(args.seconds)
+    except (RuntimeError, OSError, ValueError) as exc:
+        print(f"FAIL: {type(exc).__name__}: {exc}")
+        return 1
 
 
 if __name__ == "__main__":

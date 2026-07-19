@@ -13,6 +13,7 @@ from lxsdf import LXSDFParser, build_packet
 import kinematics
 from errp import ErrPDetector
 from eeg_bridge import EEGBridge
+from polyg_hid import PolyGIHID, command_report, decode_report
 
 
 def check(cond, msg):
@@ -68,6 +69,72 @@ def test_lxsdf_rejects_invalid_shapes():
         check(False, "unencodable high byte rejected")
     except ValueError:
         check(True, "unencodable high byte rejected")
+
+
+def _encode_polyg_value(value):
+    word = value & 0xFFFF
+    return bytes([(((word >> 8) + 8) & 0xFF), word & 0xFF])
+
+
+def test_polyg_hid_protocol():
+    print("[polyg-hid] command layout + vendor raw block decoder")
+    check(command_report(1, 1, 0) == bytes([0, 1, 1, 0, 0, 0, 0, 0, 0]),
+          "start command has report ID plus 8-byte vendor payload")
+    pattern = [-32768, -1, 0, 1, 12345, 30000, 32767, -12345]
+    payload = b"".join(_encode_polyg_value(value) for value in pattern * 64)
+    rows = decode_report(payload, channels=8)
+    check(len(rows) == 64, "1024-byte report decodes to 64 eight-channel rows")
+    check(rows[0] == pattern and rows[-1] == pattern,
+          "high-byte bias and signed int16 conversion match vendor DLL")
+    check(decode_report(b"\x00" + payload, channels=8) == rows,
+          "optional Windows report-ID byte is accepted")
+    try:
+        decode_report(payload[:-1], channels=8)
+        check(False, "short HID report rejected")
+    except ValueError:
+        check(True, "short HID report rejected")
+
+    class FakeDevice:
+        def __init__(self):
+            self.writes = []
+
+        def open_path(self, path):
+            self.path = path
+
+        def set_nonblocking(self, value):
+            self.nonblocking = value
+
+        def write(self, report):
+            self.writes.append(bytes(report))
+            return len(report)
+
+        @staticmethod
+        def read(_size):
+            return []
+
+        def close(self):
+            self.closed = True
+
+    fake_device = FakeDevice()
+
+    class FakeHID:
+        @staticmethod
+        def enumerate(_vid, _pid):
+            return [{"path": b"fake-polyg"}]
+
+        @staticmethod
+        def device():
+            return fake_device
+
+    with PolyGIHID(hid_module=FakeHID) as device:
+        device.start()
+    expected = [
+        command_report(1, 0, 0), command_report(10, 0, 0),
+        command_report(2, 16, 9), command_report(4, 1, 0xD3),
+        command_report(1, 1, 0), command_report(1, 0, 0),
+    ]
+    check(fake_device.writes == expected,
+          "initialization and cleanup reproduce the exact vendor command sequence")
 
 
 def test_ik():
@@ -268,6 +335,7 @@ if __name__ == "__main__":
     test_lxsdf_resync()
     test_lxsdf_drops()
     test_lxsdf_rejects_invalid_shapes()
+    test_polyg_hid_protocol()
     test_ik()
     test_policy_veto_scope()
     test_arm_command_validation()
