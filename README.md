@@ -563,16 +563,21 @@ you run the loop nothing is guessed.
 pip install -r requirements.txt
 ```
 
-**1 — Arm.** Flash `firmware/arm_controller/arm_controller.ino` to the Arduino.
-Find its serial port and set `ARM_PORT` in `config.py`. Measure your arm's link
-lengths with a ruler into `L_BASE_HEIGHT / L_UPPER / L_FORE / L_HAND`. Then:
+**1 — Arm.** The connected Uno/CH340 is verified at
+`/dev/cu.usbserial-140` and has `firmware/arm_controller/arm_controller.ino`
+flashed. It responds to `PONG`, reports all seven angles, and completed the
+bounded base test `90° → 95° → 90°`. Measure the arm's link lengths with a ruler
+into `L_BASE_HEIGHT / L_UPPER / L_FORE / L_HAND`. Then:
 ```bash
-python3 laptop/arm_jog.py        # jog joints; fix SERVO_DIRECTION/OFFSET if a
+python3 laptop/arm_jog.py        # reads and preserves the current pose; use h
+                                 # explicitly when a home move is wanted
+                                 # jog joints; fix SERVO_DIRECTION/OFFSET if a
                                  # joint runs backwards or neutral is off.
                                  # try `ik 0 15` and check the tip goes there.
 ```
-After geometry, offsets, directions, and safe limits are confirmed, set
-`ARM_CALIBRATED=True` and `ARM_MOCK=False`.
+`ARM_MOCK=False` now selects the physical board. `ARM_CALIBRATED=False` still
+blocks the autonomous preflight. Set it to `True` only after geometry, offsets,
+directions, and mechanical safe limits are confirmed.
 
 **2 — EEG.** Plug in the PolyG-I and:
 ```bash

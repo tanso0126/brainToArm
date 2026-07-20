@@ -29,10 +29,11 @@ def main():
     policy = Policy()
     if getattr(arm, "mock", False):
         print("NOTE: ARM_MOCK=True — commands are printed only.")
-    pose = list(config.HOME_POSE)
+    pose = None
 
     try:
-        arm.home(); arm.wait_done()
+        pose = arm.status()
+        print(f"현재 자세: {pose}")
         print(__doc__)
         while True:
             cmd = input("jog> ").strip().split()
@@ -74,10 +75,8 @@ def main():
     except (EOFError, KeyboardInterrupt):
         print()
     finally:
-        try:
-            arm.home(); arm.wait_done()
-        except Exception as exc:
-            print(f"failed to home: {exc}")
+        if pose is not None:
+            print(f"현재 자세를 유지하고 연결을 닫습니다: {pose}")
         arm.close()
 
 

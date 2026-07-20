@@ -9,9 +9,9 @@ wrong constant here — no code changes.
 # ======================================================================
 # Arduino (robot arm)
 # ======================================================================
-ARM_PORT = "auto"          # "auto" = first usb-serial, or e.g. "/dev/cu.usbmodem1101"
+ARM_PORT = "/dev/cu.usbserial-140"  # verified Uno/CH340 port on this Mac
 ARM_BAUD = 115200
-ARM_MOCK = True             # explicit safety switch; False requires a real, responsive board
+ARM_MOCK = False            # physical Uno is connected; calibration gate remains below
 ARM_CALIBRATED = False      # set True only after arm_jog confirms geometry/offset/direction/limits
 N_JOINTS = 7
 UNUSED_JOINT = 2           # servo3 index (0-based) — attached but not driven

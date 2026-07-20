@@ -615,3 +615,67 @@ Before robot decisions, install the intended electrodes/reference/ground,
 eliminate rail-saturated or floating channels, map Fz/FCz/Cz empirically, and
 collect participant-specific labeled ErrP trials. `EEG_CONFIG_VERIFIED=False`
 remains intentional until those signal-level checks are complete.
+
+## Patch 16 — physical Arduino Uno bring-up and safe manual-control handoff
+
+### Intent
+
+Bring the newly USB-connected robot arm online without bypassing mechanical
+calibration safeguards or allowing a manual diagnostic tool to make unexpected
+home movements when it starts or exits.
+
+### Hardware discovery and firmware
+
+- macOS enumerated the new board as `/dev/cu.usbserial-140` with USB vendor
+  `0x1A86`, a CH340 serial interface. The user confirmed the board is an Uno.
+- Installed the declared `pyserial 3.5` runtime dependency. Installed Arduino AVR
+  Boards `1.8.8` and the official Servo library `1.3.0` through the Arduino IDE's
+  bundled CLI because this Arduino IDE installation initially had no AVR platform
+  or Servo headers.
+- The first non-motion serial probe received no `READY`, `PONG`, or angle status,
+  confirming that the repository protocol firmware was not running.
+- Compiled `firmware/arm_controller/arm_controller.ino` for
+  `arduino:avr:uno`: 6,054 bytes flash (18%) and 470 bytes SRAM (22%).
+- Uploaded it through `/dev/cu.usbserial-140`; the port re-enumerated normally.
+
+### Physical verification
+
+- Reopened at 115200 baud and received `PONG` for `P` and
+  `C 90 90 90 90 90 170 180` for the non-motion `S` status command.
+- Performed the first bounded actuation using only joint 1 while sending `-1` for
+  every other joint: base `90° → 95° → 90°`.
+- Both directions returned `OK`, then `DONE`, and status reported the exact
+  intermediate and final target values. The arm was left at its home pose.
+
+### Code and safety changes
+
+- Bound `ARM_PORT` to the verified port and set `ARM_MOCK=False`, so arm tools no
+  longer claim success while merely printing commands.
+- Kept `ARM_CALIBRATED=False`. Autonomous preflight therefore remains NO-GO
+  until each joint direction, offset, mechanical limit, link length, and IK
+  geometry is physically checked.
+- Added strict parsing for the firmware's seven-angle `C` response and a reusable
+  `ArmSerial.status()` method. Partial, non-integer, or out-of-range firmware
+  status is rejected.
+- Changed `arm_jog.py` to read the actual current pose on connection. It no
+  longer issues an implicit home command at startup or shutdown; home motion now
+  occurs only after the operator explicitly enters `h`.
+- Updated the real-hardware section in `README.md` with the verified board,
+  port, firmware, bounded motion result, and remaining calibration gate.
+
+### Verification
+
+- Physical `ArmSerial()` using repository config: connected, `ping=True`, status
+  `[90, 90, 90, 90, 90, 170, 180]`.
+- `python3 laptop/test_pipeline.py` — passed, including strict valid/malformed
+  arm-status regression cases and all existing system tests.
+- `python3 -m compileall -q laptop` — passed.
+- `git diff --check` over the Patch 16 files — passed.
+
+### Remaining mechanical gate
+
+Serial control and one bounded base move are verified, but reported servo angles
+are commanded angles, not external joint-position feedback. Before setting
+`ARM_CALIBRATED=True`, observe each physical joint one at a time, record which
+direction increasing angles move, tighten safe limits to avoid hard stops, measure
+link lengths, and verify the gripper and IK workspace.

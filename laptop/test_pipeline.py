@@ -235,8 +235,17 @@ def test_policy_veto_scope():
 
 def test_arm_command_validation():
     print("[arm] rejects malformed or unsafe commands before serial write")
-    from arm_serial import ArmSerial
+    from arm_serial import ArmSerial, parse_status_line
     arm = ArmSerial(mock=True)
+    check(parse_status_line("C 90 90 90 90 90 170 180") == config.HOME_POSE,
+          "strict firmware status is parsed")
+    for invalid in ("C 90 90", "C 90 90 90 bad 90 170 180",
+                    "C 90 90 90 90 90 170 181"):
+        try:
+            parse_status_line(invalid)
+            check(False, f"malformed status rejected: {invalid}")
+        except ValueError:
+            check(True, f"malformed status rejected: {invalid}")
     try:
         arm.send_angles([90] * (config.N_JOINTS - 1))
         check(False, "wrong joint count rejected")

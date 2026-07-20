@@ -23,6 +23,22 @@ def _serial_candidates():
     return sorted(set(cands))
 
 
+def parse_status_line(line):
+    """Parse firmware ``C a1..a7`` status without accepting partial data."""
+    parts = str(line).strip().split()
+    if len(parts) != config.N_JOINTS + 1 or parts[0] != "C":
+        raise ValueError(f"malformed arm status: {line!r}")
+    try:
+        values = [int(value) for value in parts[1:]]
+    except ValueError as exc:
+        raise ValueError(f"non-integer arm status: {line!r}") from exc
+    for index, value in enumerate(values):
+        if not config.SERVO_MIN[index] <= value <= config.SERVO_MAX[index]:
+            raise ValueError(
+                f"arm status joint {index + 1}={value} outside configured range")
+    return values
+
+
 class ArmSerial:
     def __init__(self, port=None, baud=None, mock=None):
         self.port = port or config.ARM_PORT
@@ -106,6 +122,23 @@ class ArmSerial:
             return True
         self.ser.write(b"P\n")
         return self._wait_for({"PONG"}, timeout=2.0) == "PONG"
+
+    def status(self):
+        """Read the firmware's current commanded servo angles without motion."""
+        if self.mock:
+            return list(config.HOME_POSE)
+        self.ser.write(b"S\n")
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            raw = self.ser.readline()
+            if not raw:
+                continue
+            line = raw.decode(errors="replace").strip()
+            if line.startswith("ERR"):
+                raise RuntimeError(f"arm firmware rejected status request: {line}")
+            if line.startswith("C"):
+                return parse_status_line(line)
+        raise TimeoutError("arm serial timeout waiting for status")
 
     def gripper(self, open_=True):
         a = [-1] * config.N_JOINTS
