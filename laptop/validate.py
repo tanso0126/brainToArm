@@ -221,8 +221,10 @@ def validate():
             or any(not isinstance(value, int) or isinstance(value, bool) or value <= 0
                    for value in config.WRIST_FRAME_SIZE)):
         errs.append("WRIST_FRAME_SIZE must contain two positive integers")
-    for name in ("WRIST_BLUE_HSV", "WRIST_RED_HSV"):
+    for name in ("WRIST_BLUE_HSV", "WRIST_RED_HSV", "WRIST_TARGET_HSV"):
         ranges = getattr(config, name)
+        if name == "WRIST_TARGET_HSV" and ranges is None:
+            continue
         try:
             valid = bool(ranges) and all(
                 len(pair) == 2 and len(pair[0]) == len(pair[1]) == 3
@@ -234,6 +236,9 @@ def validate():
             valid = False
         if not valid:
             errs.append(f"{name} must contain valid OpenCV HSV range pairs")
+    if (not isinstance(config.WRIST_TARGET_COLOR_NAME, str)
+            or not config.WRIST_TARGET_COLOR_NAME.strip()):
+        errs.append("WRIST_TARGET_COLOR_NAME must be a non-empty label")
     ordered_ratios = (
         0 < config.WRIST_MARKER_MIN_AREA_RATIO
         < config.WRIST_MARKER_MAX_AREA_RATIO < 1

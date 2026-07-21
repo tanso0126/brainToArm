@@ -563,7 +563,7 @@ def test_wrist_marker_and_target_geometry():
     cv2.rectangle(frame, (690, 620), (785, 719), (0, 0, 255), -1)
     # A valid object can appear anywhere in the camera, including the upper half.
     target_box = cv2.boxPoints(((665, 180), (120, 55), 20)).astype(np.int32)
-    cv2.fillConvexPoly(frame, target_box, (0, 220, 70))
+    cv2.fillConvexPoly(frame, target_box, (0, 255, 255))  # vivid yellow target
 
     observation, _masks = WristDetector().detect(frame)
     check(observation.gripper is not None,
@@ -572,7 +572,7 @@ def test_wrist_marker_and_target_geometry():
           "colored object remains separate from finger markers")
     check(abs(observation.target.center[0] - 665) < 2
           and abs(observation.target.center[1] - 180) < 2,
-          "target detection covers the full frame while ignoring skin hue")
+          "vivid-yellow target detection covers the full frame")
     check(abs(observation.gripper.center[0] - 567.5) < 2
           and abs(observation.gripper.center[1] - 669.5) < 2,
           "bottom-edge tapes define their measured midpoint")

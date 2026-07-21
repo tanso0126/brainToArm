@@ -1291,3 +1291,13 @@ red at `(657,618,117,102)`. Both correctly touch the bottom image boundary.
 - Synthetic search tests prove forward geometry rejects base collision, complete
   simultaneous slew transitions are checked, motors 2/3/4 move together, and
   search stops after the first target-visible frame.
+
+## Patch 31 — lock the competition target to vivid yellow
+
+- Set the full-frame wrist target to explicit OpenCV HSV
+  `H=22..38, S=140..255, V=100..255` with the label `vivid_yellow`.
+- Explicit target HSV bypasses automatic scene-color selection, preventing hands,
+  screens, and the blue/red finger tapes from becoming the search target.
+- Updated validation and the synthetic full-frame test to require a vivid-yellow
+  object. Camera and Uno processes remained stopped; no physical command was
+  issued during this configuration-only patch.

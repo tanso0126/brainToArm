@@ -744,6 +744,11 @@ live view is perception-only. Physical image-Jacobian and approach-depth
 calibration are still required after reconnecting the Uno before autonomous
 motion is enabled.
 
+The current competition target is fixed to **vivid yellow** in `config.py` using
+OpenCV HSV `H=22..38, S=140..255, V=100..255`. This explicit range is searched
+over the entire frame and avoids the red/blue finger tapes and ordinary wood/skin
+tones. Clicking in the preview can still replace it for a later target color.
+
 For the alternate wired OV2640 hardware proof, flash
 `firmware/esp32_camera_diagnostic` and run:
 

@@ -310,7 +310,10 @@ WRIST_MAX_GRIPPER_CENTER_ERROR_RATIO = 0.12  # fraction of image diagonal
 # the two finger-marker masks. A left-click in the live preview locks detection
 # to the clicked object's hue for difficult venues. Do not choose a target with
 # the same red/blue color as the finger tapes.
-WRIST_TARGET_HSV = None
+# Competition object: vivid yellow. This explicit range is used across the full
+# frame and bypasses automatic scene-color ranking. OpenCV hue is 0..179.
+WRIST_TARGET_COLOR_NAME = "vivid_yellow"
+WRIST_TARGET_HSV = [([22, 140, 100], [38, 255, 255])]
 WRIST_TARGET_MIN_SATURATION = 65
 WRIST_TARGET_MIN_VALUE = 35
 # Automatic mode ignores skin/red and blue because they conflict with a nearby
