@@ -1,10 +1,11 @@
 // USB-serial OV2640 diagnostic for the loose ESP32 + camera wiring.
 //
 // The pin map is the AI-Thinker map supplied with the physical wiring. This
-// sketch intentionally uses no Wi-Fi credentials: the Mac requests one JPEG
+// sketch intentionally uses no Wi-Fi credentials: the Mac requests one frame
 // over the CP2102 serial link to prove sensor, wiring, clock, and frame capture.
 
 #include "esp_camera.h"
+#include <Wire.h>
 
 constexpr int PWDN_GPIO_NUM = 32;
 constexpr int RESET_GPIO_NUM = -1;
@@ -29,11 +30,23 @@ uint16_t cameraPid = 0;
 
 void setup() {
   Serial.begin(115200);
+  Serial.setTimeout(100);
   Serial.setDebugOutput(false);
   delay(500);
   Serial.println("CAMERA_BOOT");
 
-  camera_config_t config;
+  // Give a loose OV2640 module a deterministic power cycle. Long jumper wires
+  // are also more reliable with SCCB below the usual 100 kHz I2C clock.
+  pinMode(PWDN_GPIO_NUM, OUTPUT);
+  digitalWrite(PWDN_GPIO_NUM, HIGH);
+  delay(100);
+  digitalWrite(PWDN_GPIO_NUM, LOW);
+  delay(250);
+  Wire.begin(SIOD_GPIO_NUM, SIOC_GPIO_NUM, 50000);
+
+  // Zero-initialize the full structure. ESP32 Arduino 2.x added frame-buffer
+  // policy fields that must not contain arbitrary stack data.
+  camera_config_t config = {};
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
   config.pin_d0 = Y2_GPIO_NUM;
@@ -48,17 +61,20 @@ void setup() {
   config.pin_pclk = PCLK_GPIO_NUM;
   config.pin_vsync = VSYNC_GPIO_NUM;
   config.pin_href = HREF_GPIO_NUM;
-  config.pin_sscb_sda = SIOD_GPIO_NUM;
-  config.pin_sscb_scl = SIOC_GPIO_NUM;
+  config.pin_sccb_sda = -1;
+  config.pin_sccb_scl = -1;
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
-  config.pixel_format = PIXFORMAT_JPEG;
-  // This core/sensor combination probes reliably at VGA. Once initialized,
-  // lower it to QVGA so the no-PSRAM DevKit has ample internal frame memory.
-  config.frame_size = FRAMESIZE_VGA;
+  // RGB565 has a fixed frame length. It lets this diagnostic distinguish an
+  // electrical data-bus problem from a missing/corrupt JPEG end marker.
+  config.pixel_format = PIXFORMAT_RGB565;
+  config.frame_size = FRAMESIZE_QQVGA;
   config.jpeg_quality = 12;
   config.fb_count = psramFound() ? 2 : 1;
+  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+  config.fb_location = psramFound() ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
+  config.sccb_i2c_port = 0;
 
   cameraError = esp_camera_init(&config);
   if (cameraError != ESP_OK) {
@@ -68,28 +84,63 @@ void setup() {
 
   sensor_t *sensor = esp_camera_sensor_get();
   cameraPid = sensor->id.PID;
-  const int frameSizeResult = sensor->set_framesize(sensor, FRAMESIZE_QVGA);
+  const int frameSizeResult = sensor->set_framesize(sensor, FRAMESIZE_QQVGA);
+  const int xclkResult = sensor->set_xclk(sensor, LEDC_TIMER_0, 10);
   Serial.printf("FRAME_SIZE_RESULT %d\n", frameSizeResult);
+  Serial.printf("XCLK_RESULT %d\n", xclkResult);
 
-  // Let exposure/white balance settle and discard stale startup frames.
-  int warmupFrames = 0;
-  for (int i = 0; i < 4; ++i) {
-    camera_fb_t *frame = esp_camera_fb_get();
-    if (frame != nullptr) {
-      ++warmupFrames;
-      esp_camera_fb_return(frame);
+  cameraReady = frameSizeResult == 0 && xclkResult == 0;
+  Serial.printf("CAMERA_READY pid=0x%02x psram=%d xclk=10MHz\n",
+                cameraPid, psramFound() ? 1 : 0);
+}
+
+uint32_t countTransitions(int pin, uint32_t durationUs) {
+  uint32_t transitions = 0;
+  int previous = digitalRead(pin);
+  const uint32_t start = micros();
+  while ((uint32_t)(micros() - start) < durationUs) {
+    const int current = digitalRead(pin);
+    if (current != previous) {
+      ++transitions;
+      previous = current;
     }
-    delay(120);
   }
+  return transitions;
+}
 
-  cameraReady = frameSizeResult == 0;
-  Serial.printf("CAMERA_READY pid=0x%02x psram=%d warmup=%d/4 xclk=20MHz\n",
-                cameraPid, psramFound() ? 1 : 0, warmupFrames);
+uint8_t dataTransitionMask(uint32_t durationUs) {
+  const int pins[8] = {
+    Y2_GPIO_NUM, Y3_GPIO_NUM, Y4_GPIO_NUM, Y5_GPIO_NUM,
+    Y6_GPIO_NUM, Y7_GPIO_NUM, Y8_GPIO_NUM, Y9_GPIO_NUM
+  };
+  int previous[8];
+  for (int i = 0; i < 8; ++i) previous[i] = digitalRead(pins[i]);
+  uint8_t changed = 0;
+  const uint32_t start = micros();
+  while ((uint32_t)(micros() - start) < durationUs) {
+    for (int i = 0; i < 8; ++i) {
+      const int current = digitalRead(pins[i]);
+      if (current != previous[i]) {
+        changed |= (1U << i);
+        previous[i] = current;
+      }
+    }
+  }
+  return changed;
+}
+
+void sendSignalDiagnostics() {
+  const uint32_t pclk = countTransitions(PCLK_GPIO_NUM, 20000);
+  const uint32_t href = countTransitions(HREF_GPIO_NUM, 200000);
+  const uint32_t vsync = countTransitions(VSYNC_GPIO_NUM, 500000);
+  const uint8_t data = dataTransitionMask(200000);
+  Serial.printf("SIGNALS pclk=%u href=%u vsync=%u data=0x%02x\n",
+                pclk, href, vsync, data);
 }
 
 void sendFrame() {
   camera_fb_t *frame = nullptr;
-  for (int attempt = 0; attempt < 8 && frame == nullptr; ++attempt) {
+  for (int attempt = 0; attempt < 3 && frame == nullptr; ++attempt) {
     frame = esp_camera_fb_get();
     if (frame == nullptr) delay(120);
   }
@@ -107,18 +158,20 @@ void sendFrame() {
 
 void loop() {
   if (Serial.available()) {
-    const int command = Serial.read();
-    if (command == '?') {
+    String command = Serial.readStringUntil('\n');
+    command.trim();
+    if (command == "STATUS") {
       if (cameraReady) {
         Serial.printf("CAMERA_READY pid=0x%02x psram=%d\n",
                       cameraPid, psramFound() ? 1 : 0);
       } else {
         Serial.printf("CAMERA_ERROR 0x%08x\n", cameraError);
       }
-    } else if ((command == 'C' || command == 'c') && cameraReady) {
+    } else if (command == "SIGNALS" && cameraReady) {
+      sendSignalDiagnostics();
+    } else if (command == "CAPTURE" && cameraReady) {
       sendFrame();
     }
-    while (Serial.available()) Serial.read();
   }
   delay(10);
 }

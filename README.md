@@ -53,6 +53,21 @@ precise steps to bring it up. No other context is required.
 > `python3 laptop/planar_pick.py --run`. If the camera moves, remove the object
 > once and run `python3 laptop/planar_pick.py --learn-background` first.
 
+> ### ✅ Wired ESP32 + OV2640 frame capture works
+>
+> With the robot arm disconnected, the loose OV2640 was physically verified on
+> the classic no-PSRAM ESP32 at `/dev/cu.usbserial-0001`. The current reliable
+> proof mode is 160x120 RGB565 over USB serial; the Mac validates all 38,400
+> bytes, decodes the sensor's big-endian pixel order, and saves a PNG. Run:
+>
+> ```bash
+> python3 laptop/capture_esp32_camera.py
+> ```
+>
+> The ESP32 must have `firmware/esp32_camera_diagnostic` flashed with ESP32
+> Arduino core 2.0.17. JPEG capture on this loose-jumper/no-PSRAM setup is not
+> yet the verified path; do not describe the current diagnostic as Wi-Fi video.
+
 ---
 
 ## Table of contents
@@ -240,8 +255,9 @@ brainToArm/
 ├── example.cpp                    ← the ORIGINAL hardcoded servo demo (obsolete;
 │                                    kept only as a reference to the motor map)
 ├── firmware/
-│   └── arm_controller/
-│       └── arm_controller.ino     ← Arduino firmware (flash this)
+│   ├── arm_controller/
+│   │   └── arm_controller.ino     ← Arduino firmware (flash this)
+│   └── esp32_camera_diagnostic/   ← wired OV2640 USB frame/signal proof
 └── laptop/                        ← everything that runs on the laptop (Python)
     ├── config.py                  ← ALL tunable constants in one place
     ├── orchestrator.py            ← the main shared-autonomy loop + preflight
@@ -264,6 +280,7 @@ brainToArm/
     ├── vision.py                  ← camera → objects + arm tip (markerless)
     ├── calibrate_workspace.py     ← click 4 points → pixel↔cm mapping
     ├── camera_calibrate.py        ← optional lens (fisheye) calibration
+    ├── capture_esp32_camera.py    ← capture/validate one wired OV2640 frame
     │
     ├── sim.py                     ← toy world so the mock runs coherently
     ├── validate.py                ← static config sanity checks
@@ -631,6 +648,18 @@ python3 laptop/calibrate_workspace.py   # click 4 known cm points -> homography
 Paste the printed points into `config.py`. (Optionally run `camera_calibrate.py`
 if the lens visibly bends straight lines.) The calibration tool also prints the
 required `CAM_CALIBRATED=True` confirmation flag.
+
+For the separate wrist-camera hardware bring-up, keep the arm unplugged, flash
+`firmware/esp32_camera_diagnostic`, and run:
+
+```bash
+python3 laptop/capture_esp32_camera.py
+```
+
+A passing result currently reports `CAMERA_READY pid=0x26 psram=0` followed by
+`FRAME 160 120 38400 0` and writes
+`data/vision/esp32_camera_test.png`. This proves the camera and frame bus; it
+does not yet replace the calibrated overhead-camera source in `vision.py`.
 
 **4 — ErrP model.** The baseline heuristic already works, but for best accuracy:
 ```bash

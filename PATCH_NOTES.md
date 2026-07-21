@@ -878,3 +878,61 @@ without accidentally opening or resetting the camera board.
   ESP32 and Uno serial nodes disappeared from `/dev` simultaneously. Since the
   Uno had already passed live ping/status after reflashing, the remaining fault
   is the shared USB hub/cable/power path rather than arm protocol or selection.
+
+## Patch 23 — recover the wired OV2640 frame path
+
+### Intent
+
+Turn the ESP32-only OV2640 setup from sensor detection without frames into a
+physically verified camera capture path, while keeping the robot arm unplugged.
+
+### Root cause and evidence
+
+- The previous Arduino ESP32 core was 1.0.6. Its camera driver repeatedly timed
+  out in `esp_camera_fb_get()` even though the OV2640 answered SCCB as PID
+  `0x26`. The local toolchain was upgraded to ESP32 Arduino core 2.0.17.
+- Added an on-device parallel-signal diagnostic. On the connected module it
+  measured active PCLK, HREF, and VSYNC plus transitions on every data bit
+  (`data=0xff`), ruling out a completely open clock, sync, or D0–D7 wire.
+- The loose module was intermittently failing its first SCCB register write at
+  the newer driver's normal timing. A deterministic GPIO32 power cycle and a
+  preconfigured 50 kHz SCCB/I2C bus made sensor initialization reliable.
+- JPEG acquisition still timed out despite valid sync/data activity. Switching
+  the proof path to fixed-length RGB565 separated JPEG-marker handling from
+  physical frame acquisition and produced the complete expected frame.
+- The first Mac rendering treated the two RGB565 bytes in the wrong order. A
+  four-way endian/channel comparison showed that the OV2640 stream is
+  big-endian RGB565; decoding it that way removed the apparent rainbow noise.
+
+### Changes
+
+- Zero-initialized the full camera configuration and explicitly selected DRAM
+  frame buffers for this classic ESP32 board, which has no PSRAM.
+- Initialized at the sensor-stable 20 MHz XCLK, then lowered capture XCLK to
+  10 MHz to add timing margin for the long jumper wires.
+- Added `SIGNALS`, `STATUS`, and `CAPTURE` line commands. Exact word matching
+  prevents arbitrary single UART characters from being treated as capture
+  requests and bounds failed frame retries.
+- Configured QQVGA RGB565 (`160x120`, 2 bytes/pixel) as the reliable diagnostic
+  mode and retained JPEG validation in the Mac utility for future JPEG builds.
+- Extended the Mac capture utility to validate exact RGB565 length, decode its
+  big-endian 5/6/5 color fields, save a normal PNG, and report truncation or
+  unsupported formats explicitly. Added Pillow as the declared conversion
+  dependency and changed the default diagnostic output extension to `.png`.
+- Updated the README with the exact verified command and result, the added
+  firmware/utility locations, and an explicit boundary between this USB frame
+  proof and the not-yet-integrated Wi-Fi/robot vision source.
+
+### Verification
+
+- ESP32 Arduino 2.0.17 compilation and upload to
+  `/dev/cu.usbserial-0001` passed on the connected ESP32-D0WD-V3 revision 3.1.
+- Live status returned `CAMERA_READY pid=0x26 psram=0`.
+- Live capture returned `FRAME 160 120 38400 0`; 38,400 bytes is exactly
+  `160 * 120 * 2`, so the frame was neither short nor padded unexpectedly.
+- The Mac produced a valid 160x120 RGB PNG at the ignored diagnostic path
+  `data/vision/esp32_camera_test.png` and it was visually inspected. Scene
+  edges and the central round object were spatially coherent after the endian
+  correction, proving a real image rather than a repeated or synthetic buffer.
+- The verified PNG SHA-256 was
+  `2d38fd61df7557eb1c801dfd3daacfe6c6a2d8dd2aa82c181e34896980f09a26`.
