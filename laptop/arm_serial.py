@@ -40,6 +40,32 @@ def parse_status_line(line):
     return values
 
 
+def parse_home_pose_line(line):
+    """Parse the ``H a1..a7`` pose compiled into the connected Uno."""
+    parts = str(line).strip().split()
+    if len(parts) != config.N_JOINTS + 1 or parts[0] != "H":
+        raise ValueError(f"malformed firmware home pose: {line!r}")
+    try:
+        values = [int(value) for value in parts[1:]]
+    except ValueError as exc:
+        raise ValueError(f"non-integer firmware home pose: {line!r}") from exc
+    if any(not 0 <= value <= 180 for value in values):
+        raise ValueError(f"firmware home pose outside 0..180: {line!r}")
+    return values
+
+
+def assert_home_pose_match(compiled_pose, local_pose=None):
+    """Fail closed when source and connected firmware describe different homes."""
+    local_pose = list(config.HOME_POSE if local_pose is None else local_pose)
+    compiled_pose = list(compiled_pose)
+    if compiled_pose != local_pose:
+        raise RuntimeError(
+            "Uno firmware HOME_POSE does not match local home_pose.h: "
+            f"firmware={compiled_pose}, local={local_pose}. "
+            "Run `python3 laptop/arm_jog.py --upload` before moving the arm.")
+    return True
+
+
 class ArmSerial:
     def __init__(self, port=None, baud=None, mock=None):
         self.port = port or config.ARM_PORT
@@ -68,6 +94,11 @@ class ArmSerial:
             time.sleep(2.0)  # wait out the auto-reset on connect
             self._drain()
             print(f"[arm] connected {self.port} @ {self.baud}")
+            try:
+                self.verify_firmware_home_pose()
+            except Exception:
+                self.close()
+                raise
 
     def _drain(self):
         if self.ser:
@@ -141,6 +172,32 @@ class ArmSerial:
             if line.startswith("C"):
                 return parse_status_line(line)
         raise TimeoutError("arm serial timeout waiting for status")
+
+    def firmware_home_pose(self):
+        """Return the HOME pose compiled into the connected firmware."""
+        if self.mock:
+            return list(config.HOME_POSE)
+        self.ser.write(b"H\n")
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            raw = self.ser.readline()
+            if not raw:
+                continue
+            line = raw.decode(errors="replace").strip()
+            if line.startswith("ERR"):
+                raise RuntimeError(
+                    "connected Uno firmware cannot report its HOME_POSE; "
+                    "upload the current sketch with "
+                    "`python3 laptop/arm_jog.py --upload`")
+            if line.startswith("H"):
+                return parse_home_pose_line(line)
+        raise TimeoutError(
+            "arm firmware did not report HOME_POSE; upload the current sketch "
+            "with `python3 laptop/arm_jog.py --upload`")
+
+    def verify_firmware_home_pose(self):
+        """Require the connected firmware to match local ``home_pose.h``."""
+        return assert_home_pose_match(self.firmware_home_pose())
 
     def grip_feedback(self):
         """Return optional A0 pressure/current feedback, or None if uninstalled."""

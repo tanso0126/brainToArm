@@ -1019,3 +1019,40 @@ damaged frames from entering the later robot-vision pipeline.
 - Added a hardware-free regression proving neutral channels converge, strong
   red object color remains dominant, colored pixels are excluded from gain
   estimation, and channel gains remain bounded.
+
+## Patch 25 — fail-safe Uno HOME-pose firmware synchronization
+
+### Intent
+
+Prevent a changed `home_pose.h` from being used by laptop motion code while the
+connected Uno still contains an older startup pose.
+
+### Changes
+
+- Added the read-only firmware command `H`, which reports the exact seven HOME
+  angles compiled into the Uno without commanding motion.
+- Every real `ArmSerial` connection now compares that response with the local
+  `home_pose.h` values before allowing any caller—jog, autonomous pick, or ErrP
+  recording—to proceed. Old firmware and mismatched values fail closed with an
+  exact recovery command.
+- Added `arm_jog.py --upload`. It finds the system or Arduino IDE-bundled CLI,
+  compiles for `arduino:avr:uno`, selects exactly one non-ESP32 serial port,
+  uploads, reconnects, and verifies the compiled HOME pose before entering the
+  console.
+- Preserved the pending physical-pose adjustment: servo2 is now 70 degrees and
+  servo4 is now 90 degrees. The laptop reads these values directly from the same
+  header.
+- Documented that uploading resets and moves the arm, so its workspace must be
+  cleared first.
+
+### Verification
+
+- Hardware-free tests cover valid and malformed `H` responses, matching HOME
+  values, and rejection of a one-degree stale-firmware mismatch.
+- The complete Python regression suite passed, including arm command validation,
+  vision, visual-servo, EEG transport, filtering, and ErrP checks.
+- Arduino CLI compilation for `arduino:avr:uno` passed: 6,234 bytes of flash
+  (19%) and 476 bytes of global RAM (23%).
+- The Uno was disconnected during this patch, so compilation was verified
+  locally and physical upload was intentionally deferred until the arm is
+  connected and its workspace is clear.

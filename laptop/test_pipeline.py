@@ -236,7 +236,9 @@ def test_policy_veto_scope():
 
 def test_arm_command_validation():
     print("[arm] rejects malformed or unsafe commands before serial write")
-    from arm_serial import ArmSerial, _serial_candidates, parse_status_line
+    from arm_serial import (ArmSerial, _serial_candidates,
+                            assert_home_pose_match, parse_home_pose_line,
+                            parse_status_line)
     from unittest.mock import patch
 
     with patch("arm_serial.glob.glob") as mocked_glob:
@@ -252,6 +254,18 @@ def test_arm_command_validation():
     home_status = "C " + " ".join(str(angle) for angle in config.HOME_POSE)
     check(parse_status_line(home_status) == config.HOME_POSE,
           "strict firmware status is parsed")
+    firmware_home = "H " + " ".join(str(angle) for angle in config.HOME_POSE)
+    check(parse_home_pose_line(firmware_home) == config.HOME_POSE,
+          "compiled firmware HOME pose is parsed")
+    check(assert_home_pose_match(config.HOME_POSE),
+          "matching local and firmware HOME poses pass")
+    stale_home = list(config.HOME_POSE)
+    stale_home[config.J_SHOULDER] += 1
+    try:
+        assert_home_pose_match(stale_home)
+        check(False, "stale firmware HOME pose rejected")
+    except RuntimeError:
+        check(True, "stale firmware HOME pose rejected")
     base_turn = list(config.HOME_POSE)
     base_turn[config.J_BASE] = 180
     check(arm.send_angles(base_turn) == "OK",
@@ -263,6 +277,13 @@ def test_arm_command_validation():
             check(False, f"malformed status rejected: {invalid}")
         except ValueError:
             check(True, f"malformed status rejected: {invalid}")
+    for invalid in ("H 90 90", "H 90 90 90 bad 90 0 180",
+                    "H 90 90 90 180 90 0 181"):
+        try:
+            parse_home_pose_line(invalid)
+            check(False, f"malformed firmware HOME rejected: {invalid}")
+        except ValueError:
+            check(True, f"malformed firmware HOME rejected: {invalid}")
     try:
         arm.send_angles([90] * (config.N_JOINTS - 1))
         check(False, "wrong joint count rejected")

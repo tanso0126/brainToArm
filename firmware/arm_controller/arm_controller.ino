@@ -20,6 +20,7 @@
 //                                   use -1 to leave a joint's target unchanged
 //     "P\n"                        ping -> replies "PONG"
 //     "S\n"                        status -> replies current angles "C a1..a7"
+//     "H\n"                        compiled home pose -> "H a1..a7"
 //     "F\n"                        grip sensor -> "F 0..1023", or "F -1" absent
 //   Reply to laptop:
 //     "OK\n"      command accepted
@@ -114,6 +115,15 @@ void sendStatus() {
   Serial.println();
 }
 
+void sendHomePose() {
+  Serial.print("H");
+  for (uint8_t i = 0; i < N; i++) {
+    Serial.print(' ');
+    Serial.print(HOME_DEG[i]);
+  }
+  Serial.println();
+}
+
 void sendGripFeedback() {
   if (!GRIP_FEEDBACK_ENABLED) {
     Serial.println("F -1");
@@ -137,6 +147,10 @@ void handleLine(char* line) {
       break;
     case 'S':
       if (line[1] == '\0') sendStatus();
+      else                  Serial.println("ERR parse");
+      break;
+    case 'H':
+      if (line[1] == '\0') sendHomePose();
       else                  Serial.println("ERR parse");
       break;
     case 'F':

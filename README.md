@@ -624,7 +624,10 @@ reports all seven angles, and completed the
 bounded base test `90° → 95° → 90°`. Measure the arm's link lengths with a ruler
 into `L_BASE_HEIGHT / L_UPPER / L_FORE / L_HAND`. Then:
 ```bash
-python3 laptop/arm_jog.py        # reads and preserves the current pose; use h
+python3 laptop/arm_jog.py --upload # after changing home_pose.h: compile, flash,
+                                  # verify the Uno, then enter the jog console
+python3 laptop/arm_jog.py        # later runs verify the flashed HOME first;
+                                 # reads and preserves the current pose; use h
                                  # explicitly when a home move is wanted
                                  # jog joints; fix SERVO_DIRECTION/OFFSET if a
                                  # joint runs backwards or neutral is off.
@@ -636,8 +639,13 @@ directions, and mechanical safe limits are confirmed.
 
 The single source of truth for the power-on and `h` home pose is
 `firmware/arm_controller/home_pose.h`. Change only the number on the named
-`ARM_HOME_SERVO_n` line and upload the sketch; both the Uno firmware and laptop
-controller read that same value, so no second copy needs to be synchronized.
+`ARM_HOME_SERVO_n` line, connect the Uno, and run
+`python3 laptop/arm_jog.py --upload`. The upload resets the Uno and moves the
+physical arm to the new pose, so clear its workspace first. Every real
+`ArmSerial` connection—including autonomous and recording code—queries the HOME
+pose compiled into the Uno before accepting commands. Missing query support or
+a mismatch stops the run and names the upload command; stale firmware can no
+longer continue silently.
 
 **2 — EEG.** Plug in the PolyG-I and:
 ```bash

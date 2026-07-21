@@ -19,13 +19,24 @@ Checklist while jogging:
   * Run `ik 0 15` etc. and check the tip lands near that spot on the table.
     Consistent offset -> refine link lengths L_* or the servo offsets.
 """
+import argparse
+
 import config
+from arm_firmware import upload_arm_firmware
 from arm_serial import ArmSerial
 from policy import Policy
 
 
-def main():
-    arm = ArmSerial()
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Safely upload and/or jog the seven-servo robot arm")
+    parser.add_argument(
+        "--upload", action="store_true",
+        help="compile/upload arm_controller before connecting (resets/moves arm)")
+    args = parser.parse_args(argv)
+
+    port = upload_arm_firmware() if args.upload else None
+    arm = ArmSerial(port=port)
     policy = Policy()
     if getattr(arm, "mock", False):
         print("NOTE: ARM_MOCK=True — commands are printed only.")
