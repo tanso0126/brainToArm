@@ -1129,3 +1129,64 @@ while commanding motor 6/D8 rotates the gripper assembly.
   bytes of flash (19%) and 461 bytes of global RAM (22%).
 - Physical upload is intentionally left to a fresh `arm_jog.py --upload` run
   after closing the still-running pre-swap interactive process.
+
+## Patch 28 — continuous TAR workload and adaptive ErrP autonomy
+
+### Intent
+
+Separate the two EEG roles precisely: all eight channels provide instantaneous,
+action-locked ErrP evidence, while CH1–CH4 theta and CH8 alpha continuously
+estimate cognitive load. Use session-rest-normalized TAR to allocate more
+authority to the robot under higher load and more to the human/ErrP under lower
+load.
+
+### Signal definition
+
+- Welch PSD runs on a rolling two-second window every second. Theta is 4–8 Hz
+  on each of CH1–CH4 and alpha is 8–13 Hz on CH8.
+- `theta_power` is the mean of the four extracted channel powers;
+  `TAR = theta_power / alpha_power_CH8`.
+- An eight-second still resting segment establishes `rest_TAR`. The control
+  variable is `(TAR - rest_TAR) / rest_TAR`, followed by an EMA and ±10% rest
+  deadband. Raw per-channel powers, TAR, rest TAR, raw delta, and smoothed delta
+  remain available in the typed state for logging/UI use.
+
+### Adaptive autonomy
+
+- Positive normalized TAR increases robot weight; negative TAR increases human
+  weight. The mapping is bounded to robot weights 0.20–0.80 and invalid/flat
+  spectral windows fail toward 0.20 rather than granting robot authority.
+- Robot-leaning allocation raises the ErrP veto threshold and expands the
+  decision-application stride up to three action checkpoints. Human-leaning
+  allocation lowers the threshold and applies every checkpoint.
+- EEG acquisition and event-locked ErrP probability calculation are never
+  skipped. A non-application checkpoint is logged as observed-only; a very
+  strong `P(error)>=0.90` always overrides the stride and vetoes.
+- Added a background cognitive-load monitor so TAR updates continuously between
+  robot actions. The orchestrator prints TAR, normalized delta, human/robot
+  weights, adaptive threshold, and whether the current ErrP was applied.
+
+### ErrP channel correction
+
+- Replaced the previous three-channel provisional setting with CH1–CH8. Model
+  metadata format 2 records all eight channels and spatial-reference mode, so an
+  incompatible older model is rejected and must be retrained.
+- Disabled all-channel CAR for this average: averaging every CAR-referenced
+  channel is mathematically zero. The baseline backend instead band-passes,
+  baseline-corrects, and averages the configured eight signals; participant
+  training remains required before claiming real classification accuracy.
+
+### Verification
+
+- Synthetic PSD tests prove theta-up/alpha-down produces positive normalized
+  TAR and the reverse produces negative TAR using exactly CH1–CH4 and CH8.
+- Tests prove rest/deadband stays 50:50 with stride 1, higher TAR raises robot
+  weight/threshold/stride, lower TAR does the reverse, observed-only ErrP is
+  still calculated, flat/invalid PSD fails toward minimum robot authority, and
+  the strong-ErrP override remains active.
+- The all-eight-channel baseline ErrP test separated synthetic clean/error
+  epochs (`P(clean)=0.04`, `P(error)=1.00`). These synthetic probabilities are a
+  code-path regression, not a human-subject accuracy claim.
+- A background-thread end-to-end mock run completed rest calibration, continuous
+  TAR update, adaptive ErrP decision, visual alignment, grasp, and delivery of
+  one object.

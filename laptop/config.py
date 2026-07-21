@@ -184,11 +184,40 @@ EEG_TCP_PORT = 9000
 # ======================================================================
 ERRP_BACKEND = "baseline"  # "baseline" (zero-training heuristic) | "model" (trained)
 ERRP_MODEL_PATH = "errp_model.pkl"
-ERRP_FRONTOCENTRAL = [0, 1, 2]   # EEG ch indices over Fz/FCz/Cz — set to YOUR montage
+ERRP_CHANNELS = list(range(8))    # all acquired EEG channels, zero-based CH1..CH8
+ERRP_USE_CAR = False        # all-channel averaging after CAR would cancel identically
 ERRP_WINDOW_S = 0.8        # epoch length after action onset
 ERRP_BASELINE_S = 0.2      # pre-onset baseline for correction
 ERRP_BAND = (1.0, 10.0)    # ErrP bandpass (Hz)
 ERRP_THRESHOLD = 0.5       # decision threshold (tune with real data)
+
+# Continuous cognitive load: TAR = mean(theta power CH1..CH4) / alpha power CH8.
+# Normalize within participant/session as (current TAR - resting TAR) / resting TAR.
+COG_THETA_CHANNELS = [0, 1, 2, 3]
+COG_ALPHA_CHANNELS = [7]
+COG_THETA_BAND = (4.0, 8.0)
+COG_ALPHA_BAND = (8.0, 13.0)
+COG_WINDOW_S = 2.0
+COG_UPDATE_S = 1.0
+COG_REST_S = 8.0
+COG_PSD_SEGMENT_S = 2.0
+COG_MIN_WINDOW_FRACTION = 0.80
+COG_MIN_SIGNAL_STD = 1e-9
+COG_MIN_ALPHA_POWER = 1e-12
+COG_EMA_ALPHA = 0.30
+
+# Adaptive autonomy. Invalid workload never grants extra robot authority.
+AUTONOMY_ROBOT_BASE = 0.50
+AUTONOMY_ROBOT_MIN = 0.20
+AUTONOMY_ROBOT_MAX = 0.80
+AUTONOMY_TAR_GAIN = 0.50
+AUTONOMY_TAR_DEADBAND = 0.10
+AUTONOMY_RELATIVE_MIN = -0.60
+AUTONOMY_RELATIVE_MAX = 1.50
+AUTONOMY_ERRP_THRESHOLD_GAIN = 0.50
+AUTONOMY_STRIDE_TAR_STEP = 0.25
+AUTONOMY_MAX_ERRP_STRIDE = 3
+AUTONOMY_ERRP_OVERRIDE_THRESHOLD = 0.90
 
 # ======================================================================
 # Vision (overhead camera)

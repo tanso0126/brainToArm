@@ -13,6 +13,7 @@ from lxsdf import LXSDFParser, build_packet
 import kinematics
 from errp import ErrPDetector
 from eeg_bridge import EEGBridge
+from cognitive_load import AutonomyAllocator, CognitiveLoadEstimator
 from polyg_hid import (
     ADC_VOLTS_PER_COUNT, PolyGIHID, command_report, counts_to_adc_mv, decode_report)
 from eeg_dashboard import EEGSignalProcessor, analyze_signal_quality, sanitize_recording_name
@@ -374,15 +375,87 @@ def _synth_epoch(fs, error=False):
         row = []
         for ch in range(config.EEG_CHANNELS):
             v = 5 * math.sin(2 * math.pi * 10 * t)
-            if error and ch in config.ERRP_FRONTOCENTRAL and 0.25 < t < 0.5:
+            if error and ch in config.ERRP_CHANNELS and 0.25 < t < 0.5:
                 v -= 40    # negative deflection ~ErrP
             row.append(v)
         win.append(row)
     return win
 
 
+def _synth_load_window(theta_amplitude, alpha_amplitude, seconds=4.0):
+    rows = []
+    for sample in range(int(config.EEG_FS * seconds)):
+        t = sample / config.EEG_FS
+        theta = theta_amplitude * math.sin(2 * math.pi * 6 * t)
+        alpha = alpha_amplitude * math.sin(2 * math.pi * 10 * t)
+        row = []
+        for channel in range(config.EEG_CHANNELS):
+            if channel in config.COG_THETA_CHANNELS:
+                row.append(theta + 0.2 * alpha)
+            elif channel in config.COG_ALPHA_CHANNELS:
+                row.append(alpha + 0.2 * theta)
+            else:
+                row.append(math.sin(2 * math.pi * (9 + channel * 0.1) * t))
+        rows.append(row)
+    return rows
+
+
+def test_cognitive_load_and_autonomy():
+    print("[load] channel-specific TAR + rest normalization + autonomy allocation")
+    rest = _synth_load_window(theta_amplitude=4.0, alpha_amplitude=8.0)
+    high = _synth_load_window(theta_amplitude=8.0, alpha_amplitude=4.0)
+    low = _synth_load_window(theta_amplitude=2.0, alpha_amplitude=12.0)
+
+    high_estimator = CognitiveLoadEstimator()
+    baseline = high_estimator.calibrate(rest)
+    high_state = high_estimator.update(high)
+    low_estimator = CognitiveLoadEstimator()
+    low_estimator.calibrate(rest)
+    low_state = low_estimator.update(low)
+    check(baseline.relative_tar == 0.0,
+          "resting TAR is the zero point")
+    check(high_state.relative_tar > 0 and low_state.relative_tar < 0,
+          "(current-rest)/rest follows theta-up/alpha-down load direction")
+    check(len(high_state.theta_powers) == 4
+          and len(high_state.alpha_powers) == 1,
+          "TAR uses theta CH1-CH4 and alpha CH8")
+
+    allocator = AutonomyAllocator()
+    rest_allocation = allocator.allocate(baseline)
+    high_allocation = allocator.allocate(high_state)
+    low_allocation = allocator.allocate(low_state)
+    check(rest_allocation.robot_weight == config.AUTONOMY_ROBOT_BASE
+          and rest_allocation.errp_apply_stride == 1,
+          "rest/deadband keeps balanced authority and every ErrP checkpoint")
+    check(high_allocation.robot_weight > config.AUTONOMY_ROBOT_BASE
+          and high_allocation.errp_threshold > config.ERRP_THRESHOLD
+          and high_allocation.errp_apply_stride > 1,
+          "higher TAR shifts authority toward robot and reduces ErrP application")
+    check(low_allocation.robot_weight < config.AUTONOMY_ROBOT_BASE
+          and low_allocation.errp_threshold < config.ERRP_THRESHOLD
+          and low_allocation.errp_apply_stride == 1,
+          "lower TAR shifts authority toward human and applies every ErrP checkpoint")
+    invalid_state = high_estimator.update(
+        [[0.0] * config.EEG_CHANNELS
+         for _ in range(int(config.COG_WINDOW_S * config.EEG_FS))])
+    invalid_allocation = allocator.allocate(invalid_state)
+    check(not invalid_state.valid
+          and invalid_allocation.robot_weight == config.AUTONOMY_ROBOT_MIN
+          and invalid_allocation.errp_apply_stride == 1,
+          "flat/invalid PSD fails toward minimum robot authority")
+    first = allocator.decide(0.8, high_state)
+    second = allocator.decide(0.8, high_state)
+    override = allocator.decide(config.AUTONOMY_ERRP_OVERRIDE_THRESHOLD, high_state)
+    check(first.applied and not second.applied,
+          "high-load ErrP is still calculated but only scheduled checkpoints apply")
+    check(override.veto and override.override and override.applied,
+          "very strong ErrP remains a load-independent veto")
+
+
 def test_errp():
     print("[errp] separates error vs clean epoch")
+    check(config.ERRP_CHANNELS == list(range(8)),
+          "ErrP consumes all eight acquired EEG channels")
     det = ErrPDetector(backend="baseline")
     det.update_baseline(_synth_epoch(config.EEG_FS, error=False))
     p_ok = det.p_error(_synth_epoch(config.EEG_FS, error=False))
@@ -534,6 +607,7 @@ if __name__ == "__main__":
     test_arm_command_validation()
     test_planar_pick_calibration_and_detection()
     test_validate_handles_short_arrays()
+    test_cognitive_load_and_autonomy()
     test_errp()
     test_errp_model_metadata()
     test_eeg_packet_timestamps()

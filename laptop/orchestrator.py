@@ -27,6 +27,7 @@ import math
 import config
 import sim
 from arm_serial import ArmSerial
+from cognitive_load import AutonomyAllocator, CognitiveLoadMonitor
 from eeg_bridge import EEGBridge
 from errp import ErrPDetector
 from vision import Vision
@@ -139,7 +140,8 @@ def read_veto(eeg, errp, onset):
     return p_err >= errp.threshold, p_err
 
 
-def do_pick_and_place(arm, eeg, errp, vision, policy, target):
+def do_pick_and_place(arm, eeg, errp, vision, policy, target,
+                      load_monitor=None, autonomy=None):
     """One object, full sequence. Returns "done" | "veto" | "fail"."""
     # commit: hover above the object so the human SEES the intent (ErrP needs a
     # clearly perceived wrong action, so we pause at hover during the veto read).
@@ -154,8 +156,30 @@ def do_pick_and_place(arm, eeg, errp, vision, policy, target):
         eeg.mark_error(VETO_WATCH_S, onset_t=onset)
     move_to(arm, policy, (target.x, target.y), config.Z_APPROACH)
 
-    veto, p_err = read_veto(eeg, errp, onset)
-    print(f"    [errp] P(error)={p_err:.2f} (thr={errp.threshold})")
+    _static_veto, p_err = read_veto(eeg, errp, onset)
+    load = load_monitor.current() if load_monitor is not None else None
+    if autonomy is None:
+        veto = _static_veto
+        threshold = errp.threshold
+        applied = True
+    else:
+        decision = autonomy.decide(p_err, load)
+        veto = decision.veto
+        threshold = decision.threshold
+        applied = decision.applied
+        allocation = decision.allocation
+        if load is not None:
+            validity = "ok" if load.valid else f"invalid:{load.reason}"
+            print(
+                f"    [load] TAR={load.tar:.4g} rest={load.rest_tar:.4g} "
+                f"delta={load.smoothed_relative_tar:+.2f} ({validity})")
+        print(
+            f"    [autonomy] robot={allocation.robot_weight:.2f} "
+            f"human={allocation.human_weight:.2f} "
+            f"ErrP stride={allocation.errp_apply_stride}")
+    print(
+        f"    [errp] P(error)={p_err:.2f} (adaptive thr={threshold:.2f}, "
+        f"applied={'yes' if applied else 'observed-only'})")
     if veto:
         print(f"    -> BRAIN SAYS NO. veto '{target.label}', reselect.")
         policy.reject(target)
@@ -184,46 +208,64 @@ def do_pick_and_place(arm, eeg, errp, vision, policy, target):
     return "done"
 
 
-def run_trial(arm, eeg, errp, vision, policy, max_objects=None):
+def run_trial(arm, eeg, errp, vision, policy, max_objects=None,
+              load_monitor=None, autonomy=None):
     """Continuously clear the table: re-detect, pick the best remaining target,
     veto-or-place, repeat until nothing's left (or max_objects delivered)."""
     policy.reset_trial()
-    resting = eeg.snapshot(1.0)                # calibrate on a calm moment
-    minimum = int(config.EEG_FS * config.EEG_MIN_EPOCH_FRACTION)
+    print(f"[calibration] remain still for {config.COG_REST_S:.0f}s rest baseline...")
+    deadline = time.monotonic() + config.COG_REST_S
+    while time.monotonic() < deadline:
+        time.sleep(0.05)
+    resting = eeg.snapshot(config.COG_REST_S)
+    minimum = int(config.COG_REST_S * config.EEG_FS
+                  * config.COG_MIN_WINDOW_FRACTION)
     if len(resting) < minimum:
         raise RuntimeError(
-            f"not enough resting EEG for calibration ({len(resting)}/{config.EEG_FS})")
+            f"not enough resting EEG for calibration ({len(resting)}/{minimum})")
     errp.update_baseline(resting)
+    if load_monitor is not None:
+        baseline = load_monitor.calibrate(resting)
+        load_monitor.start()
+        print(
+            f"[calibration] rest theta={baseline.theta_power:.4g} "
+            f"alpha={baseline.alpha_power:.4g} TAR={baseline.rest_tar:.4g}")
 
     delivered = 0
-    while True:
-        detections = vision.detect()
-        if not detections:
-            print("[trial] table clear.")
-            break
-        arm_xy = vision.arm_tip() or (0.0, 0.0)
-        print(f"[scene] {len(detections)} object(s): " +
-              ", ".join(d.label for d in detections))
-        target = policy.choose(detections, arm_xy)
-        if target is None:
-            if policy.unreachable:
-                labels = ", ".join(d.label for d in policy.unreachable)
-                print(f"[trial] no eligible target; unreachable: {labels}. Stop.")
-            else:
-                print("[trial] every remaining object was vetoed. Stop.")
-            break
-
-        result = do_pick_and_place(arm, eeg, errp, vision, policy, target)
-        if result == "done":
-            delivered += 1
-            # A veto answers "not for the current goal", not "never touch this
-            # location". The next pick in a clear-table run is a new selection.
-            policy.reset_selection()
-            if max_objects and delivered >= max_objects:
+    try:
+        while True:
+            detections = vision.detect()
+            if not detections:
+                print("[trial] table clear.")
                 break
-        elif result == "fail":
-            return False
-        # "veto" -> loop; the spot remains rejected for this selection cycle
+            arm_xy = vision.arm_tip() or (0.0, 0.0)
+            print(f"[scene] {len(detections)} object(s): " +
+                  ", ".join(d.label for d in detections))
+            target = policy.choose(detections, arm_xy)
+            if target is None:
+                if policy.unreachable:
+                    labels = ", ".join(d.label for d in policy.unreachable)
+                    print(f"[trial] no eligible target; unreachable: {labels}. Stop.")
+                else:
+                    print("[trial] every remaining object was vetoed. Stop.")
+                break
+
+            result = do_pick_and_place(
+                arm, eeg, errp, vision, policy, target,
+                load_monitor=load_monitor, autonomy=autonomy)
+            if result == "done":
+                delivered += 1
+                # A veto answers "not for the current goal", not "never touch this
+                # location". The next pick in a clear-table run is a new selection.
+                policy.reset_selection()
+                if max_objects and delivered >= max_objects:
+                    break
+            elif result == "fail":
+                return False
+            # "veto" -> loop; the spot remains rejected for this selection cycle
+    finally:
+        if load_monitor is not None:
+            load_monitor.stop()
     print(f"[trial] delivered {delivered} object(s).")
     return True
 
@@ -304,11 +346,13 @@ def preflight(arm, eeg, vision):
 def main():
     print("=== brainToArm shared-autonomy loop ===")
     force = "--force" in sys.argv
-    arm = eeg = vision = None
+    arm = eeg = vision = load_monitor = None
     try:
         arm = ArmSerial()
         eeg = EEGBridge().start()
         errp = ErrPDetector()          # backend from config.ERRP_BACKEND
+        load_monitor = CognitiveLoadMonitor(eeg)
+        autonomy = AutonomyAllocator()
         vision = Vision()              # mock/real from config.CAM_MOCK
         policy = Policy()
 
@@ -317,7 +361,9 @@ def main():
         if not preflight(arm, eeg, vision) and not force:
             print("Aborting. Fix the above, or pass --force to run anyway.")
             return False
-        ok = run_trial(arm, eeg, errp, vision, policy)
+        ok = run_trial(
+            arm, eeg, errp, vision, policy,
+            load_monitor=load_monitor, autonomy=autonomy)
         print(f"[run] {'complete' if ok else 'aborted'}")
         return ok
     except KeyboardInterrupt:
@@ -329,6 +375,8 @@ def main():
     finally:
         if eeg is not None:
             eeg.stop()
+        if load_monitor is not None:
+            load_monitor.stop()
         if arm is not None:
             try:
                 arm.home()

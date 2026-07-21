@@ -285,6 +285,7 @@ brainToArm/
     ├── eeg_detect.py              ← live PolyG-I HID bench diagnostic
     ├── windows_eeg_server.py      ← legacy/alternate-device DLL → TCP bridge
     ├── errp.py                    ← ErrP detector (the brain-signal classifier)
+    ├── cognitive_load.py          ← continuous TAR + adaptive autonomy allocator
     ├── record_errp.py             ← collect labeled ErrP training data
     ├── errp_train.py              ← train the ErrP model from that data
     │
@@ -378,7 +379,7 @@ brainToArm/
   interchangeable sources selected by `config.EEG_SOURCE`:
   - `"hid"` — the connected PID `0x0010` PolyG-I. Native macOS `hidapi`, the
     D1WD10 initialization sequence, and 1,024-byte/16-channel block decoder.
-  - `"mock"` — synthetic 8-channel signal (widespread alpha + noise), with an
+  - `"mock"` — synthetic 8-channel theta/alpha signal + noise, with an
     injectable ErrP-like burst for testing. Goes through the **real** LXSDF
     encode+parse path so nothing downstream is special-cased.
   - `"serial"` — compatibility path for LAXTHA CDC variants, not PID `0x0010`.
@@ -410,11 +411,11 @@ brainToArm/
   ctypes function names follow LAXTHA's documented API pattern; confirm them
   against the LXSMWD12 developer manual if that compatibility path is needed.
 
-- **`errp.py`** — `ErrPDetector`: the brain-signal classifier. Given an EEG epoch
-  around an action onset, returns `p_error` ∈ [0,1] (probability the human judged
-  the action wrong). Pipeline: **Common Average Reference** (remove noise shared
-  across electrodes) → **band-pass 1–10 Hz** (remove drift and mains hum) →
-  baseline-correct → spatially average the fronto-central channels → find the
+- **`errp.py`** — `ErrPDetector`: the brain-signal classifier. Given all eight
+  EEG channels around an action onset, it returns `p_error` ∈ [0,1]
+  (probability the human judged
+  the action wrong). Pipeline: **band-pass 1–10 Hz** → baseline-correct →
+  spatially average the configured eight channels → find the
   strongest **sustained negative deflection** in the post-onset region (a sliding
   ~150 ms window over roughly the first 0.6 s, robust to person-to-person latency
   differences). Two backends:
@@ -425,7 +426,18 @@ brainToArm/
   Saved models include sampling, channel, band, and epoch metadata; a mismatched
   runtime configuration is rejected instead of producing an invalid prediction.
   `update_baseline()` calibrates the resting noise; `fit()`/`save()` train.
-  Tested false-positive rate ~1%, false-negative ~0% on synthetic data.
+
+- **`cognitive_load.py`** — continuous mental-workload and adaptive-autonomy
+  path. Every second it computes a Welch PSD on the latest two-second window,
+  averages theta power (4–8 Hz) from CH1–CH4, divides it by alpha power
+  (8–13 Hz) from CH8, and normalizes TAR against the participant's eight-second
+  session rest baseline: `(current TAR - rest TAR) / rest TAR`. An EMA prevents
+  one noisy window from changing authority abruptly, and a ±10% rest deadband
+  prevents baseline jitter from changing checkpoint density. Higher normalized TAR
+  raises robot weight and the ErrP veto threshold and spaces out application
+  checkpoints; lower TAR gives the human/ErrP more weight. ErrP probability is
+  still calculated at every action event, and a very strong response remains an
+  override. Invalid/flat PSD windows fail toward minimum robot authority.
 
 - **`record_errp.py`** — Collects training data. A goal is fixed for the session,
   then the script drives the arm through
@@ -656,9 +668,11 @@ python3 laptop/eeg_detect.py --seconds 5
 python3 laptop/eeg_bridge.py
 ```
 Both commands must show live 8-channel data. `EEG_SOURCE="hid"` is already set
-for this unit. Set `ERRP_FRONTOCENTRAL` to the indices of the electrodes actually
-placed at Fz/FCz/Cz, verify signal response and the sustained rate with the
-headset mounted, then set `EEG_CONFIG_VERIFIED=True`. The gate intentionally
+for this unit. ErrP uses CH1–CH8. Continuous load uses theta from CH1–CH4 and
+alpha from CH8, so verify those physical electrode assignments, signal response,
+and the sustained rate with the headset mounted, then set
+`EEG_CONFIG_VERIFIED=True`. At trial start remain still during the printed
+eight-second resting-TAR calibration. The gate intentionally
 distinguishes “USB input works” from “this participant's montage is trustworthy.”
 
 **3 — Camera.** Mount a phone overhead looking straight down. Set `CAM_MOCK=False`.
@@ -713,8 +727,11 @@ Grouped constants (see the file for full comments):
   `PLACE_ZONES`, `GRASP_VERIFY`, `GRASP_RETRIES`.
 - **EEG:** `EEG_SOURCE`, `EEG_HID_*`, `EEG_CHANNEL_MAP`, `EEG_CHANNELS`,
   measured `EEG_FS`, relative scaling, plus legacy `EEG_PORT/BAUD`/`EEG_TCP_*`.
-- **ErrP:** `ERRP_BACKEND`, `ERRP_MODEL_PATH`, `ERRP_FRONTOCENTRAL`,
+- **ErrP:** `ERRP_BACKEND`, `ERRP_MODEL_PATH`, `ERRP_CHANNELS`, `ERRP_USE_CAR`,
   `ERRP_WINDOW_S`, `ERRP_BASELINE_S`, `ERRP_BAND`, `ERRP_THRESHOLD`.
+- **Cognitive load/autonomy:** `COG_THETA_CHANNELS`, `COG_ALPHA_CHANNELS`,
+  `COG_*_BAND`, window/rest/update/EMA controls, `AUTONOMY_ROBOT_*`, adaptive
+  threshold gain, application stride, and strong-ErrP override threshold.
 - **Vision:** `CAM_INDEX`, `CAM_MOCK`, `OBJECT_METHOD` (`bgsub`/`yolo`/`hsv`/
   `aruco`), `BGSUB_THRESH`, `OBJECT_MIN_AREA`, `ARM_MIN_AREA`, `YOLO_*`,
   aruco ids, `OBJECT_HSV`, `CAM_CALIB_IMAGE_PTS/WORLD_PTS`, `CAM_MATRIX/DIST`.
@@ -726,7 +743,8 @@ Grouped constants (see the file for full comments):
 ## 12. Testing and verification
 
 - **`python3 laptop/test_pipeline.py`** — must pass: PolyG-I command/decoder,
-  LXSDF compatibility, IK, ErrP, and full mock pick-and-place tests.
+  LXSDF compatibility, IK, all-channel ErrP, TAR/autonomy direction, and full
+  mock pick-and-place tests.
 - **`python3 laptop/eeg_detect.py --seconds 5`** — physical HID start, live
   8-channel range/cadence report, and deterministic stop.
 - **`python3 laptop/eeg_dashboard.py`** — local live waveform, spectrum,
@@ -738,8 +756,6 @@ Grouped constants (see the file for full comments):
 - **`python3 laptop/orchestrator.py --auto`** — full mock run after selecting
   `EEG_SOURCE="mock"`; the active HID configuration fails closed at preflight
   until its montage gate is cleared.
-- Direct detector check (false-alarm rate on synthetic epochs) is in the project
-  history; the current numbers are ~1% false positive, ~0% false negative.
 
 ---
 
@@ -751,6 +767,9 @@ Grouped constants (see the file for full comments):
 - **ErrP (Error-Related Potential):** an involuntary EEG response, ~250–450 ms
   after a person perceives an error, strongest over fronto-central scalp sites.
   This project's core signal.
+- **TAR (theta/alpha ratio):** here, mean 4–8 Hz power from CH1–CH4 divided by
+  8–13 Hz power from CH8. Its session-rest-relative change drives autonomy
+  allocation; it is not treated as a clinical diagnosis.
 - **Shared autonomy:** human and autonomous system jointly control a task; here
   the AI does the work and the human contributes veto corrections.
 - **Motor imagery:** consciously imagining a movement to produce a detectable EEG
@@ -771,6 +790,10 @@ Grouped constants (see the file for full comments):
 ---
 
 ## 14. Sources and prior art
+
+- [Evaluation of alpha/theta and theta/alpha workload indexes](https://pmc.ncbi.nlm.nih.gov/articles/PMC9149374/)
+- [Reliability of EEG mental-workload indexes across electrode/preprocessing configurations](https://pmc.ncbi.nlm.nih.gov/articles/PMC9920504/)
+- [ErrP in a virtual pick-and-place shared-control experiment](https://pubmed.ncbi.nlm.nih.gov/38083754/)
 
 - Device / protocol: [PolyG-I](https://www.laxtha.com/ProductView.asp?Model=PolyG-I) ·
   [LXSDF spec repo](https://github.com/LAXTHA/LXSDF) ·

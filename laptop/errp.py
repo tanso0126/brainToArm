@@ -6,7 +6,7 @@ human's brain involuntarily fires an ErrP — a fronto-central negative deflecti
 training to push a mental button.
 
 Pipeline (given an epoch of EEG right after action onset):
-  1. band-pass 1-10 Hz (scipy) over fronto-central channels
+  1. band-pass 1-10 Hz (scipy) over all configured EEG channels
   2. baseline-correct against the pre-onset segment
   3. extract features (negative peak amplitude + latency, peak-to-peak, mean)
   4a. baseline backend: threshold the negative-peak amplitude (zero training)
@@ -52,13 +52,14 @@ def _sigmoid(x):
 
 
 class ErrPDetector:
-    MODEL_FORMAT = 1
+    MODEL_FORMAT = 2
 
     def __init__(self, backend=None, model_path=None):
         self.backend = backend or config.ERRP_BACKEND
         self.fs = config.EEG_FS
         self.band = config.ERRP_BAND
-        self.chans = config.ERRP_FRONTOCENTRAL
+        self.chans = config.ERRP_CHANNELS
+        self.use_car = config.ERRP_USE_CAR
         self.threshold = config.ERRP_THRESHOLD
         self.model = None
         self._baseline_std = None
@@ -85,6 +86,7 @@ class ErrPDetector:
             "fs": self.fs,
             "band": list(self.band),
             "channels": list(self.chans),
+            "use_car": self.use_car,
             "baseline_s": config.ERRP_BASELINE_S,
             "window_s": config.ERRP_WINDOW_S,
         }
@@ -103,11 +105,12 @@ class ErrPDetector:
 
     # --- calibration: learn resting variability so the threshold is adaptive ---
     def update_baseline(self, resting_window):
-        # Measure resting fronto-central std AFTER the same CAR+bandpass used at
-        # decision time, so the z-score below is in matching units. This makes the
-        # detector scale-invariant: it works without knowing the ADC's uV/LSB,
+        # Measure resting configured-channel std after the same reference and
+        # band-pass used at decision time, so the z-score below is in matching
+        # units. This makes the detector scale-invariant: it works without
+        # knowing the ADC's uV/LSB,
         # because everything is expressed in units of the person's own EEG noise.
-        rw = self._car(resting_window)
+        rw = self._reference(resting_window)
         signals = []
         for ch in self.chans:
             sig = _bandpass(_col(rw, ch), self.fs, self.band)
@@ -119,13 +122,16 @@ class ErrPDetector:
         self._baseline_std = math.sqrt(var)
 
     # --- feature extraction (shared by both backends) ---
-    def _car(self, window):
+    def _reference(self, window):
         """Common Average Reference: subtract, at each timepoint, the mean across
         ALL electrodes. Cancels noise shared by every channel (mains hum, motion,
         reference drift) — standard, near-mandatory on real EEG. Cheap sensors
-        need it most. No-op if only one channel is present."""
+        need it most. It is deliberately disabled for the configured all-channel
+        ErrP average because averaging every CAR channel would be exactly zero."""
         if not window:
             return window
+        if not self.use_car:
+            return [list(row) for row in window]
         nch = len(window[0])
         if nch < 2:
             return window
@@ -136,10 +142,11 @@ class ErrPDetector:
         return out
 
     def _preprocess(self, window):
-        # CAR across all channels first, then per-channel band-pass (which also
-        # removes DC drift and mains, since ErrP band is 1-10Hz), then baseline-
-        # correct each fronto-central channel against its pre-onset segment.
-        window = self._car(window)
+        # Apply the configured spatial reference, then per-channel band-pass
+        # (which also removes DC drift and mains, since the ErrP band is 1-10Hz),
+        # then baseline-correct each configured channel against its pre-onset
+        # segment.
+        window = self._reference(window)
         n_base = int(config.ERRP_BASELINE_S * self.fs)
         chans = []
         for ch in self.chans:
@@ -195,17 +202,18 @@ class ErrPDetector:
         return self._baseline_prob(window)
 
     def _baseline_prob(self, window):
-        # ErrP = a sustained fronto-central NEGATIVE deflection ~250-450ms after
+        # ErrP = a sustained NEGATIVE deflection ~250-450ms after
         # the action. Score the strongest sustained dip, expressed as a Z-SCORE
         # against the person's resting noise (from update_baseline). Z-scoring
         # makes this independent of ADC scaling / uV calibration — a ~2.5-sigma
         # dip reads ~0.5, ~4-sigma ~0.9. Falls back to a fixed uV scale only if
         # no baseline was captured.
         chans = self._preprocess(window)
-        # Spatially AVERAGE the fronto-central channels first, THEN search for the
-        # dip. A real ErrP is coherent across Fz/FCz/Cz so it survives averaging;
-        # independent per-channel noise cancels. (Averaging each channel's own
-        # worst dip instead would compound noise + search bias -> false alarms.)
+        # Spatially average all configured channels first, then search for the
+        # dip. Independent per-channel noise cancels. With all eight channels the
+        # configuration disables CAR because the average of every CAR channel is
+        # identically zero; a trained multichannel model remains the deployment
+        # target after participant-specific ErrP collection.
         mean_sig = self._mean_signal(chans)
         neg = -self._deflection(mean_sig)             # positive when deflected down
         std = self._baseline_std

@@ -211,13 +211,18 @@ class EEGBridge:
             # this is a COMMON-MODE component, so CAR removes it cleanly, just
             # like real EEG. A shared 10Hz term + a per-channel gain.
             alpha = 10 * math.sin(2 * math.pi * 10 * t)
+            theta = 4 * math.sin(2 * math.pi * 6 * t)
             raw_slots = []
             for slot in range(total):
                 if slot < 8:  # EEG-like
                     gain = 1.6 if slot >= 6 else 1.0       # occipital a bit stronger
                     uv = gain * alpha + random.gauss(0, 4)
-                    if slot in config.ERRP_FRONTOCENTRAL:
-                        uv += errp_uv                      # ErrP only fronto-central
+                    if slot in config.COG_THETA_CHANNELS:
+                        uv += theta
+                    if slot in config.ERRP_CHANNELS:
+                        # Slight spatial variation avoids an unrealistically
+                        # identical eight-channel mock response.
+                        uv += errp_uv * (0.75 + 0.05 * slot)
                     raw = int(config.ADC_ZERO + uv / max(config.ADC_UV_PER_LSB, 1e-6))
                 else:
                     raw = config.ADC_ZERO

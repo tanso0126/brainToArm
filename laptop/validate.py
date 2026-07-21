@@ -81,17 +81,17 @@ def validate():
         errs.append("EEG_CHANNELS must be a positive integer")
     elif len(config.EEG_CHANNEL_MAP) != config.EEG_CHANNELS:
         errs.append(f"EEG_CHANNEL_MAP has {len(config.EEG_CHANNEL_MAP)} slots but EEG_CHANNELS={config.EEG_CHANNELS}")
-    for ch in config.ERRP_FRONTOCENTRAL:
+    for ch in config.ERRP_CHANNELS:
         if not isinstance(ch, int) or isinstance(ch, bool) or ch < 0:
-            errs.append(f"ERRP_FRONTOCENTRAL ch {ch!r} must be a non-negative integer")
+            errs.append(f"ERRP_CHANNELS ch {ch!r} must be a non-negative integer")
         elif ch >= config.EEG_CHANNELS:
-            errs.append(f"ERRP_FRONTOCENTRAL ch {ch} >= EEG_CHANNELS {config.EEG_CHANNELS}")
+            errs.append(f"ERRP_CHANNELS ch {ch} >= EEG_CHANNELS {config.EEG_CHANNELS}")
     if len(set(config.EEG_CHANNEL_MAP)) != len(config.EEG_CHANNEL_MAP):
         errs.append("EEG_CHANNEL_MAP contains duplicate packet slots")
-    if not config.ERRP_FRONTOCENTRAL:
-        errs.append("ERRP_FRONTOCENTRAL must contain at least one channel")
-    elif len(set(config.ERRP_FRONTOCENTRAL)) != len(config.ERRP_FRONTOCENTRAL):
-        errs.append("ERRP_FRONTOCENTRAL contains duplicate channels")
+    if config.ERRP_CHANNELS != list(range(config.EEG_CHANNELS)):
+        errs.append("ErrP requirement uses all eight EEG channels in acquisition order")
+    if not isinstance(config.ERRP_USE_CAR, bool):
+        errs.append("ERRP_USE_CAR must be True or False")
 
     # --- ErrP band below Nyquist ---
     if not isinstance(config.EEG_FS, (int, float)) or config.EEG_FS <= 0:
@@ -112,6 +112,54 @@ def validate():
         errs.append("ERRP_BASELINE_S and ERRP_WINDOW_S must be > 0")
     if not 0 <= config.ERRP_THRESHOLD <= 1:
         errs.append("ERRP_THRESHOLD must be in [0, 1]")
+
+    # --- continuous cognitive-load TAR and adaptive autonomy ---
+    for name in ("COG_THETA_CHANNELS", "COG_ALPHA_CHANNELS"):
+        channels = getattr(config, name)
+        if not channels:
+            errs.append(f"{name} must not be empty")
+        elif (len(set(channels)) != len(channels)
+              or any(not isinstance(ch, int) or isinstance(ch, bool)
+                     or not 0 <= ch < config.EEG_CHANNELS for ch in channels)):
+            errs.append(f"{name} must contain unique valid EEG channel indices")
+    if config.COG_THETA_CHANNELS != [0, 1, 2, 3]:
+        errs.append("cognitive-load theta must use EEG CH1..CH4")
+    if config.COG_ALPHA_CHANNELS != [7]:
+        errs.append("cognitive-load alpha must use EEG CH8")
+    for name in ("COG_THETA_BAND", "COG_ALPHA_BAND"):
+        band = getattr(config, name)
+        if (not isinstance(band, (tuple, list)) or len(band) != 2
+                or not all(isinstance(v, (int, float)) and math.isfinite(v)
+                           for v in band)
+                or not 0 < band[0] < band[1] < config.EEG_FS / 2):
+            errs.append(f"{name} must be a valid positive band below Nyquist")
+    for name in ("COG_WINDOW_S", "COG_UPDATE_S", "COG_REST_S",
+                 "COG_PSD_SEGMENT_S", "COG_MIN_SIGNAL_STD",
+                 "COG_MIN_ALPHA_POWER", "AUTONOMY_STRIDE_TAR_STEP"):
+        value = getattr(config, name)
+        if (not isinstance(value, (int, float)) or isinstance(value, bool)
+                or not math.isfinite(value) or value <= 0):
+            errs.append(f"{name} must be finite and > 0")
+    if not 0 < config.COG_MIN_WINDOW_FRACTION <= 1:
+        errs.append("COG_MIN_WINDOW_FRACTION must be in (0, 1]")
+    if not 0 < config.COG_EMA_ALPHA <= 1:
+        errs.append("COG_EMA_ALPHA must be in (0, 1]")
+    if not (0 <= config.AUTONOMY_ROBOT_MIN
+            <= config.AUTONOMY_ROBOT_BASE
+            <= config.AUTONOMY_ROBOT_MAX <= 1):
+        errs.append("robot autonomy weights must satisfy 0 <= min <= base <= max <= 1")
+    if config.AUTONOMY_RELATIVE_MIN >= config.AUTONOMY_RELATIVE_MAX:
+        errs.append("AUTONOMY_RELATIVE_MIN must be below AUTONOMY_RELATIVE_MAX")
+    if config.AUTONOMY_TAR_GAIN <= 0 or config.AUTONOMY_ERRP_THRESHOLD_GAIN < 0:
+        errs.append("autonomy TAR gain must be positive and threshold gain non-negative")
+    if not 0 <= config.AUTONOMY_TAR_DEADBAND < config.AUTONOMY_RELATIVE_MAX:
+        errs.append("AUTONOMY_TAR_DEADBAND must be in [0, AUTONOMY_RELATIVE_MAX)")
+    if (not isinstance(config.AUTONOMY_MAX_ERRP_STRIDE, int)
+            or isinstance(config.AUTONOMY_MAX_ERRP_STRIDE, bool)
+            or config.AUTONOMY_MAX_ERRP_STRIDE < 1):
+        errs.append("AUTONOMY_MAX_ERRP_STRIDE must be an integer >= 1")
+    if not 0 <= config.AUTONOMY_ERRP_OVERRIDE_THRESHOLD <= 1:
+        errs.append("AUTONOMY_ERRP_OVERRIDE_THRESHOLD must be in [0, 1]")
     if config.ADC_BITS <= 0 or not 0 <= config.ADC_ZERO < 2 ** config.ADC_BITS:
         errs.append("ADC_BITS/ADC_ZERO are inconsistent")
     if config.ADC_UV_PER_LSB <= 0:
