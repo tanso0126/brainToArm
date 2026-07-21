@@ -260,10 +260,10 @@ def test_arm_command_validation():
           and config.JOINT_NAMES
           == ["base", "shoulder", "elbow", "wrist_pitch", "gripper", "wrist_roll"],
           "physical six-servo pin and joint map is exact")
-    check(config.HOME_POSE == [90, 70, 90, 120, 180, 0],
-          "six-servo HOME pose includes the verified wrist floor")
-    check(config.SERVO_MIN == [0, 0, 0, 120, 90, 0]
-          and config.SERVO_MAX == [180, 150, 180, 180, 180, 180],
+    check(config.HOME_POSE == [90, 70, 90, 140, 170, 170],
+          "six-servo HOME pose matches the latest raised camera pose")
+    check(config.SERVO_MIN == [0, 0, 0, 130, 90, 0]
+          and config.SERVO_MAX == [180, 150, 180, 180, 170, 180],
           "host limits match the physical wrist/gripper/roll ranges")
     home_status = "C " + " ".join(str(angle) for angle in config.HOME_POSE)
     check(parse_status_line(home_status) == config.HOME_POSE,
@@ -320,8 +320,8 @@ def test_planar_pick_calibration_and_detection():
     from vision_segment import (
         ObjectDetection, select_gripper, select_pick_target)
 
-    check(config.GRIP_OPEN == 90 and config.GRIP_CLOSED == 180,
-          "physical gripper direction is 90=open, 180=closed")
+    check(config.GRIP_OPEN == 90 and config.GRIP_CLOSED == 170,
+          "physical gripper direction is 90=open, 170=closed")
     check(config.PLANAR_SERVO_MIN[config.J_BASE]
           == config.PLANAR_SERVO_MAX[config.J_BASE] == 90,
           "side-camera calibration keeps the working base at 90")
@@ -597,18 +597,18 @@ def test_wrist_full_frame_search():
     import numpy as np
 
     safety = PlanarSearchSafety(
-        offsets=[0, 90, 90, 120, 0, 0], directions=[1] * 6,
+        offsets=[0, 90, 90, 130, 0, 0], directions=[1] * 6,
         lengths=(3, 3, 2), base_height=10,
         table_clearance=.5, base_clearance=.5, self_clearance=.5,
         slew_step=1.5)
-    safe_pose = [90, 90, 90, 120, 180, 0]
-    base_collision = [90, 0, 90, 120, 180, 0]
+    safe_pose = [90, 90, 90, 130, 170, 0]
+    base_collision = [90, 0, 90, 130, 170, 0]
     check(safety.pose_is_safe(safe_pose),
           "forward model accepts a clear horizontal three-link pose")
     check(not safety.pose_is_safe(base_collision),
           "forward model rejects forearm contact with the base column")
-    target_pose_a = [90, 105, 90, 130, 180, 0]
-    target_pose_b = [90, 105, 105, 140, 180, 0]
+    target_pose_a = [90, 105, 90, 140, 170, 0]
+    target_pose_b = [90, 105, 105, 150, 170, 0]
     check(safety.transition_is_safe(safe_pose, target_pose_a),
           "every firmware-slew intermediate is collision checked")
 
@@ -659,7 +659,7 @@ def test_wrist_full_frame_search():
         arm, FakeCamera(), FakeDetector(), FakePlanner()).find(max_poses=2)
     commanded = [tuple(pose[joint] for joint in config.WRIST_SEARCH_JOINTS)
                  for pose in arm.commands]
-    check(found is not None and commanded == [(105, 90, 130), (105, 105, 140)],
+    check(found is not None and commanded == [(105, 90, 140), (105, 105, 150)],
           "coordinated search stops immediately at first target-visible pose")
 
 

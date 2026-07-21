@@ -1301,3 +1301,15 @@ red at `(657,618,117,102)`. Both correctly touch the bottom image boundary.
 - Updated validation and the synthetic full-frame test to require a vivid-yellow
   object. Camera and Uno processes remained stopped; no physical command was
   issued during this configuration-only patch.
+
+## Patch 32 — synchronize the latest raised search HOME and limits
+
+- Adopted the operator's latest physical source values as authoritative:
+  `HOME=[90,70,90,140,170,170]`, wrist-pitch range 130–180°, and gripper range
+  90–170°.
+- Synchronized global and planar host limits, gripper close semantics,
+  validation, regression expectations, firmware comments, and README hardware
+  tables before attempting any search motion.
+- The connected Uno initially reported stale firmware HOME
+  `[90,70,90,140,180,0]`; connection failed closed and no host motion command
+  was sent. Patch 32 must be uploaded before the search controller may connect.
