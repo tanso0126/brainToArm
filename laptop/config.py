@@ -18,9 +18,66 @@ UNUSED_JOINT = 2           # servo3 index (0-based) — attached but not driven
 HOME_POSE = [90, 90, 90, 90, 90, 170, 180]
 
 # Joint indices (readable names). Bottom -> top of the arm.
-J_BASE, J_SHOULDER, _UNUSED, J_ELBOW, J_WRIST, J_TILT, J_GRIP = range(7)
-GRIP_OPEN = 180
-GRIP_CLOSED = 90
+J_BASE, J_SHOULDER, _UNUSED, J_ELBOW, J_WRIST, J_ROLL, J_GRIP = range(7)
+J_TILT = J_ROLL            # compatibility alias; servo6 is physically wrist roll
+GRIP_OPEN = 90             # physically verified: 90=open
+GRIP_CLOSED = 180          # physically verified: 180=closed
+
+# ---- Broken-base planar arm mode (physically verified 2026-07-20) ----
+# Servo1 cannot turn, so the real arm is constrained to one vertical plane.
+# The generic 3-D IK remains available for simulation, but physical pick/place
+# must use planar_pick.py, which locks servo1/3 and enforces these limits.
+PLANAR_CAM_INDEX = "auto"  # macOS indices change when an iPhone camera appears/disappears
+PLANAR_FRAME_SIZE = (1920, 1080)
+PLANAR_ARM_CALIBRATED = True  # successful physical pick/lift/place on 2026-07-20
+PLANAR_BASE_ANGLE = 90
+PLANAR_UNUSED_ANGLE = 90
+PLANAR_SERVO_MIN = [90, 0, 90, 0, 10, 0, 90]
+PLANAR_SERVO_MAX = [90, 150, 90, 150, 180, 180, 180]
+
+# Background-independent FastSAM perception and the calibrated local image
+# Jacobian. At the verified observation pose, an object centered at x=1435 px
+# is reached with elbow=90. The model file is downloaded once before competition
+# and then runs offline; no empty-table image or venue-specific background is used.
+PLANAR_VISION_MODEL = "FastSAM-s.pt"
+PLANAR_VISION_DEVICE = "cpu"  # measured faster than MPS on this Mac/FastSAM-s
+PLANAR_VISION_IMAGE_SIZE = 640
+PLANAR_VISION_CONFIDENCE = 0.20  # target stays >0.9; avoids slow low-quality fragments
+PLANAR_GEOMETRY_REFERENCE = "data/vision/planar_background.jpg"
+PLANAR_MAX_CAMERA_SCALE_DRIFT = 0.025
+PLANAR_MAX_CAMERA_ROTATION_DEG = 1.0
+PLANAR_MAX_CAMERA_TRANSLATION_PX = 35.0
+PLANAR_TARGET_MIN_BOX_RATIO = 0.0005
+PLANAR_TARGET_MAX_BOX_RATIO = 0.04
+PLANAR_TARGET_MIN_ASPECT = 0.35
+PLANAR_TARGET_MAX_ASPECT = 5.0
+PLANAR_TARGET_MIN_Y_RATIO = 0.52
+PLANAR_MIN_LIFT_PX = 30
+
+# At the grasp pose, reducing elbow by 1 degree moves the gripper about 7 px
+# right; shoulder +1 degree moves it about 11 px down. Vision remeasures both
+# the object and gripper between bounded corrections instead of replaying a pose.
+# Near the grasp pose, reducing elbow by 1 degree moves the gripper about 7 px
+# right; shoulder +1 degree moves it about 11 px down. Every run re-detects the
+# object and corrects elbow before descending instead of replaying one pose.
+PLANAR_REFERENCE_OBJECT_X = 1435.0
+PLANAR_REFERENCE_ELBOW = 90
+PLANAR_ELBOW_PX_PER_DEG = -7.0
+PLANAR_REFERENCE_GRASP_SHOULDER = 140
+PLANAR_GRASP_DEPTH_OFFSET_DEG = 2  # measured extra descent for full side contact
+PLANAR_ELBOW_Y_PX_PER_DEG = 6.0
+PLANAR_SHOULDER_PX_PER_DEG = 11.0
+PLANAR_APPROACH_CLEARANCE_DEG = 16
+PLANAR_LIFT_DEG = 12
+PLANAR_PICK_ELBOW_RANGE = (78, 110)
+PLANAR_WRIST_PITCH = 180
+PLANAR_WRIST_ROLL = 180
+PLANAR_PLACE_ELBOW = 80
+PLANAR_PLACE_SHOULDER = 140
+PLANAR_RETREAT_SHOULDER = 134
+PLANAR_GRIP_CLOSE_STEP = 10
+GRIP_FEEDBACK_ENABLED = False  # requires an FSR/current-sensor signal on Uno A0
+GRIP_FEEDBACK_DELTA = 80       # ADC counts above the open-gripper baseline
 
 # ---- Pick-and-place heights (cm above the table) and the place/delivery zone.
 Z_APPROACH = 6.0           # hover height above an object before descending

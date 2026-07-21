@@ -42,6 +42,32 @@ def validate():
             if not config.SERVO_MIN[config.J_GRIP] <= value <= config.SERVO_MAX[config.J_GRIP]:
                 errs.append(f"{name}={value} outside gripper safe range")
 
+    # --- physically verified fixed-base planar mode ---
+    for name in ("PLANAR_SERVO_MIN", "PLANAR_SERVO_MAX"):
+        values = getattr(config, name)
+        if len(values) != config.N_JOINTS:
+            errs.append(f"{name} has {len(values)} entries, expected {config.N_JOINTS}")
+    if not isinstance(config.PLANAR_ARM_CALIBRATED, bool):
+        errs.append("PLANAR_ARM_CALIBRATED must be True or False")
+    if (len(config.PLANAR_SERVO_MIN) == config.N_JOINTS
+            and len(config.PLANAR_SERVO_MAX) == config.N_JOINTS):
+        for i, (lo, hi) in enumerate(zip(config.PLANAR_SERVO_MIN,
+                                          config.PLANAR_SERVO_MAX)):
+            if lo > hi:
+                errs.append(f"PLANAR_SERVO_MIN[{i}] > PLANAR_SERVO_MAX[{i}]")
+        if not (config.PLANAR_SERVO_MIN[config.J_BASE]
+                == config.PLANAR_SERVO_MAX[config.J_BASE]
+                == config.PLANAR_BASE_ANGLE == 90):
+            errs.append("planar mode must hard-lock broken base servo1 at 90")
+        if not (config.PLANAR_SERVO_MIN[config._UNUSED]
+                == config.PLANAR_SERVO_MAX[config._UNUSED]
+                == config.PLANAR_UNUSED_ANGLE == 90):
+            errs.append("planar mode must lock unused servo3 at 90")
+    if config.GRIP_OPEN != 90 or config.GRIP_CLOSED != 180:
+        errs.append("physical gripper calibration requires 90=open and 180=closed")
+    if config.PLANAR_WRIST_ROLL != 180 or config.PLANAR_WRIST_PITCH != 180:
+        errs.append("verified planar top grasp requires wrist pitch/roll 180")
+
     # --- EEG channel map sane ---
     total = config.EEG_TOTAL_CHANNELS
     if total is not None and (not isinstance(total, int) or isinstance(total, bool) or total <= 0):

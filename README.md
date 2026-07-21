@@ -36,6 +36,22 @@ precise steps to bring it up. No other context is required.
 > Full evidence, commands, and the corrected earlier findings are recorded in
 > [`docs/EEG_DEVICE_COMMS.md`](docs/EEG_DEVICE_COMMS.md).
 
+> ### ✅ Fixed-base camera pick-and-place works on the physical arm
+>
+> The connected Uno arm has a broken servo1 base-yaw axis, so it cannot correct
+> out-of-plane position. A dedicated side-camera controller now locks servo1
+> and unused servo3 at 90°, re-detects the object before every attempt, corrects
+> shoulder/elbow in image pixels, rotates wrist pitch and roll to 180°, opens the
+> gripper at 90°, descends before closing it at 180°, verifies lift, transports,
+> releases, and verifies displacement. The complete sequence was physically
+> demonstrated on 2026-07-20: the white object was picked up, moved right, and
+> placed back on the table.
+>
+> With the saved clean background and unchanged camera, run
+> `python3 laptop/planar_pick.py --detect-only`, then
+> `python3 laptop/planar_pick.py --run`. If the camera moves, remove the object
+> once and run `python3 laptop/planar_pick.py --learn-background` first.
+
 ---
 
 ## Table of contents
@@ -231,6 +247,7 @@ brainToArm/
     │
     ├── arm_serial.py              ← laptop → Arduino serial link
     ├── kinematics.py              ← inverse kinematics (x,y,z → servo angles)
+    ├── planar_pick.py             ← verified fixed-base camera pick/place loop
     ├── policy.py                  ← which object to pick + reach planning
     │
     ├── eeg_bridge.py              ← live EEG acquisition → timestamped buffer
@@ -292,6 +309,15 @@ brainToArm/
   `DONE`, drives the gripper, and homes. Mock mode is selected explicitly with
   `ARM_MOCK=True`; when a real arm is requested, a missing port, bad reply, or
   motion timeout stops the run instead of pretending the command succeeded.
+
+- **`planar_pick.py`** — The physical-arm path for the currently broken base
+  yaw. It uses the MacBook side camera directly, detects the current tabletop
+  object against a clean background, maps its pixel x-coordinate through the
+  measured local elbow Jacobian, and executes the physically verified sequence:
+  fully open, pitch/roll 180°, descend in 2° steps, close, lift verification,
+  short transport, release, and displacement verification. Base and servo3 are
+  locked; a missing object, stale camera background, failed lift, or failed
+  displacement stops the sequence rather than continuing blindly.
 
 - **`kinematics.py`** — Inverse kinematics. `solve(x, y, z)` turns a workspace
   point (centimeters, origin at the arm base) into the 7 servo commands: base

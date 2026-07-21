@@ -140,6 +140,31 @@ class ArmSerial:
                 return parse_status_line(line)
         raise TimeoutError("arm serial timeout waiting for status")
 
+    def grip_feedback(self):
+        """Return optional A0 pressure/current feedback, or None if uninstalled."""
+        if self.mock:
+            return None
+        self.ser.write(b"F\n")
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            raw = self.ser.readline()
+            if not raw:
+                continue
+            line = raw.decode(errors="replace").strip()
+            if line.startswith("ERR"):
+                raise RuntimeError(f"arm firmware rejected feedback request: {line}")
+            if line.startswith("F "):
+                try:
+                    value = int(line.split()[1])
+                except (ValueError, IndexError) as exc:
+                    raise ValueError(f"malformed grip feedback: {line!r}") from exc
+                if value == -1:
+                    return None
+                if not 0 <= value <= 1023:
+                    raise ValueError(f"grip feedback outside ADC range: {value}")
+                return value
+        raise TimeoutError("arm serial timeout waiting for grip feedback")
+
     def gripper(self, open_=True):
         a = [-1] * config.N_JOINTS
         a[config.J_GRIP] = config.GRIP_OPEN if open_ else config.GRIP_CLOSED

@@ -10,9 +10,9 @@
 //   servo2 (pin 12) : shoulder   (1st bend)
 //   servo3 (pin 11) : UNUSED     (kept attached for wiring parity)
 //   servo4 (pin 10) : elbow      (2nd bend)
-//   servo5 (pin  9) : wrist / forearm
-//   servo6 (pin  8) : wrist tilt
-//   servo7 (pin  7) : gripper    (2-finger claw)
+//   servo5 (pin  9) : wrist pitch (10=up, 180=down)
+//   servo6 (pin  8) : wrist roll
+//   servo7 (pin  7) : gripper    (90=open, 180=closed)
 //
 // Serial protocol (115200 baud, newline-terminated ASCII):
 //   Command from laptop:
@@ -20,6 +20,7 @@
 //                                   use -1 to leave a joint's target unchanged
 //     "P\n"                        ping -> replies "PONG"
 //     "S\n"                        status -> replies current angles "C a1..a7"
+//     "F\n"                        grip sensor -> "F 0..1023", or "F -1" absent
 //   Reply to laptop:
 //     "OK\n"      command accepted
 //     "ERR ...\n" parse error
@@ -33,10 +34,10 @@
 const uint8_t N = 7;
 const uint8_t PINS[N] = {13, 12, 11, 10, 9, 8, 7};
 
-// Per-joint safe travel limits (deg). Tighten these once you know the real
-// mechanical range so a bad command can't drive a joint into the frame.
-const int MIN_DEG[N] = {0, 0, 0, 0, 0, 0, 0};
-const int MAX_DEG[N] = {180, 180, 180, 180, 180, 180, 180};
+// Physically verified travel limits. Base yaw is broken and servo3 is unused,
+// so both are hard-locked at 90 even if a host sends a different value.
+const int MIN_DEG[N] = {90, 0, 90, 0, 10, 0, 90};
+const int MAX_DEG[N] = {90, 150, 90, 150, 180, 180, 180};
 
 // Startup pose (safe neutral). Matches the old demo's rough home.
 const int HOME_DEG[N] = {90, 90, 90, 90, 90, 170, 180};
@@ -45,6 +46,12 @@ const uint8_t UNUSED_INDEX = 2;      // servo3, index 2 — attached but never t
 const float SLEW_DEG_PER_TICK = 1.5; // max move per control tick (~ speed limit)
 const int   TICK_MS = 15;            // control loop period
 const int   REACH_EPS = 1;           // within this many deg counts as "reached"
+
+// Optional physical grasp feedback. Install an FSR voltage divider or analog
+// current-sensor output on A0, then set true and calibrate the host threshold.
+// A plain PWM hobby servo does not report torque or its actual shaft position.
+const bool GRIP_FEEDBACK_ENABLED = false;
+const uint8_t GRIP_FEEDBACK_PIN = A0;
 
 Servo servos[N];
 float current[N];   // live angle (float for smooth slew)
@@ -105,6 +112,17 @@ void sendStatus() {
   Serial.println();
 }
 
+void sendGripFeedback() {
+  if (!GRIP_FEEDBACK_ENABLED) {
+    Serial.println("F -1");
+    return;
+  }
+  long sum = 0;
+  for (uint8_t i = 0; i < 8; i++) sum += analogRead(GRIP_FEEDBACK_PIN);
+  Serial.print("F ");
+  Serial.println((int)(sum / 8));
+}
+
 void handleLine(char* line) {
   switch (line[0]) {
     case 'A':
@@ -117,6 +135,10 @@ void handleLine(char* line) {
       break;
     case 'S':
       if (line[1] == '\0') sendStatus();
+      else                  Serial.println("ERR parse");
+      break;
+    case 'F':
+      if (line[1] == '\0') sendGripFeedback();
       else                  Serial.println("ERR parse");
       break;
     default:  Serial.println("ERR cmd");

@@ -679,3 +679,58 @@ are commanded angles, not external joint-position feedback. Before setting
 `ARM_CALIBRATED=True`, observe each physical joint one at a time, record which
 direction increasing angles move, tighten safe limits to avoid hard stops, measure
 link lengths, and verify the gripper and IK workspace.
+
+## Patch 17 — physical fixed-plane vision pick, lift, transport, and place
+
+### Intent
+
+Make the real arm useful despite its broken base-yaw servo: detect the single
+object with the MacBook side camera, pick it reliably, move it a short distance,
+and put it down without requiring the operator to enumerate joint-angle cases or
+manually guide every run.
+
+### Physical calibration and successful demonstration
+
+- Confirmed servo1 base yaw is unusable and locked the real task to one vertical
+  plane. Servo3 remains unused.
+- Corrected the hardware map: servo5 is wrist pitch (10° up, 180° down), servo6
+  is wrist roll, and servo7 is 90° open / 180° closed.
+- Learned the local image Jacobian with bounded motion: near the grasp pose,
+  shoulder +2° moved the gripper about `(0,+22)px`; elbow +2° moved it about
+  `(-14,+12)px`. This supports object-relative correction without an exhaustive
+  angle table.
+- Found the stable physical grasp sequence: base 90°, unused servo3 90°, elbow
+  90° at the reference object x=1435px, shoulder 140°, wrist pitch 180°, wrist
+  roll 180°, gripper fully open at 90° during descent, then closed to 180°.
+- Verified the complete physical result on camera. The white object left the
+  table, remained held while shoulder/elbow transported it right, was lowered,
+  released at 90°, and remained at the new location after the arm retreated.
+
+### Controller and safety changes
+
+- Added `laptop/planar_pick.py`, a dedicated controller instead of sending the
+  broken-base arm through the generic 3-D IK path.
+- Added markerless clean-background object detection inside a bounded tabletop
+  ROI. Each run detects the object's current center and corrects the elbow from
+  the measured pixel/degree relationship before descending.
+- Added a two-degree stepped descent, staged gripper close/open, source-location
+  lift verification, short transport, final displacement verification, debug
+  annotation images, and fail-closed behavior.
+- Added `--detect-only` and `--learn-background`; the physical motion path
+  requires explicit `--run`.
+- Added planar-only mechanical limits. Base and unused servo3 are fixed at 90°;
+  shoulder/elbow are capped at 150°, wrist pitch at 10–180°, and the gripper at
+  90–180°. The Arduino firmware applies the same limits as a second safety layer.
+- Preserved `ARM_CALIBRATED=False` for the unverified generic 3-D IK while adding
+  the narrower, physically proven `PLANAR_ARM_CALIBRATED=True` gate.
+- Expanded configuration validation and hardware-free regression coverage for
+  gripper semantics, fixed joints, pixel-to-pose correction, safe two-degree
+  waypoints, and markerless object-center recovery.
+
+### Verification
+
+- Physical pick/lift/transport/place: passed, with final camera confirmation.
+- The arm was left separated from the placed object at
+  `[90,134,90,80,180,180,90]` before the serial calibration session closed.
+- Generated camera/background/debug images remain under ignored `data/vision/`
+  and are not committed as source artifacts.

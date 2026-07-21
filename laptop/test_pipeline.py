@@ -260,6 +260,48 @@ def test_arm_command_validation():
         check(True, "out-of-range angle rejected")
 
 
+def test_planar_pick_calibration_and_detection():
+    print("[planar] fixed-base calibration, safe sequencing, portable perception")
+    from planar_pick import pick_pose_for_object_x, stepped_values
+    from vision_segment import (
+        ObjectDetection, select_gripper, select_pick_target)
+
+    check(config.GRIP_OPEN == 90 and config.GRIP_CLOSED == 180,
+          "physical gripper direction is 90=open, 180=closed")
+    check(config.PLANAR_SERVO_MIN[config.J_BASE]
+          == config.PLANAR_SERVO_MAX[config.J_BASE] == 90,
+          "broken base is locked at 90 in planar safety limits")
+    check(config.PLANAR_SERVO_MIN[config._UNUSED]
+          == config.PLANAR_SERVO_MAX[config._UNUSED] == 90,
+          "unused servo3 is locked at 90 in planar safety limits")
+    check(pick_pose_for_object_x(1435) == (140, 90),
+          "verified image reference maps to the successful physical pick pose")
+    right_pose = pick_pose_for_object_x(1505)
+    left_pose = pick_pose_for_object_x(1365)
+    check(right_pose[1] < 90 and left_pose[1] > 90,
+          "elbow correction follows measured camera x direction")
+    check(stepped_values(90, 95, 2) == [92, 94, 95]
+          and stepped_values(95, 90, 2) == [93, 91, 90],
+          "two-degree safety waypoints include the exact endpoint")
+
+    target = ObjectDetection((1415, 905), (1320, 870, 190, 70), 13300, .94)
+    gripper = ObjectDetection((1412, 700), (1372, 620, 80, 160), 12800, .70)
+    picture = ObjectDetection((1795, 780), (1730, 763, 130, 35), 4550, .83)
+    wall = ObjectDetection((960, 430), (0, 0, 1920, 860), 1651200, .99)
+    candidates = [wall, picture, gripper, target]
+    selected = select_pick_target(candidates, (1080, 1920, 3))
+    check(selected is target,
+          "segment selector chooses the compact tabletop object without a background")
+    check(select_gripper(candidates, target, (1080, 1920, 3)) is gripper,
+          "segment selector locates the nearest gripper section above the object")
+
+    lifted = ObjectDetection((1405, 825), (1310, 790, 190, 70), 13300, .58)
+    selected = select_pick_target(
+        [picture, gripper, lifted], (1080, 1920, 3), previous=target)
+    check(selected is lifted,
+          "target identity follows the object upward for grasp verification")
+
+
 def test_validate_handles_short_arrays():
     print("[config] malformed servo arrays are reported without crashing")
     import validate
@@ -403,6 +445,7 @@ if __name__ == "__main__":
     test_ik()
     test_policy_veto_scope()
     test_arm_command_validation()
+    test_planar_pick_calibration_and_detection()
     test_validate_handles_short_arrays()
     test_errp()
     test_errp_model_metadata()
