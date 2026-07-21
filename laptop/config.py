@@ -15,7 +15,7 @@ ARM_MOCK = False            # physical Uno is connected; calibration gate remain
 ARM_CALIBRATED = False      # set True only after arm_jog confirms geometry/offset/direction/limits
 N_JOINTS = 7
 UNUSED_JOINT = 2           # servo3 index (0-based) — attached but not driven
-HOME_POSE = [90, 90, 90, 90, 90, 170, 180]
+HOME_POSE = [90, 90, 90, 180, 90, 180, 180]
 
 # Joint indices (readable names). Bottom -> top of the arm.
 J_BASE, J_SHOULDER, _UNUSED, J_ELBOW, J_WRIST, J_ROLL, J_GRIP = range(7)
@@ -33,7 +33,7 @@ PLANAR_ARM_CALIBRATED = True  # successful physical pick/lift/place on 2026-07-2
 PLANAR_BASE_ANGLE = 90
 PLANAR_UNUSED_ANGLE = 90
 PLANAR_SERVO_MIN = [90, 0, 90, 0, 10, 0, 90]
-PLANAR_SERVO_MAX = [90, 150, 90, 150, 180, 180, 180]
+PLANAR_SERVO_MAX = [90, 150, 90, 180, 180, 180, 180]
 
 # Background-independent FastSAM perception and the calibrated local image
 # Jacobian. At the verified observation pose, an object centered at x=1435 px

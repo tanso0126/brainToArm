@@ -734,3 +734,29 @@ manually guide every run.
   `[90,134,90,80,180,180,90]` before the serial calibration session closed.
 - Generated camera/background/debug images remain under ignored `data/vision/`
   and are not committed as source artifacts.
+
+## Patch 18 — servo4/servo6 180-degree default pose
+
+### Intent
+
+Change the physical arm's requested default pose so servo4 and servo6 both
+start and return at 180 degrees.
+
+### Changes
+
+- Changed the Uno firmware startup pose from
+  `[90,90,90,90,90,170,180]` to `[90,90,90,180,90,180,180]`.
+- Kept the laptop `HOME_POSE` identical to the firmware so Arduino reset,
+  explicit home commands, mock status, and autonomous cleanup agree.
+- Extended servo4's firmware and planar-mode maximum to 180 degrees so the new
+  default is not contradicted or rejected by either safety layer.
+- Added a regression assertion for the physical servo4/servo6 home angles.
+
+### Verification
+
+- `python3 laptop/test_pipeline.py` — all tests passed.
+- `python3 -m compileall -q laptop` and `git diff --check` — passed.
+- Arduino Uno firmware compiled successfully (6,076 bytes flash, 474 bytes RAM)
+  and uploaded to `/dev/cu.usbserial-140`.
+- Live serial verification returned `PONG` and status
+  `[90,90,90,180,90,180,180]` after the Uno reset.

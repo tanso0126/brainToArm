@@ -37,10 +37,10 @@ const uint8_t PINS[N] = {13, 12, 11, 10, 9, 8, 7};
 // Physically verified travel limits. Base yaw is broken and servo3 is unused,
 // so both are hard-locked at 90 even if a host sends a different value.
 const int MIN_DEG[N] = {90, 0, 90, 0, 10, 0, 90};
-const int MAX_DEG[N] = {90, 150, 90, 150, 180, 180, 180};
+const int MAX_DEG[N] = {90, 150, 90, 180, 180, 180, 180};
 
-// Startup pose (safe neutral). Matches the old demo's rough home.
-const int HOME_DEG[N] = {90, 90, 90, 90, 90, 170, 180};
+// Startup/home pose. Servo numbers here are 1-based in the physical arm map.
+const int HOME_DEG[N] = {90, 90, 90, 180, 90, 180, 180};
 
 const uint8_t UNUSED_INDEX = 2;      // servo3, index 2 — attached but never targeted
 const float SLEW_DEG_PER_TICK = 1.5; // max move per control tick (~ speed limit)
