@@ -241,6 +241,10 @@ def test_arm_command_validation():
           "strict firmware status is parsed")
     check(config.HOME_POSE[3] == 180 and config.HOME_POSE[5] == 180,
           "physical servos 4 and 6 use the requested 180-degree home angle")
+    base_turn = list(config.HOME_POSE)
+    base_turn[config.J_BASE] = 180
+    check(arm.send_angles(base_turn) == "OK",
+          "restored base servo accepts a 180-degree jog command")
     for invalid in ("C 90 90", "C 90 90 90 bad 90 180 180",
                     "C 90 90 90 180 90 180 181"):
         try:
@@ -272,7 +276,7 @@ def test_planar_pick_calibration_and_detection():
           "physical gripper direction is 90=open, 180=closed")
     check(config.PLANAR_SERVO_MIN[config.J_BASE]
           == config.PLANAR_SERVO_MAX[config.J_BASE] == 90,
-          "broken base is locked at 90 in planar safety limits")
+          "side-camera calibration keeps the working base at 90")
     check(config.PLANAR_SERVO_MIN[config._UNUSED]
           == config.PLANAR_SERVO_MAX[config._UNUSED] == 90,
           "unused servo3 is locked at 90 in planar safety limits")

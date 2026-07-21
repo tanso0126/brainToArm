@@ -58,7 +58,7 @@ def validate():
         if not (config.PLANAR_SERVO_MIN[config.J_BASE]
                 == config.PLANAR_SERVO_MAX[config.J_BASE]
                 == config.PLANAR_BASE_ANGLE == 90):
-            errs.append("planar mode must hard-lock broken base servo1 at 90")
+            errs.append("camera-calibrated planar mode must keep servo1 at 90")
         if not (config.PLANAR_SERVO_MIN[config._UNUSED]
                 == config.PLANAR_SERVO_MAX[config._UNUSED]
                 == config.PLANAR_UNUSED_ANGLE == 90):

@@ -1,6 +1,6 @@
 """Background-independent, camera-closed-loop pick/place for the planar arm.
 
-Servo1 is currently broken, so this controller locks base yaw and servo3. It
+This side-camera calibration locks base yaw at 90 and leaves servo3 unused. It
 uses FastSAM to locate the single portable object and the gripper in every
 correction frame. No empty-table image, venue-specific ROI, or background
 learning is required.
@@ -143,7 +143,7 @@ class PlanarPicker:
                 raise ValueError(
                     f"planar joint {index + 1}={value} outside [{lo},{hi}]")
         if pose[config.J_BASE] != config.PLANAR_BASE_ANGLE:
-            raise ValueError("broken base must stay locked at 90 degrees")
+            raise ValueError("camera-calibrated planar base must stay at 90 degrees")
         if pose[config._UNUSED] != config.PLANAR_UNUSED_ANGLE:
             raise ValueError("unused servo3 must stay locked at 90 degrees")
 

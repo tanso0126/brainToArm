@@ -760,3 +760,28 @@ start and return at 180 degrees.
   and uploaded to `/dev/cu.usbserial-140`.
 - Live serial verification returned `PONG` and status
   `[90,90,90,180,90,180,180]` after the Uno reset.
+
+## Patch 19 — restore servo1 base-yaw control
+
+### Intent
+
+Re-enable the repaired base-yaw motor so manual jog commands such as
+`j 1 180` reach servo1 instead of being silently clamped to 90 degrees.
+
+### Changes
+
+- Expanded the Uno firmware's servo1 range from the former 90-degree hardware
+  lock to 0–180 degrees; servo3 remains fixed at 90 because it is unused.
+- Kept the already verified side-camera picker explicitly fixed at base=90.
+  Its pixel calibration is not valid after yawing the arm, while `arm_jog.py`
+  and generic control use the full global servo1 range.
+- Updated current-state documentation and regression coverage to distinguish
+  the restored motor from the intentionally fixed planar-camera policy.
+
+### Verification
+
+- `python3 laptop/test_pipeline.py`, Python compilation, diff checks, and the
+  Arduino Uno build all passed.
+- Uploaded the firmware to `/dev/cu.usbserial-140`; live ping returned `PONG`.
+- A bounded physical command sequence reported servo1 at 90° → 100° → 90°,
+  proving the former firmware clamp is removed while leaving the arm at home.

@@ -23,10 +23,10 @@ J_TILT = J_ROLL            # compatibility alias; servo6 is physically wrist rol
 GRIP_OPEN = 90             # physically verified: 90=open
 GRIP_CLOSED = 180          # physically verified: 180=closed
 
-# ---- Broken-base planar arm mode (physically verified 2026-07-20) ----
-# Servo1 cannot turn, so the real arm is constrained to one vertical plane.
-# The generic 3-D IK remains available for simulation, but physical pick/place
-# must use planar_pick.py, which locks servo1/3 and enforces these limits.
+# ---- Camera-calibrated planar arm mode (physically verified 2026-07-20) ----
+# Servo1 is operational again, but this legacy side-camera calibration is valid
+# only at base=90. Generic jog/IK may use servo1's full global 0..180 range;
+# planar_pick.py deliberately keeps servo1/3 fixed while using this calibration.
 PLANAR_CAM_INDEX = "auto"  # macOS indices change when an iPhone camera appears/disappears
 PLANAR_FRAME_SIZE = (1920, 1080)
 PLANAR_ARM_CALIBRATED = True  # successful physical pick/lift/place on 2026-07-20

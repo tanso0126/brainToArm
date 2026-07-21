@@ -34,10 +34,10 @@
 const uint8_t N = 7;
 const uint8_t PINS[N] = {13, 12, 11, 10, 9, 8, 7};
 
-// Physically verified travel limits. Base yaw is broken and servo3 is unused,
-// so both are hard-locked at 90 even if a host sends a different value.
-const int MIN_DEG[N] = {90, 0, 90, 0, 10, 0, 90};
-const int MAX_DEG[N] = {90, 150, 90, 180, 180, 180, 180};
+// Physically verified travel limits. Servo1 base yaw has been restored and is
+// available across 0..180 degrees. Servo3 remains unused and locked at 90.
+const int MIN_DEG[N] = {0, 0, 90, 0, 10, 0, 90};
+const int MAX_DEG[N] = {180, 150, 90, 180, 180, 180, 180};
 
 // Startup/home pose. Servo numbers here are 1-based in the physical arm map.
 const int HOME_DEG[N] = {90, 90, 90, 180, 90, 180, 180};

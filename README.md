@@ -36,11 +36,12 @@ precise steps to bring it up. No other context is required.
 > Full evidence, commands, and the corrected earlier findings are recorded in
 > [`docs/EEG_DEVICE_COMMS.md`](docs/EEG_DEVICE_COMMS.md).
 
-> ### ✅ Fixed-base camera pick-and-place works on the physical arm
+> ### ✅ Base rotation restored; calibrated planar pick remains available
 >
-> The connected Uno arm has a broken servo1 base-yaw axis, so it cannot correct
-> out-of-plane position. A dedicated side-camera controller now locks servo1
-> and unused servo3 at 90°, re-detects the object before every attempt, corrects
+> Servo1 base yaw is operational again and manual jog/3-D control may command
+> it through 0–180°. The previously verified side-camera controller remains a
+> deliberately fixed-plane mode: it locks servo1 and unused servo3 at 90°,
+> re-detects the object before every attempt, corrects
 > shoulder/elbow in image pixels, rotates wrist pitch and roll to 180°, opens the
 > gripper at 90°, descends before closing it at 180°, verifies lift, transports,
 > releases, and verifies displacement. The complete sequence was physically
@@ -310,8 +311,9 @@ brainToArm/
   `ARM_MOCK=True`; when a real arm is requested, a missing port, bad reply, or
   motion timeout stops the run instead of pretending the command succeeded.
 
-- **`planar_pick.py`** — The physical-arm path for the currently broken base
-  yaw. It uses the MacBook side camera directly, detects the current tabletop
+- **`planar_pick.py`** — The physically verified side-camera path. Although base
+  yaw is operational again, this calibration deliberately holds it at 90°. It
+  uses the MacBook side camera directly and detects the current tabletop
   object against a clean background, maps its pixel x-coordinate through the
   measured local elbow Jacobian, and executes the physically verified sequence:
   fully open, pitch/roll 180°, descend in 2° steps, close, lift verification,
