@@ -18,6 +18,7 @@ from polyg_hid import (
     ADC_VOLTS_PER_COUNT, PolyGIHID, command_report, counts_to_adc_mv, decode_report)
 from eeg_dashboard import EEGSignalProcessor, analyze_signal_quality, sanitize_recording_name
 from wrist_vision import WristDetector, frame_quality
+from wrist_search import PlanarSearchSafety, WristSearcher
 from capture_esp32_camera import correct_neutral_background, validate_frame_quality
 
 
@@ -557,9 +558,11 @@ def test_wrist_marker_and_target_geometry():
     # Small distractors are not allowed to replace the lower-center finger pair.
     cv2.rectangle(frame, (80, 80), (105, 95), (255, 0, 0), -1)
     cv2.rectangle(frame, (1120, 90), (1145, 105), (0, 0, 255), -1)
-    cv2.rectangle(frame, (430, 520), (525, 565), (255, 0, 0), -1)
-    cv2.rectangle(frame, (755, 520), (850, 565), (0, 0, 255), -1)
-    target_box = cv2.boxPoints(((665, 410), (120, 55), 20)).astype(np.int32)
+    cv2.rectangle(frame, (100, 390), (230, 470), (0, 105, 210), -1)  # skin/orange
+    cv2.rectangle(frame, (350, 620), (445, 719), (255, 0, 0), -1)
+    cv2.rectangle(frame, (690, 620), (785, 719), (0, 0, 255), -1)
+    # A valid object can appear anywhere in the camera, including the upper half.
+    target_box = cv2.boxPoints(((665, 180), (120, 55), 20)).astype(np.int32)
     cv2.fillConvexPoly(frame, target_box, (0, 220, 70))
 
     observation, _masks = WristDetector().detect(frame)
@@ -567,9 +570,12 @@ def test_wrist_marker_and_target_geometry():
           "both physical finger colors produce one gripper pose")
     check(observation.target is not None,
           "colored object remains separate from finger markers")
-    check(abs(observation.gripper.center[0] - 640) < 2
-          and abs(observation.gripper.center[1] - 542.5) < 2,
-          "grasp point is the midpoint of blue-left and red-right tape")
+    check(abs(observation.target.center[0] - 665) < 2
+          and abs(observation.target.center[1] - 180) < 2,
+          "target detection covers the full frame while ignoring skin hue")
+    check(abs(observation.gripper.center[0] - 567.5) < 2
+          and abs(observation.gripper.center[1] - 669.5) < 2,
+          "bottom-edge tapes define their measured midpoint")
     check(observation.gripper.jaw_axis[0] > 0.99,
           "jaw axis points mechanically from blue-left to red-right")
     check(observation.error_xy[1] < 0 and observation.distance_px > 100,
@@ -583,6 +589,78 @@ def test_wrist_marker_and_target_geometry():
     quality = frame_quality(clipped)
     check(not quality.valid and quality.clipped_fraction == 1.0,
           "overexposed view fails closed before visual alignment")
+
+
+def test_wrist_full_frame_search():
+    print("[wrist-search] collision-checked 2/3/4 search stops on target")
+    from types import SimpleNamespace
+    import numpy as np
+
+    safety = PlanarSearchSafety(
+        offsets=[0, 90, 90, 120, 0, 0], directions=[1] * 6,
+        lengths=(3, 3, 2), base_height=10,
+        table_clearance=.5, base_clearance=.5, self_clearance=.5,
+        slew_step=1.5)
+    safe_pose = [90, 90, 90, 120, 180, 0]
+    base_collision = [90, 0, 90, 120, 180, 0]
+    check(safety.pose_is_safe(safe_pose),
+          "forward model accepts a clear horizontal three-link pose")
+    check(not safety.pose_is_safe(base_collision),
+          "forward model rejects forearm contact with the base column")
+    target_pose_a = [90, 105, 90, 130, 180, 0]
+    target_pose_b = [90, 105, 105, 140, 180, 0]
+    check(safety.transition_is_safe(safe_pose, target_pose_a),
+          "every firmware-slew intermediate is collision checked")
+
+    class FakeArm:
+        def __init__(self):
+            self.pose = list(safe_pose)
+            self.commands = []
+
+        def status(self):
+            return list(self.pose)
+
+        def send_angles(self, pose):
+            self.pose = list(pose)
+            self.commands.append(list(pose))
+
+        @staticmethod
+        def wait_done():
+            return True
+
+    class FakeCamera:
+        @staticmethod
+        def read():
+            return True, np.zeros((32, 32, 3), dtype=np.uint8)
+
+    class FakeDetector:
+        def __init__(self):
+            self.calls = 0
+
+        def detect(self, _frame):
+            self.calls += 1
+            target = SimpleNamespace(center=(10.0, 10.0)) if self.calls == 3 else None
+            observation = SimpleNamespace(
+                quality=SimpleNamespace(valid=True, reason=""),
+                target=target, gripper=None, aligned=False,
+                error_xy=None, distance_px=None)
+            return observation, {}
+
+    class FakePlanner:
+        def __init__(self):
+            self.safety = safety
+
+        @staticmethod
+        def plan(_pose, _max_poses=None):
+            return [target_pose_a, target_pose_b]
+
+    arm = FakeArm()
+    found = WristSearcher(
+        arm, FakeCamera(), FakeDetector(), FakePlanner()).find(max_poses=2)
+    commanded = [tuple(pose[joint] for joint in config.WRIST_SEARCH_JOINTS)
+                 for pose in arm.commands]
+    check(found is not None and commanded == [(105, 90, 130), (105, 105, 140)],
+          "coordinated search stops immediately at first target-visible pose")
 
 
 def test_pick_place():
@@ -652,6 +730,7 @@ if __name__ == "__main__":
     test_ring_recent_is_time_based()
     test_camera_neutral_correction()
     test_wrist_marker_and_target_geometry()
+    test_wrist_full_frame_search()
     test_pick_place()
     test_servo_visibility_failure()
     print("\nALL TESTS PASSED")

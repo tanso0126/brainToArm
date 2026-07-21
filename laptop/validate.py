@@ -258,6 +258,35 @@ def validate():
             or not 0 <= config.WRIST_MAX_CLIPPED_FRACTION < 1
             or config.WRIST_MIN_FRAME_STD <= 0):
         errs.append("wrist alignment and frame-quality thresholds are invalid")
+    try:
+        excluded_hues_ok = all(
+            len(pair) == 2 and 0 <= int(pair[0]) <= int(pair[1]) <= 179
+            for pair in config.WRIST_AUTO_TARGET_EXCLUDED_HUES)
+    except (TypeError, ValueError):
+        excluded_hues_ok = False
+    if not excluded_hues_ok:
+        errs.append("WRIST_AUTO_TARGET_EXCLUDED_HUES contains an invalid range")
+    if tuple(config.WRIST_SEARCH_JOINTS) != (
+            config.J_SHOULDER, config.J_ELBOW, config.J_WRIST):
+        errs.append("wrist search must coordinate motors 2, 3, and 4")
+    if (len(config.WRIST_SEARCH_GRID_STEP) != len(config.WRIST_SEARCH_JOINTS)
+            or any(not isinstance(value, int) or isinstance(value, bool) or value <= 0
+                   for value in config.WRIST_SEARCH_GRID_STEP)):
+        errs.append("WRIST_SEARCH_GRID_STEP needs three positive integers")
+    for name in ("WRIST_SEARCH_TABLE_CLEARANCE_CM",
+                 "WRIST_SEARCH_BASE_CLEARANCE_CM",
+                 "WRIST_SEARCH_SELF_CLEARANCE_CM",
+                 "WRIST_SEARCH_SLEW_STEP_DEG"):
+        value = getattr(config, name)
+        if (not isinstance(value, (int, float)) or isinstance(value, bool)
+                or not math.isfinite(value) or value <= 0):
+            errs.append(f"{name} must be finite and positive")
+    if (not isinstance(config.WRIST_SEARCH_MAX_POSES, int)
+            or isinstance(config.WRIST_SEARCH_MAX_POSES, bool)
+            or config.WRIST_SEARCH_MAX_POSES < 1):
+        errs.append("WRIST_SEARCH_MAX_POSES must be a positive integer")
+    if not isinstance(config.WRIST_SEARCH_KINEMATICS_VERIFIED, bool):
+        errs.append("WRIST_SEARCH_KINEMATICS_VERIFIED must be True or False")
 
     # --- heights ordered sensibly ---
     heights = (config.Z_GRASP, config.Z_APPROACH, config.Z_LIFT, config.Z_PLACE)

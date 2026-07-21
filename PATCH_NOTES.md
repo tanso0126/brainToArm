@@ -1243,3 +1243,51 @@ physically disconnected.
   pairing, midpoint and jaw-axis geometry, independent colored-target detection,
   x/y and orientation error, alignment tolerance, and fail-closed clipping.
 - The complete Python regression suite passes with the updated 120° wrist floor.
+
+## Patch 30 — measured gripper view and collision-checked full-frame search
+
+### Correction
+
+The first wrist-camera quality policy incorrectly treated the mostly white table
+and bottom-border tape contours as unusable. Physical inspection of a warmed
+1280x720 AVerMedia frame showed that the image itself was healthy (`clipped=0%`,
+intensity standard deviation about 59) and that the actual gripper markers were
+the two dominant compact regions: blue at approximately `(326,616,130,104)` and
+red at `(657,618,117,102)`. Both correctly touch the bottom image boundary.
+
+### Changes
+
+- Allow only gripper-marker contours—not arbitrary targets—to touch the bottom
+  boundary. Left, right, and top border rejection remains in place.
+- Moved the expected mounted-view gripper midpoint from the provisional
+  `(0.50,0.76)` to the measured normalized location `(0.44,0.94)`.
+- Changed global white-background clipping from a 30% hard failure to a reported
+  warning condition that fails only above 92%. Marker and target presence remain
+  mandatory, so white background pixels cannot create `READY` by themselves.
+- Automatic target selection excludes skin/red and blue hue bands. This removed
+  the observed false target on the operator's hand while avoiding conflict with
+  both tape colors; an explicit click lock bypasses the automatic exclusions.
+- Target detection deliberately covers the full frame. Scene distractors are
+  handled by the configured/click-locked object color, not by a spatial crop;
+  this preserves the ability to sweep wrist pitch and find an off-screen object.
+- Added `wrist_search.py`: check the current view, then coordinate motors 2/3/4
+  across mathematically diverse camera positions/orientations. Forward
+  kinematics rejects table, base-column, and non-adjacent-link collision at both
+  candidate poses and every intermediate state matching the firmware's equal-
+  degree slew. Search stops anywhere in the full frame; failure exactly retraces
+  the known-safe route. Physical execution requires explicit `--run` plus arm
+  and search-kinematics calibration gates. `--target-hue` selects object color.
+- Updated the synthetic regression to prove partially bottom-edge tape contours
+  still produce the correct midpoint and jaw axis.
+
+### Verification
+
+- A fresh named-device frame confirmed normal current exposure and the exact
+  physical tape geometry above. The earlier overexposed frame was an automatic-
+  exposure/transient scene condition, not evidence that the webcam was unusable.
+- After the boundary correction, the physical frame reported gripper center
+  `(552.7,676.7)`, opening `309.6 px`, and jaw angle `0.1°`, matching the visible
+  blue/red tape pair.
+- Synthetic search tests prove forward geometry rejects base collision, complete
+  simultaneous slew transitions are checked, motors 2/3/4 move together, and
+  search stops after the first target-visible frame.

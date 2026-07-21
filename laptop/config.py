@@ -303,7 +303,7 @@ WRIST_MARKER_MAX_SEPARATION_RATIO = 0.38
 WRIST_MARKER_MIN_FILL_RATIO = 0.32
 WRIST_MARKER_MAX_ASPECT = 5.0
 WRIST_MARKER_MAX_PAIR_AREA_RATIO = 4.0
-WRIST_EXPECTED_GRIPPER_CENTER = (0.50, 0.76)  # normalized image x/y
+WRIST_EXPECTED_GRIPPER_CENTER = (0.44, 0.94)  # measured mounted-view x/y
 WRIST_MAX_GRIPPER_CENTER_ERROR_RATIO = 0.12  # fraction of image diagonal
 
 # Default target mode finds a compact, saturated object but explicitly removes
@@ -313,6 +313,9 @@ WRIST_MAX_GRIPPER_CENTER_ERROR_RATIO = 0.12  # fraction of image diagonal
 WRIST_TARGET_HSV = None
 WRIST_TARGET_MIN_SATURATION = 65
 WRIST_TARGET_MIN_VALUE = 35
+# Automatic mode ignores skin/red and blue because they conflict with a nearby
+# operator and the two gripper tapes. Click-lock mode bypasses this exclusion.
+WRIST_AUTO_TARGET_EXCLUDED_HUES = [(0, 22), (90, 145), (165, 179)]
 WRIST_TARGET_MIN_AREA_RATIO = 0.00035
 WRIST_TARGET_MAX_AREA_RATIO = 0.18
 WRIST_TARGET_HUE_TOLERANCE = 12
@@ -322,5 +325,20 @@ WRIST_ALIGN_TOLERANCE_PX = 24.0
 
 # A clipped image has permanently lost color information. Detection may still be
 # displayed for diagnosis, but aligned/ready is false until quality recovers.
-WRIST_MAX_CLIPPED_FRACTION = 0.30
+WRIST_MAX_CLIPPED_FRACTION = 0.92
 WRIST_MIN_FRAME_STD = 10.0
+
+# Full-frame search may coordinate shoulder/elbow/wrist pitch (motors 2/3/4).
+# Candidate endpoints and every intermediate firmware-slew state are checked by
+# forward kinematics before motion. Keep the execution gate False until the
+# servo zero/direction and physical link dimensions above are measured on this
+# exact arm; electrical angle limits alone cannot prove collision clearance.
+WRIST_SEARCH_JOINTS = (J_SHOULDER, J_ELBOW, J_WRIST)
+WRIST_SEARCH_GRID_STEP = (15, 15, 10)
+WRIST_SEARCH_MAX_POSES = 18
+WRIST_SEARCH_TABLE_CLEARANCE_CM = 0.8
+WRIST_SEARCH_BASE_CLEARANCE_CM = 1.5
+WRIST_SEARCH_SELF_CLEARANCE_CM = 1.2
+WRIST_SEARCH_SLEW_STEP_DEG = 1.5
+WRIST_CAMERA_MOUNT_ANGLE_DEG = 0.0
+WRIST_SEARCH_KINEMATICS_VERIFIED = False

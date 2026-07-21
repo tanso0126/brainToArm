@@ -119,7 +119,7 @@ def _blob_from_contour(contour, hsv):
 
 
 def _valid_blobs(mask, hsv, minimum_area, maximum_area,
-                 minimum_fill=0.0, maximum_aspect=None):
+                 minimum_fill=0.0, maximum_aspect=None, allow_bottom=False):
     height, width = mask.shape
     contours, _ = cv2.findContours(
         mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -130,7 +130,7 @@ def _valid_blobs(mask, hsv, minimum_area, maximum_area,
             continue
         x, y, box_width, box_height = cv2.boundingRect(contour)
         if (x <= 1 or y <= 1 or x + box_width >= width - 1
-                or y + box_height >= height - 1):
+                or (not allow_bottom and y + box_height >= height - 1)):
             continue
         fill = area / max(1, box_width * box_height)
         aspect = max(box_width, box_height) / max(1, min(box_width, box_height))
@@ -171,6 +171,11 @@ class WristDetector:
         if saturated.size == 0:
             raise ValueError("clicked target patch has too little color saturation")
         hue, saturation, value = np.median(saturated, axis=0)
+        self.target_hsv = self._target_ranges(hue, saturation, value)
+        return tuple(float(v) for v in (hue, saturation, value))
+
+    @staticmethod
+    def _target_ranges(hue, saturation=255, value=255):
         tolerance = config.WRIST_TARGET_HUE_TOLERANCE
         sat_lo = max(config.WRIST_TARGET_MIN_SATURATION,
                      int(saturation) - config.WRIST_TARGET_SATURATION_MARGIN)
@@ -185,8 +190,14 @@ class WristDetector:
                       ([0, sat_lo, val_lo], [hi - 180, 255, 255])]
         else:
             ranges = [([lo, sat_lo, val_lo], [hi, 255, 255])]
-        self.target_hsv = ranges
-        return tuple(float(v) for v in (hue, saturation, value))
+        return ranges
+
+    def set_target_hue(self, hue, saturation=255, value=255):
+        """Lock a known object/tape hue without imposing any spatial ROI."""
+        if not 0 <= float(hue) <= 179:
+            raise ValueError("OpenCV target hue must be in [0, 179]")
+        self.target_hsv = self._target_ranges(hue, saturation, value)
+        return self.target_hsv
 
     def clear_target_lock(self):
         self.target_hsv = None
@@ -199,8 +210,11 @@ class WristDetector:
         marker_args = (minimum, maximum,
                        config.WRIST_MARKER_MIN_FILL_RATIO,
                        config.WRIST_MARKER_MAX_ASPECT)
-        blue = _valid_blobs(blue_mask, hsv, *marker_args)
-        red = _valid_blobs(red_mask, hsv, *marker_args)
+        # The mounted camera intentionally sees the fingers entering from the
+        # bottom. Their tape contours are complete enough for centroids even
+        # though the physical fingers continue outside the image.
+        blue = _valid_blobs(blue_mask, hsv, *marker_args, allow_bottom=True)
+        red = _valid_blobs(red_mask, hsv, *marker_args, allow_bottom=True)
         if not blue or not red:
             return None
 
@@ -252,6 +266,11 @@ class WristDetector:
                 0, config.WRIST_TARGET_MIN_SATURATION,
                 config.WRIST_TARGET_MIN_VALUE], dtype=np.uint8)
             mask = cv2.inRange(hsv, lower, np.array([179, 255, 255], dtype=np.uint8))
+            for low_hue, high_hue in config.WRIST_AUTO_TARGET_EXCLUDED_HUES:
+                excluded = cv2.inRange(
+                    hsv, np.array([low_hue, 0, 0], dtype=np.uint8),
+                    np.array([high_hue, 255, 255], dtype=np.uint8))
+                mask = cv2.bitwise_and(mask, cv2.bitwise_not(excluded))
             kernel = np.ones((5, 5), dtype=np.uint8)
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
@@ -279,6 +298,8 @@ class WristDetector:
             # bonus. No venue/background image is involved.
             score = -distance / diagonal + 0.035 * math.log1p(blob.area)
             ranked.append((score, blob))
+        if not ranked:
+            return None
         blob = max(ranked, key=lambda item: item[0])[1]
         rect = cv2.minAreaRect(blob.contour)
         (_cx, _cy), (rect_width, rect_height), angle = rect

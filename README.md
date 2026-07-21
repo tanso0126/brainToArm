@@ -310,6 +310,7 @@ brainToArm/
     │
     ├── vision.py                  ← camera → objects + arm tip (markerless)
     ├── wrist_vision.py            ← named wrist webcam + tape/target geometry
+    ├── wrist_search.py            ← collision-checked motor2/3/4 view planner
     ├── calibrate_workspace.py     ← click 4 points → pixel↔cm mapping
     ├── camera_calibrate.py        ← optional lens (fisheye) calibration
     ├── calibrate_esp32_color.py   ← neutral-scene OV2640 spatial color map
@@ -503,6 +504,15 @@ brainToArm/
   Pair geometry, contour compactness, expected lower-center placement, exposure,
   and contrast are all gated. It never imports or opens `ArmSerial`, so live
   framing and hue setup cannot move the robot.
+
+- **`wrist_search.py`** — Motion layer for a target outside the current frame.
+  It coordinates shoulder, elbow, and wrist pitch (motors 2/3/4) to generate
+  diverse camera positions and directions. Planar forward kinematics rejects
+  endpoints or complete firmware-slew paths that violate table, base-column, or
+  non-adjacent-link clearance. Search stops on the first full-frame target and
+  failure retraces the verified route. Physical `--run` remains locked until
+  servo zero/direction, link lengths, and the search model are explicitly marked
+  calibrated; `--target-hue` selects a known object color without a spatial crop.
 
 ### Support and testing
 
@@ -718,13 +728,21 @@ For the mounted USB wrist webcam, keep the arm unplugged and run:
 ```bash
 python3 laptop/wrist_vision.py --snapshot  # named AVerMedia proof + one annotated frame
 python3 laptop/wrist_vision.py --live      # placement, tape, target, exposure UI
+python3 laptop/wrist_search.py             # inspect gates/joints; moves nothing
 ```
 
-The frame must show both full tape patches and the object. If it reports
-`overexposed`, reduce direct light/white-table glare or set exposure with the
-AVerMedia utility; clipped pixels cannot be repaired in software. The live view
-is perception-only. Physical image-Jacobian and approach-depth calibration are
-still required after reconnecting the Uno before autonomous motion is enabled.
+The mounted view may show the fingers entering through the bottom edge; those
+contours are intentionally accepted. Global white-table clipping is reported but
+does not block alignment while the colored tape/object pixels remain usable. A
+near-total (`>92%`) clipped frame or low-contrast frame still fails closed. The
+automatic target mode ignores skin/red and blue hues so a nearby hand and the
+finger tapes are not selected as the object; left-click hue lock is available
+when an explicit target color is needed. Target location is never restricted to
+a center/lower ROI: the full frame remains searchable so the motion layer can
+search new collision-checked 2/3/4 viewpoints whenever the chosen color is absent. The
+live view is perception-only. Physical image-Jacobian and approach-depth
+calibration are still required after reconnecting the Uno before autonomous
+motion is enabled.
 
 For the alternate wired OV2640 hardware proof, flash
 `firmware/esp32_camera_diagnostic` and run:
@@ -805,6 +823,9 @@ Grouped constants (see the file for full comments):
 - **`python3 laptop/wrist_vision.py --snapshot`** — opens the AVerMedia by name,
   warms exposure, saves an annotated frame, and prints marker/target/quality
   state without opening the robot serial port.
+- **`python3 laptop/wrist_search.py`** — reports the 2/3/4 search and calibration
+  gates without hardware. Add `--run --target-hue H` only after the Uno is
+  connected and the forward-kinematics safety model is physically verified.
 
 ---
 
