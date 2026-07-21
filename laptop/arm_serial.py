@@ -20,7 +20,8 @@ def _serial_candidates():
     # macOS Arduino boards enumerate as /dev/cu.usbmodem* or /dev/cu.usbserial*
     cands = glob.glob("/dev/cu.usbmodem*") + glob.glob("/dev/cu.usbserial*") \
         + glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*")
-    return sorted(set(cands))
+    excluded = set(getattr(config, "ARM_PORT_EXCLUDE", ()))
+    return sorted(set(cands) - excluded)
 
 
 def parse_status_line(line):
@@ -54,7 +55,8 @@ class ArmSerial:
                 candidates = _serial_candidates()
                 if len(candidates) > 1:
                     raise RuntimeError(
-                        "multiple serial devices found; set ARM_PORT explicitly: "
+                        "multiple non-excluded serial devices found; "
+                        "set ARM_PORT or ARM_PORT_EXCLUDE explicitly: "
                         + ", ".join(candidates))
                 self.port = candidates[0] if candidates else None
             if not self.port:

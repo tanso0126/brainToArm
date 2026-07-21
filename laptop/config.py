@@ -32,7 +32,10 @@ def _load_home_pose():
 # ======================================================================
 # Arduino (robot arm)
 # ======================================================================
-ARM_PORT = "/dev/cu.usbserial-140"  # verified Uno/CH340 port on this Mac
+ARM_PORT = "auto"           # Uno port changes with USB topology; resolve at runtime
+# The ESP32 CP2102 has stable serial "0001" and must never be opened/reset by
+# arm discovery. The Uno CH340 currently enumerates as usbserial-110.
+ARM_PORT_EXCLUDE = ("/dev/cu.usbserial-0001",)
 ARM_BAUD = 115200
 ARM_MOCK = False            # physical Uno is connected; calibration gate remains below
 ARM_CALIBRATED = False      # set True only after arm_jog confirms geometry/offset/direction/limits

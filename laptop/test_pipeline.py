@@ -235,7 +235,18 @@ def test_policy_veto_scope():
 
 def test_arm_command_validation():
     print("[arm] rejects malformed or unsafe commands before serial write")
-    from arm_serial import ArmSerial, parse_status_line
+    from arm_serial import ArmSerial, _serial_candidates, parse_status_line
+    from unittest.mock import patch
+
+    with patch("arm_serial.glob.glob") as mocked_glob:
+        mocked_glob.side_effect = [
+            [],
+            ["/dev/cu.usbserial-0001", "/dev/cu.usbserial-110"],
+            [],
+            [],
+        ]
+        check(_serial_candidates() == ["/dev/cu.usbserial-110"],
+              "arm auto-discovery excludes the ESP32 camera CP2102 port")
     arm = ArmSerial(mock=True)
     home_status = "C " + " ".join(str(angle) for angle in config.HOME_POSE)
     check(parse_status_line(home_status) == config.HOME_POSE,

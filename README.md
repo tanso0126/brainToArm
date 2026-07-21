@@ -591,9 +591,10 @@ you run the loop nothing is guessed.
 pip install -r requirements.txt
 ```
 
-**1 — Arm.** The connected Uno/CH340 is verified at
-`/dev/cu.usbserial-140` and has `firmware/arm_controller/arm_controller.ino`
-flashed. It responds to `PONG`, reports all seven angles, and completed the
+**1 — Arm.** The connected Uno/CH340 is auto-discovered while the ESP32 camera's
+stable `/dev/cu.usbserial-0001` CP2102 port is explicitly excluded. The Uno has
+`firmware/arm_controller/arm_controller.ino` flashed, responds to `PONG`,
+reports all seven angles, and completed the
 bounded base test `90° → 95° → 90°`. Measure the arm's link lengths with a ruler
 into `L_BASE_HEIGHT / L_UPPER / L_FORE / L_HAND`. Then:
 ```bash
@@ -652,7 +653,7 @@ no keyboard — the brain drives the veto directly.
 
 Grouped constants (see the file for full comments):
 
-- **Arm serial:** `ARM_PORT`, `ARM_BAUD`, `ARM_MOCK`, `ARM_CALIBRATED`, `N_JOINTS`, `HOME_POSE`, joint index
+- **Arm serial:** `ARM_PORT`, `ARM_PORT_EXCLUDE`, `ARM_BAUD`, `ARM_MOCK`, `ARM_CALIBRATED`, `N_JOINTS`, `HOME_POSE`, joint index
   names, `GRIP_OPEN/CLOSED`.
 - **Arm geometry & calibration:** `L_BASE_HEIGHT/L_UPPER/L_FORE/L_HAND`,
   `SERVO_OFFSET/DIRECTION/MIN/MAX`.

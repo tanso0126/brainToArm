@@ -848,3 +848,33 @@ map before adding Wi-Fi streaming or mounting the camera on the arm.
 - A 4MB backup of the previous firmware was attempted at multiple serial rates,
   but CP2102 disconnected mid-read; no partial file was retained or claimed as
   a valid backup.
+
+## Patch 22 — simultaneous ESP32 and Uno serial discovery
+
+### Intent
+
+Restore `arm_jog.py` when the ESP32 camera and robot Uno are both connected,
+without accidentally opening or resetting the camera board.
+
+### Changes
+
+- Replaced the stale hard-coded Uno path `/dev/cu.usbserial-140` with runtime
+  discovery. The current Uno re-enumerated as `/dev/cu.usbserial-110`.
+- Explicitly excluded the ESP32 camera's stable CP2102 path
+  `/dev/cu.usbserial-0001` from arm candidates, so multiple attached serial
+  boards no longer make the tool choose incorrectly or abort unnecessarily.
+- Added regression coverage for two-board enumeration and documented the new
+  port configuration.
+- Reflashed the current Uno arm firmware after its serial bridge accepted bytes
+  but the previous application returned no responses.
+
+### Verification
+
+- Live Uno ping returned `PONG`; status returned the requested home pose
+  `[90,90,90,180,90,0,180]`.
+- `python3 laptop/test_pipeline.py`, Python compilation, and diff checks passed,
+  including the simultaneous-board discovery regression.
+- The final automatic `arm_jog.py` launch could not open hardware because both
+  ESP32 and Uno serial nodes disappeared from `/dev` simultaneously. Since the
+  Uno had already passed live ping/status after reflashing, the remaining fault
+  is the shared USB hub/cable/power path rather than arm protocol or selection.
