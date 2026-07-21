@@ -16,6 +16,7 @@ from eeg_bridge import EEGBridge
 from polyg_hid import (
     ADC_VOLTS_PER_COUNT, PolyGIHID, command_report, counts_to_adc_mv, decode_report)
 from eeg_dashboard import EEGSignalProcessor, analyze_signal_quality, sanitize_recording_name
+from capture_esp32_camera import correct_neutral_background, validate_frame_quality
 
 
 def check(cond, msg):
@@ -403,6 +404,42 @@ def test_ring_recent_is_time_based():
     check(ring.recent(1.0) == [[2]], "stale samples are excluded from health checks")
 
 
+def test_camera_neutral_correction():
+    print("[camera] bounded gray-background color correction")
+    import numpy as np
+    from PIL import Image
+
+    pixels = np.empty((40, 40, 3), dtype=np.uint8)
+    pixels[:] = [90, 110, 100]  # deliberately green-tinted neutral background
+    pixels[5:12, 5:12] = [220, 30, 30]  # colored object must stay red
+    corrected, gains, neutral_count = correct_neutral_background(Image.fromarray(pixels))
+    result = np.asarray(corrected)
+    background = result[20:, 20:].mean(axis=(0, 1))
+    check(background.max() - background.min() <= 2,
+          "neutral background channels converge")
+    check(result[8, 8, 0] > result[8, 8, 1] * 4,
+          "strong object color is preserved")
+    check(neutral_count > pixels.shape[0] * pixels.shape[1] * 0.8,
+          "colored object is excluded from the gain estimate")
+    check(all(0.85 <= gain <= 1.15 for gain in gains),
+          "per-channel correction remains bounded")
+
+    clean = Image.fromarray(np.full((64, 64, 3), 128, dtype=np.uint8))
+    validate_frame_quality(clean, neutral_count=64 * 64)
+    check(True, "neutral non-clipped frame passes quality validation")
+
+    mosaicked = np.empty((64, 64, 3), dtype=np.uint8)
+    for row in range(8):
+        for column in range(8):
+            mosaicked[row * 8:(row + 1) * 8, column * 8:(column + 1) * 8] = \
+                70 if (row + column) % 2 else 180
+    try:
+        validate_frame_quality(Image.fromarray(mosaicked), neutral_count=64 * 64)
+        check(False, "8-pixel mosaic corruption rejected")
+    except ValueError:
+        check(True, "8-pixel mosaic corruption rejected")
+
+
 def test_pick_place():
     print("[pickplace] visual correction is preserved through grasp + delivery")
     import random
@@ -467,6 +504,7 @@ if __name__ == "__main__":
     test_errp_model_metadata()
     test_eeg_packet_timestamps()
     test_ring_recent_is_time_based()
+    test_camera_neutral_correction()
     test_pick_place()
     test_servo_visibility_failure()
     print("\nALL TESTS PASSED")

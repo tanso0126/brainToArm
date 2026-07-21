@@ -56,17 +56,25 @@ precise steps to bring it up. No other context is required.
 > ### ✅ Wired ESP32 + OV2640 frame capture works
 >
 > With the robot arm disconnected, the loose OV2640 was physically verified on
-> the classic no-PSRAM ESP32 at `/dev/cu.usbserial-0001`. The current reliable
-> proof mode is 160x120 RGB565 over USB serial; the Mac validates all 38,400
-> bytes, decodes the sensor's big-endian pixel order, and saves a PNG. Run:
+> the classic no-PSRAM ESP32 at `/dev/cu.usbserial-0001`. The physical harness
+> has D5/D7 crossed; the firmware compensates for it. The current reliable mode
+> is hardware JPEG at 160x120 over USB serial with spatial color calibration,
+> bounded per-frame neutral correction, full JPEG decoding, and block-damage
+> rejection. Run:
 >
 > ```bash
+> # Run once while the camera sees an empty neutral gray/white workspace:
+> python3 laptop/calibrate_esp32_color.py
+>
+> # Normal corrected capture:
 > python3 laptop/capture_esp32_camera.py
 > ```
 >
 > The ESP32 must have `firmware/esp32_camera_diagnostic` flashed with ESP32
-> Arduino core 2.0.17. JPEG capture on this loose-jumper/no-PSRAM setup is not
-> yet the verified path; do not describe the current diagnostic as Wi-Fi video.
+> Arduino core 2.0.17. This is a verified USB frame source, not yet Wi-Fi video.
+> The lower resolution is deliberate: 320x240 worked but long jumper wires
+> caused intermittent JPEG block corruption; 160x120 plus the quality gate
+> completed 20/20 clean output requests in the physical stability test.
 
 ---
 
@@ -280,6 +288,7 @@ brainToArm/
     ├── vision.py                  ← camera → objects + arm tip (markerless)
     ├── calibrate_workspace.py     ← click 4 points → pixel↔cm mapping
     ├── camera_calibrate.py        ← optional lens (fisheye) calibration
+    ├── calibrate_esp32_color.py   ← neutral-scene OV2640 spatial color map
     ├── capture_esp32_camera.py    ← capture/validate one wired OV2640 frame
     │
     ├── sim.py                     ← toy world so the mock runs coherently
@@ -653,13 +662,16 @@ For the separate wrist-camera hardware bring-up, keep the arm unplugged, flash
 `firmware/esp32_camera_diagnostic`, and run:
 
 ```bash
+python3 laptop/calibrate_esp32_color.py  # empty neutral scene; repeat after remount/lighting change
 python3 laptop/capture_esp32_camera.py
 ```
 
-A passing result currently reports `CAMERA_READY pid=0x26 psram=0` followed by
-`FRAME 160 120 38400 0` and writes
-`data/vision/esp32_camera_test.png`. This proves the camera and frame bus; it
-does not yet replace the calibrated overhead-camera source in `vision.py`.
+A passing result currently reports `CAMERA_READY pid=0x26 psram=0 controls=0`
+followed by `FRAME 160 120 ... 4` and writes a color-corrected image under
+`data/vision/`. Pixel format 4 is OV2640 hardware JPEG. The Mac drops frames
+that fail full decoding, clipping/background checks, or the measured JPEG
+8-pixel block-discontinuity limit. This proves the camera and frame bus; it does
+not yet replace the calibrated overhead-camera source in `vision.py`.
 
 **4 — ErrP model.** The baseline heuristic already works, but for best accuracy:
 ```bash

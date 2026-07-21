@@ -936,3 +936,86 @@ physically verified camera capture path, while keeping the robot arm unplugged.
   correction, proving a real image rather than a repeated or synthetic buffer.
 - The verified PNG SHA-256 was
   `2d38fd61df7557eb1c801dfd3daacfe6c6a2d8dd2aa82c181e34896980f09a26`.
+
+## Patch 24 — OV2640 bit-order, color, and frame-quality calibration
+
+### Intent
+
+Use the supplied iPhone photograph of the real gray cabinet/floor scene to
+correct the OV2640's false colors, preserve reliable object colors, and prevent
+damaged frames from entering the later robot-vision pipeline.
+
+### Root cause and physical evidence
+
+- Captured a new upright raw RGB565 frame while the robot arm remained
+  disconnected. The image geometry was already upright, so no vertical or
+  horizontal flip is applied.
+- Evaluated all 40,320 possible permutations of the eight parallel data bits
+  against the neutral-gray reference scene. The unique best mapping swapped
+  data bits D5 and D7 while leaving D0–D4/D6 unchanged. Its reconstructed image
+  changed the false cyan/red surfaces back into the actual gray cabinet,
+  metal strip, and floor.
+- Compensated the crossed physical harness in the ESP32 GPIO matrix by swapping
+  the configured GPIO39/GPIO35 D5/D7 inputs. This also restored valid JPEG byte
+  markers and enabled OV2640 hardware JPEG instead of the RGB565 workaround.
+- The corrected camera produced 320x240 JPEG, but the long loose parallel wires
+  still caused intermittent MCU block mosaics. Lowering capture XCLK to 5 MHz
+  and output to 160x120 materially improved candidate integrity; two DRAM
+  buffers made it worse and were rejected in favor of one buffer.
+
+### Color calibration and controls
+
+- Kept the now-physical upright orientation explicit (`hmirror=0`, `vflip=0`)
+  and made frame size, XCLK, and warm-up count named one-line constants.
+- Compared all OV2640 white-balance modes on the same scene. Automatic WB mode
+  0 was the only accurate mode; modes 1–4 produced severe pink/blue casts and
+  were not selected. The driver defaults already report WB0, AE0, AWB/AEC/AGC
+  enabled, so fragile duplicate register writes during boot were removed.
+- Added a `TUNE wb ae brightness contrast saturation` command plus `SETTINGS`
+  reporting for later controlled bench experiments. Tuning is applied only
+  after camera initialization and followed by twenty discarded stabilization
+  frames.
+- Added `calibrate_esp32_color.py`. With the camera pointed at an empty neutral
+  scene it captures a validated frame, estimates a smooth 20x15 sensor-coordinate
+  RGB gain grid, saves it under ignored local calibration data, and writes a
+  preview. Re-run it after changing the camera mounting or lighting.
+- Normal capture loads that fixed spatial grid and then performs a bounded
+  gray-background correction. Only low-saturation, non-clipped pixels estimate
+  the final gains; colored objects are excluded, and each channel is limited to
+  0.85–1.15 so object identity cannot be normalized away.
+
+### Damaged-frame defense
+
+- Full JPEG decode is mandatory; SOI/EOI markers alone are no longer accepted.
+- Added rejection for implausibly clipped frames, loss of the calibrated neutral
+  background, and 8-pixel JPEG boundary discontinuity. Clean physical frames
+  measured boundary ratios 1.56–1.63; visibly mosaicked frames began at 1.83,
+  so the fail-closed limit is 1.75.
+- A request may discard and recapture up to eight candidates. Only a frame that
+  passes decoding, spatial/global color correction, and every quality gate is
+  saved or returned for future detection.
+- With a spatial calibration loaded, a candidate is also dropped when its
+  required global channel gain leaves `0.90..1.10`; this prevents an
+  auto-white-balance startup frame from being forced into an unreliable color.
+- STATUS is retried up to three times to tolerate the board's occasional USB
+  response loss immediately after flashing.
+
+### Verification
+
+- Final hardware JPEG mode: OV2640 PID `0x26`, no PSRAM, 5 MHz capture XCLK,
+  160x120, pixel format 4, one DRAM frame buffer.
+- After strict gating, 20/20 consecutive physical capture requests produced a
+  valid output. Eight damaged candidates were automatically dropped and
+  replaced; a 20-image montage was visually inspected and every delivered frame
+  was geometrically coherent and free of JPEG block mosaics.
+- The final 20x15 calibration gain grid ranged only `0.9641..1.0783`. On the
+  corrected final image, the cabinet panel averaged RGB
+  `[132.0, 132.5, 133.2]` with gray error 5.7, versus the iPhone reference's
+  `[132.8, 134.5, 130.4]` in the corresponding central panel region.
+- Final corrected-image SHA-256:
+  `6aa260b56c741c5aadc290ea386de19d396138a90725318bd1c62aaa86ef7321`.
+  Local calibration SHA-256:
+  `05787ce74bdfd8e3f6cc7e7c1704e5ab2eb076236c5776ad5456ebdda81a9f26`.
+- Added a hardware-free regression proving neutral channels converge, strong
+  red object color remains dominant, colored pixels are excluded from gain
+  estimation, and channel gains remain bounded.
