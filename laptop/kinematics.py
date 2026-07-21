@@ -2,8 +2,8 @@
 
 Model: base yaw about Z, then a planar 2-link arm (upper + forearm) in the
 vertical plane containing the target, then the hand. This matches the user's
-build: servo1 base yaw, servo2 shoulder, servo3 elbow, servo4/5 wrist, and
-servo6 gripper.
+build: servo1 base yaw, servo2 shoulder, servo3 elbow, servo4/6 wrist, and
+servo5 gripper.
 
 Coordinates: workspace origin at the base axis on the table. x,y horizontal
 (same frame as the overhead camera), z up. Units cm (config link lengths).

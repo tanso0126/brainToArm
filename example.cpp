@@ -21,11 +21,11 @@ void loop() { // roop -> loop 로 수정
   servo2.write(70);
   servo3.write(90);
   servo4.write(90);
-  servo5.write(0);
-  servo6.write(180);
+  servo5.write(180);
+  servo6.write(0);
   delay(100);    // 0.1초 대기
   
   servo1.write(100);
-  servo6.write(90);
+  servo5.write(90);
   delay(100);    // 동작 확인을 위한 0.1초 대기
 }

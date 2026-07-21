@@ -42,11 +42,11 @@ ARM_CALIBRATED = False      # set True only after arm_jog confirms geometry/offs
 N_JOINTS = 6
 HOME_POSE = _load_home_pose()
 SERVO_PINS = [13, 12, 11, 10, 9, 8]
-JOINT_NAMES = ["base", "shoulder", "elbow", "wrist_pitch", "wrist_roll", "gripper"]
+JOINT_NAMES = ["base", "shoulder", "elbow", "wrist_pitch", "gripper", "wrist_roll"]
 
 # Joint indices (readable names). Bottom -> top of the arm.
-J_BASE, J_SHOULDER, J_ELBOW, J_WRIST, J_ROLL, J_GRIP = range(N_JOINTS)
-J_TILT = J_ROLL            # compatibility alias; servo5 is physically wrist roll
+J_BASE, J_SHOULDER, J_ELBOW, J_WRIST, J_GRIP, J_ROLL = range(N_JOINTS)
+J_TILT = J_ROLL            # compatibility alias; servo6 is physically wrist roll
 GRIP_OPEN = 90             # physically verified: 90=open
 GRIP_CLOSED = 180          # physically verified: 180=closed
 
@@ -58,7 +58,7 @@ PLANAR_CAM_INDEX = "auto"  # macOS indices change when an iPhone camera appears/
 PLANAR_FRAME_SIZE = (1920, 1080)
 PLANAR_ARM_CALIBRATED = True  # successful physical pick/lift/place on 2026-07-20
 PLANAR_BASE_ANGLE = 90
-PLANAR_SERVO_MIN = [90, 0, 0, 10, 0, 90]
+PLANAR_SERVO_MIN = [90, 0, 0, 10, 90, 0]
 PLANAR_SERVO_MAX = [90, 150, 180, 180, 180, 180]
 
 # Background-independent FastSAM perception and the calibrated local image
@@ -132,7 +132,7 @@ L_HAND  = 8.0              # wrist axis -> gripper contact point
 # backwards. Defaults assume 90 = neutral, positive = "up/outward".
 SERVO_OFFSET    = [90, 90, 90, 90, 90, 90]
 SERVO_DIRECTION = [1, 1, 1, 1, 1, 1]
-SERVO_MIN       = [0, 0, 0, 10, 0, 90]
+SERVO_MIN       = [0, 0, 0, 10, 90, 0]
 SERVO_MAX       = [180, 150, 180, 180, 180, 180]
 
 # ======================================================================

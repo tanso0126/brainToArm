@@ -14,7 +14,7 @@ Commands (type + ENTER):
 
 Motor map after removing the old unused servo3:
   1 D13 base yaw       2 D12 shoulder       3 D11 elbow
-  4 D10 wrist pitch    5 D9  wrist roll     6 D8  gripper
+  4 D10 wrist pitch    5 D9  gripper        6 D8  wrist roll
 
 Checklist while jogging:
   * Does joint 1 (base) rotate the whole arm? Increasing deg -> which way?

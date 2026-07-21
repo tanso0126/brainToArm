@@ -1100,3 +1100,32 @@ joint number from the physical harness.
   (19%) and 461 bytes of global RAM (22%).
 - Physical upload and motor movement were not performed automatically while an
   interactive `arm_jog.py` process still owned the serial device.
+
+## Patch 27 — swap servo 5 gripper and servo 6 wrist-roll semantics
+
+### Intent
+
+Match the observed final harness: commanding motor 5/D9 operates the gripper,
+while commanding motor 6/D8 rotates the gripper assembly.
+
+### Changes
+
+- Kept the six consecutive signal pins unchanged, but changed the final semantic
+  map to `5/D9=gripper` and `6/D8=wrist roll` throughout firmware, laptop
+  configuration, IK-generated poses, planar pick, interactive help, example,
+  tests, and documentation.
+- Swapped the final HOME values to `[... 180, 0]`, preserving the closed-gripper
+  and zero-roll startup pose on the actual motors.
+- Moved the gripper safety range `90..180°` to motor 5 and the wrist-roll range
+  `0..180°` to motor 6 in both global and planar safety arrays.
+- Updated `J_GRIP`, `J_ROLL`, `JOINT_NAMES`, and every higher-level gripper call;
+  callers continue using semantic names and do not need hard-coded indices.
+
+### Verification
+
+- Regression tests assert the exact swapped names, indices, HOME values, and
+  limits, then exercise gripper/open-close and planar roll through those names.
+- The full Python regression suite passed, and the Uno sketch compiled at 6,208
+  bytes of flash (19%) and 461 bytes of global RAM (22%).
+- Physical upload is intentionally left to a fresh `arm_jog.py --upload` run
+  after closing the still-running pre-swap interactive process.

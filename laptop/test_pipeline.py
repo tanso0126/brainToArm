@@ -255,10 +255,13 @@ def test_arm_command_validation():
     check(config.N_JOINTS == 6
           and config.SERVO_PINS == [13, 12, 11, 10, 9, 8]
           and config.JOINT_NAMES
-          == ["base", "shoulder", "elbow", "wrist_pitch", "wrist_roll", "gripper"],
+          == ["base", "shoulder", "elbow", "wrist_pitch", "gripper", "wrist_roll"],
           "physical six-servo pin and joint map is exact")
-    check(config.HOME_POSE == [90, 70, 90, 90, 0, 180],
+    check(config.HOME_POSE == [90, 70, 90, 90, 180, 0],
           "six-servo HOME pose preserves active joints after removing old servo3")
+    check(config.SERVO_MIN == [0, 0, 0, 10, 90, 0]
+          and config.SERVO_MAX == [180, 150, 180, 180, 180, 180],
+          "gripper and wrist-roll limits follow swapped 5/6 wiring")
     home_status = "C " + " ".join(str(angle) for angle in config.HOME_POSE)
     check(parse_status_line(home_status) == config.HOME_POSE,
           "strict firmware status is parsed")
@@ -320,8 +323,8 @@ def test_planar_pick_calibration_and_detection():
           == config.PLANAR_SERVO_MAX[config.J_BASE] == 90,
           "side-camera calibration keeps the working base at 90")
     check(config.N_JOINTS == 6 and config.J_ELBOW == 2
-          and config.J_GRIP == 5,
-          "six-servo map has no unused slot and ends with gripper")
+          and config.J_GRIP == 4 and config.J_ROLL == 5,
+          "six-servo map has gripper on 5 and wrist roll on 6")
     check(pick_pose_for_object_x(1435) == (140, 90),
           "verified image reference maps to the successful physical pick pose")
     right_pose = pick_pose_for_object_x(1505)

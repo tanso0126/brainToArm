@@ -164,11 +164,12 @@ pick another," otherwise we finish the grasp and delivery.**
   | servo2 | 12 | shoulder | first bend |
   | servo3 | 11 | elbow | second bend |
   | servo4 | 10 | wrist pitch | 10° up, 180° down |
-  | servo5 | 9 | wrist roll | rotate gripper orientation |
-  | servo6 | 8 | gripper | 90° open, 180° closed |
+  | servo5 | 9 | gripper | 90° open, 180° closed |
+  | servo6 | 8 | wrist roll | rotate gripper orientation |
 
-  The former unused servo3 slot was removed completely. Former servos 4–7 are
-  now numbered 3–6 and are wired one position earlier; Arduino pin 7 is unused.
+  The former unused servo3 slot was removed completely. Elbow and wrist pitch
+  moved to 3/D11 and 4/D10; the observed harness has the gripper on 5/D9 and
+  wrist roll on 6/D8. Arduino pin 7 is unused.
 
 - **EEG device:** [LAXTHA PolyG-I](https://www.laxtha.com/ProductView.asp?Model=PolyG-I),
   an 8-channel EEG amplifier (part of a 16-channel polygraph). Connects by USB.
