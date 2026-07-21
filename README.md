@@ -607,6 +607,11 @@ python3 laptop/arm_jog.py        # reads and preserves the current pose; use h
 blocks the autonomous preflight. Set it to `True` only after geometry, offsets,
 directions, and mechanical safe limits are confirmed.
 
+The single source of truth for the power-on and `h` home pose is
+`firmware/arm_controller/home_pose.h`. Change only the number on the named
+`ARM_HOME_SERVO_n` line and upload the sketch; both the Uno firmware and laptop
+controller read that same value, so no second copy needs to be synchronized.
+
 **2 — EEG.** Plug in the PolyG-I and:
 ```bash
 python3 laptop/eeg_detect.py --seconds 5

@@ -237,16 +237,15 @@ def test_arm_command_validation():
     print("[arm] rejects malformed or unsafe commands before serial write")
     from arm_serial import ArmSerial, parse_status_line
     arm = ArmSerial(mock=True)
-    check(parse_status_line("C 90 90 90 180 90 180 180") == config.HOME_POSE,
+    home_status = "C " + " ".join(str(angle) for angle in config.HOME_POSE)
+    check(parse_status_line(home_status) == config.HOME_POSE,
           "strict firmware status is parsed")
-    check(config.HOME_POSE[3] == 180 and config.HOME_POSE[5] == 180,
-          "physical servos 4 and 6 use the requested 180-degree home angle")
     base_turn = list(config.HOME_POSE)
     base_turn[config.J_BASE] = 180
     check(arm.send_angles(base_turn) == "OK",
           "restored base servo accepts a 180-degree jog command")
-    for invalid in ("C 90 90", "C 90 90 90 bad 90 180 180",
-                    "C 90 90 90 180 90 180 181"):
+    for invalid in ("C 90 90", "C 90 90 90 bad 90 0 180",
+                    "C 90 90 90 180 90 0 181"):
         try:
             parse_status_line(invalid)
             check(False, f"malformed status rejected: {invalid}")

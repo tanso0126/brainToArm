@@ -6,6 +6,29 @@ matches these guesses, the system runs unmodified. If not, you edit ONLY the
 wrong constant here — no code changes.
 """
 
+import re
+from pathlib import Path
+
+
+def _load_home_pose():
+    """Read the same named constants compiled into the Uno firmware."""
+    source = (Path(__file__).resolve().parents[1]
+              / "firmware" / "arm_controller" / "home_pose.h")
+    values = {
+        int(index): int(angle)
+        for index, angle in re.findall(
+            r"^#define\s+ARM_HOME_SERVO_([1-7])\s+(\d+)\s*$",
+            source.read_text(encoding="utf-8"),
+            flags=re.MULTILINE)
+    }
+    if sorted(values) != list(range(1, 8)):
+        raise RuntimeError(f"invalid seven-servo home pose in {source}")
+    pose = [values[index] for index in range(1, 8)]
+    if any(not 0 <= angle <= 180 for angle in pose):
+        raise RuntimeError(f"home angle outside 0..180 in {source}")
+    return pose
+
+
 # ======================================================================
 # Arduino (robot arm)
 # ======================================================================
@@ -15,7 +38,7 @@ ARM_MOCK = False            # physical Uno is connected; calibration gate remain
 ARM_CALIBRATED = False      # set True only after arm_jog confirms geometry/offset/direction/limits
 N_JOINTS = 7
 UNUSED_JOINT = 2           # servo3 index (0-based) — attached but not driven
-HOME_POSE = [90, 90, 90, 180, 90, 180, 180]
+HOME_POSE = _load_home_pose()
 
 # Joint indices (readable names). Bottom -> top of the arm.
 J_BASE, J_SHOULDER, _UNUSED, J_ELBOW, J_WRIST, J_ROLL, J_GRIP = range(7)

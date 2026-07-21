@@ -30,6 +30,7 @@
 // arm never snaps. The laptop can send a new target at any time.
 
 #include <Servo.h>
+#include "home_pose.h"
 
 const uint8_t N = 7;
 const uint8_t PINS[N] = {13, 12, 11, 10, 9, 8, 7};
@@ -39,8 +40,9 @@ const uint8_t PINS[N] = {13, 12, 11, 10, 9, 8, 7};
 const int MIN_DEG[N] = {0, 0, 90, 0, 10, 0, 90};
 const int MAX_DEG[N] = {180, 150, 90, 180, 180, 180, 180};
 
-// Startup/home pose. Servo numbers here are 1-based in the physical arm map.
-const int HOME_DEG[N] = {90, 90, 90, 180, 90, 180, 180};
+// Shared with laptop/config.py through home_pose.h; edit the seven named values
+// there rather than duplicating the startup pose in multiple files.
+const int HOME_DEG[N] = ARM_HOME_VALUES;
 
 const uint8_t UNUSED_INDEX = 2;      // servo3, index 2 — attached but never targeted
 const float SLEW_DEG_PER_TICK = 1.5; // max move per control tick (~ speed limit)

@@ -785,3 +785,31 @@ Re-enable the repaired base-yaw motor so manual jog commands such as
 - Uploaded the firmware to `/dev/cu.usbserial-140`; live ping returned `PONG`.
 - A bounded physical command sequence reported servo1 at 90° → 100° → 90°,
   proving the former firmware clamp is removed while leaving the arm at home.
+
+## Patch 20 — single-source home pose and servo6 at zero
+
+### Intent
+
+Set servo6's startup/home angle to 0 degrees and make future home-pose changes
+require editing only one clearly named number.
+
+### Changes
+
+- Added `firmware/arm_controller/home_pose.h` with one named value per physical
+  servo; servo6 is now 0 degrees and the complete pose is
+  `[90,90,90,180,90,0,180]`.
+- The Uno firmware compiles its startup pose from that header, while
+  `laptop/config.py` reads the same seven definitions for explicit `h` commands,
+  mock status, autonomous return-home behavior, and validation.
+- Removed hard-coded home-pose duplication from regression tests and documented
+  the one-file adjustment workflow.
+
+### Verification
+
+- `python3 laptop/test_pipeline.py`, Python compilation, diff checks, and the
+  Arduino Uno build all passed. The compiled sketch uses 6,076 bytes of flash
+  and 474 bytes of RAM.
+- Upload was attempted, but `/dev/cu.usbserial-140` had disappeared and no
+  `usbserial`/`usbmodem` device was present in macOS USB enumeration. Therefore
+  the source is ready but this patch has not yet been flashed or physically
+  confirmed on the Uno.
