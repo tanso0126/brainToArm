@@ -813,3 +813,38 @@ require editing only one clearly named number.
   `usbserial`/`usbmodem` device was present in macOS USB enumeration. Therefore
   the source is ready but this patch has not yet been flashed or physically
   confirmed on the Uno.
+
+## Patch 21 — wired OV2640 USB diagnostic
+
+### Intent
+
+Verify the loose OV2640 module and its supplied AI-Thinker-compatible ESP32 pin
+map before adding Wi-Fi streaming or mounting the camera on the arm.
+
+### Changes
+
+- Added a credential-free ESP32 diagnostic sketch using the exact D0–D7, SCCB,
+  clock, sync, power-down, and reset wiring supplied for the physical module.
+- Added a Mac capture utility that requests one QVGA JPEG through the CP2102 USB
+  serial link, rejects initialization/capture errors and truncated data, checks
+  JPEG markers, and saves the proven frame under ignored `data/vision/`.
+- Attempted to preserve the previous 360-degree-servo firmware before replacing
+  it, but the CP2102 disconnected during the long 4MB read and no valid backup
+  was produced; this failed preservation attempt is recorded explicitly.
+
+### Verification
+
+- Detected a classic ESP32-D0WD-V3 revision 3 with 4MB flash through CP2102 at
+  `/dev/cu.usbserial-0001`; build and repeated firmware uploads succeeded.
+- The camera answered SCCB commands with sensor PID `0x26` (OV2640), proving
+  camera power, XCLK, SDA, and SCL are functional.
+- Actual frame capture failed at VGA and QVGA, with repeated retries and both
+  20MHz and 10MHz XCLK. The driver reported `Failed to get the frame on time`.
+  This isolates the current fault to the parallel frame path: D0–D7, PCLK,
+  VSYNC, HREF, or jumper-wire signal integrity. No valid image was produced.
+- After repeated ESP32-only resets, the separately powered camera state stopped
+  completing initialization; the final clean diagnostic build/upload passed,
+  but a full USB power cycle is required before the next physical retry.
+- A 4MB backup of the previous firmware was attempted at multiple serial rates,
+  but CP2102 disconnected mid-read; no partial file was retained or claimed as
+  a valid backup.
