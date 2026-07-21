@@ -6,11 +6,15 @@ what turns "guessed constants" into "verified constants".
 
 Commands (type + ENTER):
   h              home pose
-  j <i> <deg>    jog joint i (1-7) to servo angle deg   e.g.  j 1 120
+  j <i> <deg>    jog joint i (1-6) to servo angle deg   e.g.  j 1 120
   g open|close   gripper
   ik <x> <y> [z] move tip to workspace point via IK      e.g.  ik 10 5 2
   s              print last commanded pose
   q              quit
+
+Motor map after removing the old unused servo3:
+  1 D13 base yaw       2 D12 shoulder       3 D11 elbow
+  4 D10 wrist pitch    5 D9  wrist roll     6 D8  gripper
 
 Checklist while jogging:
   * Does joint 1 (base) rotate the whole arm? Increasing deg -> which way?
@@ -29,7 +33,7 @@ from policy import Policy
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Safely upload and/or jog the seven-servo robot arm")
+        description="Safely upload and/or jog the six-servo robot arm")
     parser.add_argument(
         "--upload", action="store_true",
         help="compile/upload arm_controller before connecting (resets/moves arm)")
@@ -60,7 +64,7 @@ def main(argv=None):
                 elif c == "j" and len(cmd) == 3:
                     i = int(cmd[1]) - 1
                     if not 0 <= i < config.N_JOINTS:
-                        raise ValueError("joint must be 1..7")
+                        raise ValueError(f"joint must be 1..{config.N_JOINTS}")
                     next_pose = list(pose)
                     next_pose[i] = int(cmd[2])
                     arm.send_angles(next_pose); arm.wait_done(); pose = next_pose

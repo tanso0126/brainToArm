@@ -82,7 +82,7 @@ class Policy:
 
     # ---- reaching (IK now; RL-ready) ----
     def target_to_angles(self, target_xy, z=0.0):
-        """Map a workspace point to 7 servo commands via inverse kinematics.
-        Replace body with an RL policy later; keep the 7-value return shape."""
+        """Map a workspace point to 6 servo commands via inverse kinematics.
+        Replace body with an RL policy later; keep the 6-value return shape."""
         x, y = target_xy
         return kinematics.solve(x, y, z)

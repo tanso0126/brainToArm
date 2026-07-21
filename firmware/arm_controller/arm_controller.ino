@@ -1,5 +1,5 @@
 // arm_controller.ino
-// Serial-driven angle control for the 7-servo robot arm.
+// Serial-driven angle control for the 6-servo robot arm.
 //
 // Replaces the hardcoded demo (old example.cpp). The laptop is the brain:
 // it streams target joint angles over USB serial; this firmware just moves
@@ -8,19 +8,18 @@
 // Motor map (per user's build), bottom -> top:
 //   servo1 (pin 13) : base yaw   (rotate whole arm about Z)
 //   servo2 (pin 12) : shoulder   (1st bend)
-//   servo3 (pin 11) : UNUSED     (kept attached for wiring parity)
-//   servo4 (pin 10) : elbow      (2nd bend)
-//   servo5 (pin  9) : wrist pitch (10=up, 180=down)
-//   servo6 (pin  8) : wrist roll
-//   servo7 (pin  7) : gripper    (90=open, 180=closed)
+//   servo3 (pin 11) : elbow      (2nd bend)
+//   servo4 (pin 10) : wrist pitch (10=up, 180=down)
+//   servo5 (pin  9) : wrist roll
+//   servo6 (pin  8) : gripper    (90=open, 180=closed)
 //
 // Serial protocol (115200 baud, newline-terminated ASCII):
 //   Command from laptop:
-//     "A a1 a2 a3 a4 a5 a6 a7\n"   set target angles (deg 0..180) for servos 1..7
+//     "A a1 a2 a3 a4 a5 a6\n"      set target angles (deg 0..180) for servos 1..6
 //                                   use -1 to leave a joint's target unchanged
 //     "P\n"                        ping -> replies "PONG"
-//     "S\n"                        status -> replies current angles "C a1..a7"
-//     "H\n"                        compiled home pose -> "H a1..a7"
+//     "S\n"                        status -> replies current angles "C a1..a6"
+//     "H\n"                        compiled home pose -> "H a1..a6"
 //     "F\n"                        grip sensor -> "F 0..1023", or "F -1" absent
 //   Reply to laptop:
 //     "OK\n"      command accepted
@@ -33,19 +32,17 @@
 #include <Servo.h>
 #include "home_pose.h"
 
-const uint8_t N = 7;
-const uint8_t PINS[N] = {13, 12, 11, 10, 9, 8, 7};
+const uint8_t N = 6;
+const uint8_t PINS[N] = {13, 12, 11, 10, 9, 8};
 
-// Physically verified travel limits. Servo1 base yaw has been restored and is
-// available across 0..180 degrees. Servo3 remains unused and locked at 90.
-const int MIN_DEG[N] = {0, 0, 90, 0, 10, 0, 90};
-const int MAX_DEG[N] = {180, 150, 90, 180, 180, 180, 180};
+// Physically verified travel limits after removing the old unused third motor.
+const int MIN_DEG[N] = {0, 0, 0, 10, 0, 90};
+const int MAX_DEG[N] = {180, 150, 180, 180, 180, 180};
 
-// Shared with laptop/config.py through home_pose.h; edit the seven named values
+// Shared with laptop/config.py through home_pose.h; edit the six named values
 // there rather than duplicating the startup pose in multiple files.
 const int HOME_DEG[N] = ARM_HOME_VALUES;
 
-const uint8_t UNUSED_INDEX = 2;      // servo3, index 2 — attached but never targeted
 const float SLEW_DEG_PER_TICK = 1.5; // max move per control tick (~ speed limit)
 const int   TICK_MS = 15;            // control loop period
 const int   REACH_EPS = 1;           // within this many deg counts as "reached"
@@ -88,7 +85,7 @@ bool parseIntStrict(char* tok, int* out) {
   return true;
 }
 
-// Parse "A a1 a2 ... a7" atomically. -1 keeps the existing target. A malformed
+// Parse "A a1 a2 ... a6" atomically. -1 keeps the existing target. A malformed
 // command changes no targets; this matters when a truncated serial line arrives.
 bool parseAngles(char* line) {
   if (line[1] != ' ' && line[1] != '\t') return false;
@@ -187,7 +184,6 @@ void readSerial() {
 void slew() {
   bool allReached = true;
   for (uint8_t i = 0; i < N; i++) {
-    if (i == UNUSED_INDEX) continue;
     float diff = target[i] - current[i];
     if (fabs(diff) <= REACH_EPS) {
       current[i] = target[i];

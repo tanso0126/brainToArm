@@ -196,8 +196,9 @@ def test_ik():
     print("[ik] servo range + base aim")
     for x, y in [(12, 4), (8, -3), (-6, 9), (0, 15)]:
         a = kinematics.solve(x, y)
-        check(len(a) == 7, "7 servo values")
-        check(all(config.SERVO_MIN[i] <= a[i] <= config.SERVO_MAX[i] for i in range(7)),
+        check(len(a) == config.N_JOINTS, "6 servo values")
+        check(all(config.SERVO_MIN[i] <= a[i] <= config.SERVO_MAX[i]
+                  for i in range(config.N_JOINTS)),
               f"all servos in range for ({x},{y}) -> {a}")
     # base yaw should differ between a +x and a -x target
     ax = kinematics.solve(15, 0)[config.J_BASE]
@@ -251,6 +252,13 @@ def test_arm_command_validation():
         check(_serial_candidates() == ["/dev/cu.usbserial-110"],
               "arm auto-discovery excludes the ESP32 camera CP2102 port")
     arm = ArmSerial(mock=True)
+    check(config.N_JOINTS == 6
+          and config.SERVO_PINS == [13, 12, 11, 10, 9, 8]
+          and config.JOINT_NAMES
+          == ["base", "shoulder", "elbow", "wrist_pitch", "wrist_roll", "gripper"],
+          "physical six-servo pin and joint map is exact")
+    check(config.HOME_POSE == [90, 70, 90, 90, 0, 180],
+          "six-servo HOME pose preserves active joints after removing old servo3")
     home_status = "C " + " ".join(str(angle) for angle in config.HOME_POSE)
     check(parse_status_line(home_status) == config.HOME_POSE,
           "strict firmware status is parsed")
@@ -270,15 +278,17 @@ def test_arm_command_validation():
     base_turn[config.J_BASE] = 180
     check(arm.send_angles(base_turn) == "OK",
           "restored base servo accepts a 180-degree jog command")
-    for invalid in ("C 90 90", "C 90 90 90 bad 90 0 180",
-                    "C 90 90 90 180 90 0 181"):
+    for invalid in ("C 90 90", "C 90 70 bad 90 0 180",
+                    "C 90 70 90 90 0 181",
+                    "C 90 70 90 90 90 0 180"):
         try:
             parse_status_line(invalid)
             check(False, f"malformed status rejected: {invalid}")
         except ValueError:
             check(True, f"malformed status rejected: {invalid}")
-    for invalid in ("H 90 90", "H 90 90 90 bad 90 0 180",
-                    "H 90 90 90 180 90 0 181"):
+    for invalid in ("H 90 90", "H 90 70 bad 90 0 180",
+                    "H 90 70 90 90 0 181",
+                    "H 90 70 90 90 90 0 180"):
         try:
             parse_home_pose_line(invalid)
             check(False, f"malformed firmware HOME rejected: {invalid}")
@@ -309,9 +319,9 @@ def test_planar_pick_calibration_and_detection():
     check(config.PLANAR_SERVO_MIN[config.J_BASE]
           == config.PLANAR_SERVO_MAX[config.J_BASE] == 90,
           "side-camera calibration keeps the working base at 90")
-    check(config.PLANAR_SERVO_MIN[config._UNUSED]
-          == config.PLANAR_SERVO_MAX[config._UNUSED] == 90,
-          "unused servo3 is locked at 90 in planar safety limits")
+    check(config.N_JOINTS == 6 and config.J_ELBOW == 2
+          and config.J_GRIP == 5,
+          "six-servo map has no unused slot and ends with gripper")
     check(pick_pose_for_object_x(1435) == (140, 90),
           "verified image reference maps to the successful physical pick pose")
     right_pose = pick_pose_for_object_x(1505)

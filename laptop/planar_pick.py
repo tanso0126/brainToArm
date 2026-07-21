@@ -1,7 +1,7 @@
 """Background-independent, camera-closed-loop pick/place for the planar arm.
 
-This side-camera calibration locks base yaw at 90 and leaves servo3 unused. It
-uses FastSAM to locate the single portable object and the gripper in every
+This side-camera calibration locks base yaw at 90. It uses FastSAM to locate
+the single portable object and the gripper in every
 correction frame. No empty-table image, venue-specific ROI, or background
 learning is required.
 
@@ -136,7 +136,7 @@ class PlanarPicker:
 
     def _validate_pose(self, pose):
         if len(pose) != config.N_JOINTS:
-            raise ValueError("planar pose must contain seven joints")
+            raise ValueError("planar pose must contain six joints")
         for index, value in enumerate(pose):
             lo, hi = config.PLANAR_SERVO_MIN[index], config.PLANAR_SERVO_MAX[index]
             if not lo <= value <= hi:
@@ -144,8 +144,6 @@ class PlanarPicker:
                     f"planar joint {index + 1}={value} outside [{lo},{hi}]")
         if pose[config.J_BASE] != config.PLANAR_BASE_ANGLE:
             raise ValueError("camera-calibrated planar base must stay at 90 degrees")
-        if pose[config._UNUSED] != config.PLANAR_UNUSED_ANGLE:
-            raise ValueError("unused servo3 must stay locked at 90 degrees")
 
     def _read(self):
         ok, frame = self.cap.read()

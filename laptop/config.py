@@ -17,13 +17,13 @@ def _load_home_pose():
     values = {
         int(index): int(angle)
         for index, angle in re.findall(
-            r"^#define\s+ARM_HOME_SERVO_([1-7])\s+(\d+)\s*$",
+            r"^#define\s+ARM_HOME_SERVO_([1-6])\s+(\d+)\s*$",
             source.read_text(encoding="utf-8"),
             flags=re.MULTILINE)
     }
-    if sorted(values) != list(range(1, 8)):
-        raise RuntimeError(f"invalid seven-servo home pose in {source}")
-    pose = [values[index] for index in range(1, 8)]
+    if sorted(values) != list(range(1, 7)):
+        raise RuntimeError(f"invalid six-servo home pose in {source}")
+    pose = [values[index] for index in range(1, 7)]
     if any(not 0 <= angle <= 180 for angle in pose):
         raise RuntimeError(f"home angle outside 0..180 in {source}")
     return pose
@@ -39,27 +39,27 @@ ARM_PORT_EXCLUDE = ("/dev/cu.usbserial-0001",)
 ARM_BAUD = 115200
 ARM_MOCK = False            # physical Uno is connected; calibration gate remains below
 ARM_CALIBRATED = False      # set True only after arm_jog confirms geometry/offset/direction/limits
-N_JOINTS = 7
-UNUSED_JOINT = 2           # servo3 index (0-based) — attached but not driven
+N_JOINTS = 6
 HOME_POSE = _load_home_pose()
+SERVO_PINS = [13, 12, 11, 10, 9, 8]
+JOINT_NAMES = ["base", "shoulder", "elbow", "wrist_pitch", "wrist_roll", "gripper"]
 
 # Joint indices (readable names). Bottom -> top of the arm.
-J_BASE, J_SHOULDER, _UNUSED, J_ELBOW, J_WRIST, J_ROLL, J_GRIP = range(7)
-J_TILT = J_ROLL            # compatibility alias; servo6 is physically wrist roll
+J_BASE, J_SHOULDER, J_ELBOW, J_WRIST, J_ROLL, J_GRIP = range(N_JOINTS)
+J_TILT = J_ROLL            # compatibility alias; servo5 is physically wrist roll
 GRIP_OPEN = 90             # physically verified: 90=open
 GRIP_CLOSED = 180          # physically verified: 180=closed
 
 # ---- Camera-calibrated planar arm mode (physically verified 2026-07-20) ----
 # Servo1 is operational again, but this legacy side-camera calibration is valid
 # only at base=90. Generic jog/IK may use servo1's full global 0..180 range;
-# planar_pick.py deliberately keeps servo1/3 fixed while using this calibration.
+# planar_pick.py deliberately keeps the base fixed while using this calibration.
 PLANAR_CAM_INDEX = "auto"  # macOS indices change when an iPhone camera appears/disappears
 PLANAR_FRAME_SIZE = (1920, 1080)
 PLANAR_ARM_CALIBRATED = True  # successful physical pick/lift/place on 2026-07-20
 PLANAR_BASE_ANGLE = 90
-PLANAR_UNUSED_ANGLE = 90
-PLANAR_SERVO_MIN = [90, 0, 90, 0, 10, 0, 90]
-PLANAR_SERVO_MAX = [90, 150, 90, 180, 180, 180, 180]
+PLANAR_SERVO_MIN = [90, 0, 0, 10, 0, 90]
+PLANAR_SERVO_MAX = [90, 150, 180, 180, 180, 180]
 
 # Background-independent FastSAM perception and the calibrated local image
 # Jacobian. At the verified observation pose, an object centered at x=1435 px
@@ -130,10 +130,10 @@ L_HAND  = 8.0              # wrist axis -> gripper contact point
 # servo.write() value. servo_cmd = clamp(offset + direction * joint_deg).
 # Tune offset so the arm's real neutral matches, and direction if a joint runs
 # backwards. Defaults assume 90 = neutral, positive = "up/outward".
-SERVO_OFFSET    = [90, 90, 90, 90, 90, 90, 90]
-SERVO_DIRECTION = [1, 1, 1, 1, 1, 1, 1]
-SERVO_MIN       = [0, 0, 0, 0, 0, 0, 0]
-SERVO_MAX       = [180, 180, 180, 180, 180, 180, 180]
+SERVO_OFFSET    = [90, 90, 90, 90, 90, 90]
+SERVO_DIRECTION = [1, 1, 1, 1, 1, 1]
+SERVO_MIN       = [0, 0, 0, 10, 0, 90]
+SERVO_MAX       = [180, 150, 180, 180, 180, 180]
 
 # ======================================================================
 # EEG (LAXTHA PolyG-I)

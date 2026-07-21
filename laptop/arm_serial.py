@@ -25,7 +25,7 @@ def _serial_candidates():
 
 
 def parse_status_line(line):
-    """Parse firmware ``C a1..a7`` status without accepting partial data."""
+    """Parse firmware ``C a1..a6`` status without accepting partial data."""
     parts = str(line).strip().split()
     if len(parts) != config.N_JOINTS + 1 or parts[0] != "C":
         raise ValueError(f"malformed arm status: {line!r}")
@@ -41,7 +41,7 @@ def parse_status_line(line):
 
 
 def parse_home_pose_line(line):
-    """Parse the ``H a1..a7`` pose compiled into the connected Uno."""
+    """Parse the ``H a1..a6`` pose compiled into the connected Uno."""
     parts = str(line).strip().split()
     if len(parts) != config.N_JOINTS + 1 or parts[0] != "H":
         raise ValueError(f"malformed firmware home pose: {line!r}")
@@ -106,7 +106,7 @@ class ArmSerial:
                 self.ser.readline()
 
     def send_angles(self, angles):
-        """angles: list of 7 ints (0..180), or -1 to hold a joint."""
+        """angles: list of 6 ints (0..180), or -1 to hold a joint."""
         if len(angles) != config.N_JOINTS:
             raise ValueError(f"expected {config.N_JOINTS} joint values, got {len(angles)}")
         values = []
@@ -190,7 +190,13 @@ class ArmSerial:
                     "upload the current sketch with "
                     "`python3 laptop/arm_jog.py --upload`")
             if line.startswith("H"):
-                return parse_home_pose_line(line)
+                try:
+                    return parse_home_pose_line(line)
+                except ValueError as exc:
+                    raise RuntimeError(
+                        "connected Uno uses a different arm layout/protocol; "
+                        "upload the current six-servo sketch with "
+                        "`python3 laptop/arm_jog.py --upload`") from exc
         raise TimeoutError(
             "arm firmware did not report HOME_POSE; upload the current sketch "
             "with `python3 laptop/arm_jog.py --upload`")

@@ -1,9 +1,9 @@
-"""Inverse kinematics for the arm: workspace point (x,y,z) -> 7 servo commands.
+"""Inverse kinematics for the arm: workspace point (x,y,z) -> 6 servo commands.
 
 Model: base yaw about Z, then a planar 2-link arm (upper + forearm) in the
 vertical plane containing the target, then the hand. This matches the user's
-build: servo1 base yaw, servo2 shoulder (1st bend), servo4 elbow (2nd bend),
-servo5/6 wrist, servo7 gripper.
+build: servo1 base yaw, servo2 shoulder, servo3 elbow, servo4/5 wrist, and
+servo6 gripper.
 
 Coordinates: workspace origin at the base axis on the table. x,y horizontal
 (same frame as the overhead camera), z up. Units cm (config link lengths).
@@ -30,7 +30,7 @@ def joint_to_servo(i, joint_deg):
 
 
 def solve(x, y, z=0.0, approach_from_above=True):
-    """Return a full 7-element servo command list to place the gripper at (x,y,z).
+    """Return a full 6-element servo command list to place the gripper at (x,y,z).
 
     Joints solved: base yaw, shoulder, elbow. Wrist is set to keep the hand
     roughly level (or pointing down for a top grasp). Gripper left as-is (HOME).

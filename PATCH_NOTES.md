@@ -1056,3 +1056,47 @@ connected Uno still contains an older startup pose.
 - The Uno was disconnected during this patch, so compilation was verified
   locally and physical upload was intentionally deferred until the arm is
   connected and its workspace is clear.
+
+## Patch 26 — remove unused motor slot and migrate to six active servos
+
+### Intent
+
+Match software to the rewired physical arm after removing the old unused third
+motor. The six active motors now occupy consecutive Arduino pins D13 through D8
+and must have consecutive user-facing numbers 1 through 6.
+
+### Root cause
+
+The wiring had already been shifted, but the previous firmware still skipped
+array index 2/D11 as an unused servo and still emitted the gripper signal on D7.
+That left the new elbow on D11 without updates and offset every later semantic
+joint number from the physical harness.
+
+### Changes
+
+- Replaced the seven-slot firmware layout with six outputs:
+  `1/base=D13`, `2/shoulder=D12`, `3/elbow=D11`,
+  `4/wrist pitch=D10`, `5/wrist roll=D9`, and `6/gripper=D8`.
+- Removed the unused-index branch entirely; D7 is no longer attached or driven.
+- Migrated HOME from `[90,70,90-unused,90,90,0,180]` to the equivalent active
+  six-joint pose `[90,70,90,90,0,180]`.
+- Changed the serial `A`, `C`, and `H` payloads from seven angles to six. A
+  connected old-layout firmware response now fails with an explicit instruction
+  to upload the current six-servo sketch.
+- Shifted every laptop joint index, global/planar limit array, IK output, gripper
+  command, validation rule, mock path, and regression expectation to the new
+  semantic order. The old planar calibration values were preserved by joint
+  meaning rather than by obsolete array position.
+- Added explicit `SERVO_PINS` and `JOINT_NAMES` configuration arrays and updated
+  the interactive jog help, obsolete example sketch, and README hardware map.
+
+### Verification
+
+- The full Python pipeline regression passed with six-value IK, arm protocol,
+  visual-servo, planar pick, EEG, filtering, and ErrP paths.
+- Tests assert the exact pin/joint map, HOME pose, command length, malformed
+  six-value responses, and absence of the old unused planar slot.
+- Arduino CLI compilation for `arduino:avr:uno` passed: 6,208 bytes of flash
+  (19%) and 461 bytes of global RAM (22%).
+- Physical upload and motor movement were not performed automatically while an
+  interactive `arm_jog.py` process still owned the serial device.

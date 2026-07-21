@@ -14,11 +14,14 @@ def validate():
 
     # --- servo arrays all length N_JOINTS ---
     servo_arrays_ok = True
-    for name in ("SERVO_OFFSET", "SERVO_DIRECTION", "SERVO_MIN", "SERVO_MAX", "HOME_POSE"):
+    for name in ("SERVO_PINS", "JOINT_NAMES", "SERVO_OFFSET", "SERVO_DIRECTION",
+                 "SERVO_MIN", "SERVO_MAX", "HOME_POSE"):
         arr = getattr(config, name)
         if len(arr) != config.N_JOINTS:
             errs.append(f"{name} has {len(arr)} entries, expected N_JOINTS={config.N_JOINTS}")
             servo_arrays_ok = False
+    if len(set(config.SERVO_PINS)) != len(config.SERVO_PINS):
+        errs.append("SERVO_PINS contains duplicate Arduino pins")
     if not isinstance(config.ARM_MOCK, bool):
         errs.append("ARM_MOCK must be True or False")
     if not config.ARM_MOCK and not config.ARM_PORT:
@@ -59,10 +62,6 @@ def validate():
                 == config.PLANAR_SERVO_MAX[config.J_BASE]
                 == config.PLANAR_BASE_ANGLE == 90):
             errs.append("camera-calibrated planar mode must keep servo1 at 90")
-        if not (config.PLANAR_SERVO_MIN[config._UNUSED]
-                == config.PLANAR_SERVO_MAX[config._UNUSED]
-                == config.PLANAR_UNUSED_ANGLE == 90):
-            errs.append("planar mode must lock unused servo3 at 90")
     if config.GRIP_OPEN != 90 or config.GRIP_CLOSED != 180:
         errs.append("physical gripper calibration requires 90=open and 180=closed")
     if config.PLANAR_WRIST_ROLL != 180 or config.PLANAR_WRIST_PITCH != 180:

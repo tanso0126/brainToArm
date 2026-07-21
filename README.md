@@ -40,7 +40,7 @@ precise steps to bring it up. No other context is required.
 >
 > Servo1 base yaw is operational again and manual jog/3-D control may command
 > it through 0–180°. The previously verified side-camera controller remains a
-> deliberately fixed-plane mode: it locks servo1 and unused servo3 at 90°,
+> deliberately fixed-plane mode: it locks servo1 at 90°,
 > re-detects the object before every attempt, corrects
 > shoulder/elbow in image pixels, rotates wrist pitch and roll to 180°, opens the
 > gripper at 90°, descends before closing it at 180°, verifies lift, transports,
@@ -153,7 +153,7 @@ pick another," otherwise we finish the grasp and delivery.**
 
 ## 3. The hardware
 
-- **Robot arm:** 7 servo motors (all *angle* servos — position-controlled, not
+- **Robot arm:** 6 servo motors (all *angle* servos — position-controlled, not
   continuous-rotation). Physical model:
   [MakerWorld "Robotic Arm with Servo / Arduino"](https://makerworld.com/ko/models/1134925-robotic-arm-with-servo-arduino).
   Driven by an **Arduino**. Motor map, from the base upward:
@@ -162,11 +162,13 @@ pick another," otherwise we finish the grasp and delivery.**
   |-------|-------------|-------|------|
   | servo1 | 13 | base yaw | rotate the whole arm about the vertical (Z) axis |
   | servo2 | 12 | shoulder | first bend |
-  | servo3 | 11 | (unused) | attached for wiring parity, never driven |
-  | servo4 | 10 | elbow | second bend |
-  | servo5 | 9 | wrist | forearm rotation/pitch |
-  | servo6 | 8 | wrist tilt | |
-  | servo7 | 7 | gripper | 2-finger claw open/close |
+  | servo3 | 11 | elbow | second bend |
+  | servo4 | 10 | wrist pitch | 10° up, 180° down |
+  | servo5 | 9 | wrist roll | rotate gripper orientation |
+  | servo6 | 8 | gripper | 90° open, 180° closed |
+
+  The former unused servo3 slot was removed completely. Former servos 4–7 are
+  now numbered 3–6 and are wired one position earlier; Arduino pin 7 is unused.
 
 - **EEG device:** [LAXTHA PolyG-I](https://www.laxtha.com/ProductView.asp?Model=PolyG-I),
   an 8-channel EEG amplifier (part of a 16-channel polygraph). Connects by USB.
@@ -205,7 +207,7 @@ is no network, no router, no UDP.
                                                              ▼  (angle commands)
                                                     ┌──────────────────┐
                                                     │     Arduino       │
-                                                    │  7 servo motors   │
+                                                    │  6 servo motors   │
                                                     └──────────────────┘
 ```
 
@@ -301,7 +303,7 @@ brainToArm/
 
 - **`firmware/arm_controller/arm_controller.ino`** — Runs on the Arduino. Opens
   serial at 115200 baud and accepts newline-terminated ASCII commands:
-  - `A a1 a2 a3 a4 a5 a6 a7` — set target angles (0–180°) for servos 1–7; a value
+  - `A a1 a2 a3 a4 a5 a6` — set target angles for servos 1–6; a value
     of `-1` means "leave that joint's target unchanged." Replies `OK`.
   - `P` → `PONG` (ping), `S` → current angles.
   - When all joints reach their targets it prints `DONE` once.
@@ -343,12 +345,12 @@ brainToArm/
   object against a clean background, maps its pixel x-coordinate through the
   measured local elbow Jacobian, and executes the physically verified sequence:
   fully open, pitch/roll 180°, descend in 2° steps, close, lift verification,
-  short transport, release, and displacement verification. Base and servo3 are
-  locked; a missing object, stale camera background, failed lift, or failed
+  short transport, release, and displacement verification. The base is locked;
+  a missing object, stale camera background, failed lift, or failed
   displacement stops the sequence rather than continuing blindly.
 
 - **`kinematics.py`** — Inverse kinematics. `solve(x, y, z)` turns a workspace
-  point (centimeters, origin at the arm base) into the 7 servo commands: base
+  point (centimeters, origin at the arm base) into the 6 servo commands: base
   yaw to face the target, then a 2-link (upper arm + forearm) law-of-cosines
   solution for shoulder and elbow, wrist kept pointing down for a top grasp.
   Uses the link lengths and servo calibration from `config.py`. Unreachable
@@ -620,7 +622,7 @@ pip install -r requirements.txt
 **1 — Arm.** The connected Uno/CH340 is auto-discovered while the ESP32 camera's
 stable `/dev/cu.usbserial-0001` CP2102 port is explicitly excluded. The Uno has
 `firmware/arm_controller/arm_controller.ino` flashed, responds to `PONG`,
-reports all seven angles, and completed the
+reports all six angles, and completed the
 bounded base test `90° → 95° → 90°`. Measure the arm's link lengths with a ruler
 into `L_BASE_HEIGHT / L_UPPER / L_FORE / L_HAND`. Then:
 ```bash
@@ -702,7 +704,7 @@ no keyboard — the brain drives the veto directly.
 
 Grouped constants (see the file for full comments):
 
-- **Arm serial:** `ARM_PORT`, `ARM_PORT_EXCLUDE`, `ARM_BAUD`, `ARM_MOCK`, `ARM_CALIBRATED`, `N_JOINTS`, `HOME_POSE`, joint index
+- **Arm serial:** `ARM_PORT`, `ARM_PORT_EXCLUDE`, `ARM_BAUD`, `ARM_MOCK`, `ARM_CALIBRATED`, `N_JOINTS`, `SERVO_PINS`, `JOINT_NAMES`, `HOME_POSE`, joint index
   names, `GRIP_OPEN/CLOSED`.
 - **Arm geometry & calibration:** `L_BASE_HEIGHT/L_UPPER/L_FORE/L_HAND`,
   `SERVO_OFFSET/DIRECTION/MIN/MAX`.
