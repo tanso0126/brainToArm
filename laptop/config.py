@@ -58,7 +58,7 @@ PLANAR_CAM_INDEX = "auto"  # macOS indices change when an iPhone camera appears/
 PLANAR_FRAME_SIZE = (1920, 1080)
 PLANAR_ARM_CALIBRATED = True  # successful physical pick/lift/place on 2026-07-20
 PLANAR_BASE_ANGLE = 90
-PLANAR_SERVO_MIN = [90, 0, 0, 10, 90, 0]
+PLANAR_SERVO_MIN = [90, 0, 0, 120, 90, 0]
 PLANAR_SERVO_MAX = [90, 150, 180, 180, 180, 180]
 
 # Background-independent FastSAM perception and the calibrated local image
@@ -132,7 +132,7 @@ L_HAND  = 8.0              # wrist axis -> gripper contact point
 # backwards. Defaults assume 90 = neutral, positive = "up/outward".
 SERVO_OFFSET    = [90, 90, 90, 90, 90, 90]
 SERVO_DIRECTION = [1, 1, 1, 1, 1, 1]
-SERVO_MIN       = [0, 0, 0, 10, 90, 0]
+SERVO_MIN       = [0, 0, 0, 120, 90, 0]
 SERVO_MAX       = [180, 150, 180, 180, 180, 180]
 
 # ======================================================================
@@ -276,3 +276,51 @@ OBJECT_HSV = {
     "blue":  ([100, 120, 70], [130, 255, 255]),
     "green": ([40, 80, 70], [80, 255, 255]),
 }
+
+# ======================================================================
+# Wrist / eye-in-hand camera
+# ======================================================================
+# macOS camera indices change when Continuity Camera appears. The wrist-camera
+# diagnostic therefore opens this AVFoundation device by NAME through ffmpeg.
+# Numeric index is only a fallback for non-macOS/development machines.
+WRIST_CAMERA_NAME = "AVerMedia PW315"
+WRIST_CAMERA_INDEX = 0
+WRIST_FRAME_SIZE = (1280, 720)
+WRIST_CAMERA_FPS = 30
+WRIST_CAMERA_WARMUP_FRAMES = 45
+
+# The blue tape is physically on the left finger and red tape on the right
+# finger. Hue wrap-around requires two ranges for red. Values are deliberately
+# broad; pair geometry and the expected lower-center gripper location reject
+# unrelated colored objects.
+WRIST_BLUE_HSV = [([92, 70, 35], [140, 255, 255])]
+WRIST_RED_HSV = [([0, 75, 35], [12, 255, 255]),
+                 ([165, 75, 35], [179, 255, 255])]
+WRIST_MARKER_MIN_AREA_RATIO = 0.00004
+WRIST_MARKER_MAX_AREA_RATIO = 0.035
+WRIST_MARKER_MIN_SEPARATION_RATIO = 0.035
+WRIST_MARKER_MAX_SEPARATION_RATIO = 0.38
+WRIST_MARKER_MIN_FILL_RATIO = 0.32
+WRIST_MARKER_MAX_ASPECT = 5.0
+WRIST_MARKER_MAX_PAIR_AREA_RATIO = 4.0
+WRIST_EXPECTED_GRIPPER_CENTER = (0.50, 0.76)  # normalized image x/y
+WRIST_MAX_GRIPPER_CENTER_ERROR_RATIO = 0.12  # fraction of image diagonal
+
+# Default target mode finds a compact, saturated object but explicitly removes
+# the two finger-marker masks. A left-click in the live preview locks detection
+# to the clicked object's hue for difficult venues. Do not choose a target with
+# the same red/blue color as the finger tapes.
+WRIST_TARGET_HSV = None
+WRIST_TARGET_MIN_SATURATION = 65
+WRIST_TARGET_MIN_VALUE = 35
+WRIST_TARGET_MIN_AREA_RATIO = 0.00035
+WRIST_TARGET_MAX_AREA_RATIO = 0.18
+WRIST_TARGET_HUE_TOLERANCE = 12
+WRIST_TARGET_SATURATION_MARGIN = 45
+WRIST_TARGET_VALUE_MARGIN = 55
+WRIST_ALIGN_TOLERANCE_PX = 24.0
+
+# A clipped image has permanently lost color information. Detection may still be
+# displayed for diagnosis, but aligned/ready is false until quality recovers.
+WRIST_MAX_CLIPPED_FRACTION = 0.30
+WRIST_MIN_FRAME_STD = 10.0

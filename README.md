@@ -76,6 +76,25 @@ precise steps to bring it up. No other context is required.
 > caused intermittent JPEG block corruption; 160x120 plus the quality gate
 > completed 20/20 clean output requests in the physical stability test.
 
+> ### ✅ Named wrist webcam and colored-finger perception are implemented
+>
+> The primary eye-in-hand source is now the USB **AVerMedia PW315**, opened by
+> its stable AVFoundation device name so iPhone Continuity Camera and the MacBook
+> front camera cannot silently replace it. Blue tape on the physical left finger
+> and red tape on the right finger define the live gripper midpoint, opening, and
+> jaw angle. A separate colored-object contour produces image x/y and orientation
+> error relative to that measured midpoint. The detector does not use a venue
+> background image. With the Uno unplugged, run:
+>
+> ```bash
+> python3 laptop/wrist_vision.py --live
+> ```
+>
+> Left-click the intended object to lock its hue, right-click to return to
+> automatic colored-object selection, `S` saves an annotated frame, and
+> `Q`/Escape exits. `READY / ALIGNED` is impossible unless both tapes, a target,
+> and an exposure/contrast quality gate all pass.
+
 ---
 
 ## Table of contents
@@ -163,7 +182,7 @@ pick another," otherwise we finish the grasp and delivery.**
   | servo1 | 13 | base yaw | rotate the whole arm about the vertical (Z) axis |
   | servo2 | 12 | shoulder | first bend |
   | servo3 | 11 | elbow | second bend |
-  | servo4 | 10 | wrist pitch | 10° up, 180° down |
+  | servo4 | 10 | wrist pitch | verified safe range 120°–180° |
   | servo5 | 9 | gripper | 90° open, 180° closed |
   | servo6 | 8 | wrist roll | rotate gripper orientation |
 
@@ -290,6 +309,7 @@ brainToArm/
     ├── errp_train.py              ← train the ErrP model from that data
     │
     ├── vision.py                  ← camera → objects + arm tip (markerless)
+    ├── wrist_vision.py            ← named wrist webcam + tape/target geometry
     ├── calibrate_workspace.py     ← click 4 points → pixel↔cm mapping
     ├── camera_calibrate.py        ← optional lens (fisheye) calibration
     ├── calibrate_esp32_color.py   ← neutral-scene OV2640 spatial color map
@@ -473,6 +493,16 @@ brainToArm/
 - **`camera_calibrate.py`** — Optional. Removes lens/fisheye distortion (only
   matters if a cheap wide lens bends straight lines near the edges), using a
   printed checkerboard.
+
+- **`wrist_vision.py`** — Robot-independent eye-in-hand perception. On macOS it
+  asks AVFoundation for `AVerMedia PW315` by name through ffmpeg, avoiding
+  unstable numeric indices. Compact blue-left/red-right tape contours define a
+  gripper pose; their midpoint is the grasp point and their connecting line is
+  the jaw axis. A separate colored target yields pixel displacement in both
+  image and jaw coordinates plus an optional elongated-object roll error.
+  Pair geometry, contour compactness, expected lower-center placement, exposure,
+  and contrast are all gated. It never imports or opens `ArmSerial`, so live
+  framing and hue setup cannot move the robot.
 
 ### Support and testing
 
@@ -683,8 +713,21 @@ Paste the printed points into `config.py`. (Optionally run `camera_calibrate.py`
 if the lens visibly bends straight lines.) The calibration tool also prints the
 required `CAM_CALIBRATED=True` confirmation flag.
 
-For the separate wrist-camera hardware bring-up, keep the arm unplugged, flash
-`firmware/esp32_camera_diagnostic`, and run:
+For the mounted USB wrist webcam, keep the arm unplugged and run:
+
+```bash
+python3 laptop/wrist_vision.py --snapshot  # named AVerMedia proof + one annotated frame
+python3 laptop/wrist_vision.py --live      # placement, tape, target, exposure UI
+```
+
+The frame must show both full tape patches and the object. If it reports
+`overexposed`, reduce direct light/white-table glare or set exposure with the
+AVerMedia utility; clipped pixels cannot be repaired in software. The live view
+is perception-only. Physical image-Jacobian and approach-depth calibration are
+still required after reconnecting the Uno before autonomous motion is enabled.
+
+For the alternate wired OV2640 hardware proof, flash
+`firmware/esp32_camera_diagnostic` and run:
 
 ```bash
 python3 laptop/calibrate_esp32_color.py  # empty neutral scene; repeat after remount/lighting change
@@ -735,6 +778,9 @@ Grouped constants (see the file for full comments):
 - **Vision:** `CAM_INDEX`, `CAM_MOCK`, `OBJECT_METHOD` (`bgsub`/`yolo`/`hsv`/
   `aruco`), `BGSUB_THRESH`, `OBJECT_MIN_AREA`, `ARM_MIN_AREA`, `YOLO_*`,
   aruco ids, `OBJECT_HSV`, `CAM_CALIB_IMAGE_PTS/WORLD_PTS`, `CAM_MATRIX/DIST`.
+- **Wrist vision:** stable `WRIST_CAMERA_NAME`, frame/FPS settings, blue/red HSV
+  ranges, marker pair geometry, expected gripper center, colored-target bounds,
+  alignment tolerance, and exposure/contrast gates.
 
 **Rule:** hardware doesn't match? Change a constant here, not code.
 
@@ -756,6 +802,9 @@ Grouped constants (see the file for full comments):
 - **`python3 laptop/orchestrator.py --auto`** — full mock run after selecting
   `EEG_SOURCE="mock"`; the active HID configuration fails closed at preflight
   until its montage gate is cleared.
+- **`python3 laptop/wrist_vision.py --snapshot`** — opens the AVerMedia by name,
+  warms exposure, saves an annotated frame, and prints marker/target/quality
+  state without opening the robot serial port.
 
 ---
 

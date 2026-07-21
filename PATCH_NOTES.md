@@ -1190,3 +1190,56 @@ load.
 - A background-thread end-to-end mock run completed rest calibration, continuous
   TAR update, adaptive ErrP decision, visual alignment, grasp, and delivery of
   one object.
+
+## Patch 29 — named wrist webcam and two-color gripper geometry
+
+### Intent
+
+Use the mounted USB webcam as a true eye-in-hand sensor. Blue tape on the left
+finger and red tape on the right finger must provide a measured grasp point and
+orientation instead of relying on the old side-camera gripper segmentation or a
+venue-specific background image. Keep all current work safe while the Uno is
+physically disconnected.
+
+### Camera source and safety
+
+- Added a macOS AVFoundation reader that opens `AVerMedia PW315` by device name
+  through ffmpeg. This avoids the observed index instability where the same
+  number selected an iPhone or the MacBook front camera in different APIs.
+- The module has no `ArmSerial` import and cannot move a servo. `--snapshot` and
+  `--live` are safe camera-only modes.
+- Added frame-quality gating for clipped fraction and contrast. A target can
+  never report aligned when the image is overexposed or effectively flat.
+
+### Perception
+
+- Detect compact blue and red contours independently, then choose a physically
+  plausible pair using separation, area balance, compactness, and distance from
+  the configured lower-center gripper location.
+- Treat blue as the physical left finger and red as the right. Their midpoint is
+  the grasp point, the blue-to-red unit vector is the jaw axis, and their pixel
+  separation is the visual opening measurement.
+- Detect a separate compact colored target after removing dilated tape masks.
+  Report target error in image x/y, jaw-axis coordinates, Euclidean pixels, and
+  optional elongated-object orientation relative to wrist roll.
+- Added click-to-lock target hue for a new venue without background capture or
+  model training. Right-click clears the lock.
+- Added a real-time annotated UI with explicit marker/target/quality status,
+  alignment arrow, errors, FPS, screenshot control, and fail-closed `NOT READY`.
+
+### Servo constraint synchronization
+
+- Synchronized laptop global and planar wrist-pitch minima to the user's current
+  firmware value of 120° and updated the expected HOME pose to wrist pitch 120°.
+  The user's existing firmware limit/HOME edits are included unchanged so a
+  clean checkout cannot revert the physical safety constraint; only the stale
+  firmware comment was corrected from 10° to 120°.
+
+### Verification
+
+- Named physical AVerMedia capture succeeded at 1280x720. The current view was
+  correctly rejected as `overexposed 80%`; it cannot produce `READY / ALIGNED`.
+- Synthetic 1280x720 tests verify distractor rejection, blue-left/red-right
+  pairing, midpoint and jaw-axis geometry, independent colored-target detection,
+  x/y and orientation error, alignment tolerance, and fail-closed clipping.
+- The complete Python regression suite passes with the updated 120° wrist floor.

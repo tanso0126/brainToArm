@@ -5,7 +5,7 @@
 #define ARM_HOME_SERVO_1 90
 #define ARM_HOME_SERVO_2 70
 #define ARM_HOME_SERVO_3 90
-#define ARM_HOME_SERVO_4 90
+#define ARM_HOME_SERVO_4 120
 #define ARM_HOME_SERVO_5 180
 #define ARM_HOME_SERVO_6 0
 

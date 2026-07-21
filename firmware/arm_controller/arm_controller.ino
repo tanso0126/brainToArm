@@ -9,7 +9,7 @@
 //   servo1 (pin 13) : base yaw   (rotate whole arm about Z)
 //   servo2 (pin 12) : shoulder   (1st bend)
 //   servo3 (pin 11) : elbow      (2nd bend)
-//   servo4 (pin 10) : wrist pitch (10=up, 180=down)
+//   servo4 (pin 10) : wrist pitch (verified safe range 120..180)
 //   servo5 (pin  9) : gripper    (90=open, 180=closed)
 //   servo6 (pin  8) : wrist roll
 //
@@ -36,7 +36,7 @@ const uint8_t N = 6;
 const uint8_t PINS[N] = {13, 12, 11, 10, 9, 8};
 
 // Physically verified travel limits after removing the old unused third motor.
-const int MIN_DEG[N] = {0, 0, 0, 10, 90, 0};
+const int MIN_DEG[N] = {0, 0, 0, 120, 90, 0};
 const int MAX_DEG[N] = {180, 150, 180, 180, 180, 180};
 
 // Shared with laptop/config.py through home_pose.h; edit the six named values

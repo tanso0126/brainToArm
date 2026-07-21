@@ -213,6 +213,52 @@ def validate():
     elif not config.CAM_MOCK and not config.CAM_CALIBRATED:
         errs.append("real camera requires CAM_CALIBRATED=True after workspace calibration")
 
+    # --- named eye-in-hand camera and tape geometry ---
+    if not isinstance(config.WRIST_CAMERA_NAME, str) or not config.WRIST_CAMERA_NAME.strip():
+        errs.append("WRIST_CAMERA_NAME must be a non-empty device name")
+    if (not isinstance(config.WRIST_FRAME_SIZE, (tuple, list))
+            or len(config.WRIST_FRAME_SIZE) != 2
+            or any(not isinstance(value, int) or isinstance(value, bool) or value <= 0
+                   for value in config.WRIST_FRAME_SIZE)):
+        errs.append("WRIST_FRAME_SIZE must contain two positive integers")
+    for name in ("WRIST_BLUE_HSV", "WRIST_RED_HSV"):
+        ranges = getattr(config, name)
+        try:
+            valid = bool(ranges) and all(
+                len(pair) == 2 and len(pair[0]) == len(pair[1]) == 3
+                and all(0 <= int(value) <= limit
+                        for endpoint in pair
+                        for value, limit in zip(endpoint, (179, 255, 255)))
+                for pair in ranges)
+        except (TypeError, ValueError):
+            valid = False
+        if not valid:
+            errs.append(f"{name} must contain valid OpenCV HSV range pairs")
+    ordered_ratios = (
+        0 < config.WRIST_MARKER_MIN_AREA_RATIO
+        < config.WRIST_MARKER_MAX_AREA_RATIO < 1
+        and 0 < config.WRIST_MARKER_MIN_SEPARATION_RATIO
+        < config.WRIST_MARKER_MAX_SEPARATION_RATIO < 1
+        and 0 < config.WRIST_TARGET_MIN_AREA_RATIO
+        < config.WRIST_TARGET_MAX_AREA_RATIO < 1)
+    if not ordered_ratios:
+        errs.append("wrist marker/target area and separation ratios are invalid")
+    if (not 0 < config.WRIST_MARKER_MIN_FILL_RATIO <= 1
+            or config.WRIST_MARKER_MAX_ASPECT < 1
+            or config.WRIST_MARKER_MAX_PAIR_AREA_RATIO < 1):
+        errs.append("wrist marker compactness/pair limits are invalid")
+    if (not isinstance(config.WRIST_EXPECTED_GRIPPER_CENTER, (tuple, list))
+            or len(config.WRIST_EXPECTED_GRIPPER_CENTER) != 2
+            or not all(0 <= value <= 1
+                       for value in config.WRIST_EXPECTED_GRIPPER_CENTER)):
+        errs.append("WRIST_EXPECTED_GRIPPER_CENTER must be normalized x/y")
+    if not 0 < config.WRIST_MAX_GRIPPER_CENTER_ERROR_RATIO < 1:
+        errs.append("WRIST_MAX_GRIPPER_CENTER_ERROR_RATIO must be in (0, 1)")
+    if (config.WRIST_ALIGN_TOLERANCE_PX <= 0
+            or not 0 <= config.WRIST_MAX_CLIPPED_FRACTION < 1
+            or config.WRIST_MIN_FRAME_STD <= 0):
+        errs.append("wrist alignment and frame-quality thresholds are invalid")
+
     # --- heights ordered sensibly ---
     heights = (config.Z_GRASP, config.Z_APPROACH, config.Z_LIFT, config.Z_PLACE)
     if not all(isinstance(v, (int, float)) and math.isfinite(v) for v in heights):

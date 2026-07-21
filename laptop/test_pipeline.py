@@ -17,6 +17,7 @@ from cognitive_load import AutonomyAllocator, CognitiveLoadEstimator
 from polyg_hid import (
     ADC_VOLTS_PER_COUNT, PolyGIHID, command_report, counts_to_adc_mv, decode_report)
 from eeg_dashboard import EEGSignalProcessor, analyze_signal_quality, sanitize_recording_name
+from wrist_vision import WristDetector, frame_quality
 from capture_esp32_camera import correct_neutral_background, validate_frame_quality
 
 
@@ -258,11 +259,11 @@ def test_arm_command_validation():
           and config.JOINT_NAMES
           == ["base", "shoulder", "elbow", "wrist_pitch", "gripper", "wrist_roll"],
           "physical six-servo pin and joint map is exact")
-    check(config.HOME_POSE == [90, 70, 90, 90, 180, 0],
-          "six-servo HOME pose preserves active joints after removing old servo3")
-    check(config.SERVO_MIN == [0, 0, 0, 10, 90, 0]
+    check(config.HOME_POSE == [90, 70, 90, 120, 180, 0],
+          "six-servo HOME pose includes the verified wrist floor")
+    check(config.SERVO_MIN == [0, 0, 0, 120, 90, 0]
           and config.SERVO_MAX == [180, 150, 180, 180, 180, 180],
-          "gripper and wrist-roll limits follow swapped 5/6 wiring")
+          "host limits match the physical wrist/gripper/roll ranges")
     home_status = "C " + " ".join(str(angle) for angle in config.HOME_POSE)
     check(parse_status_line(home_status) == config.HOME_POSE,
           "strict firmware status is parsed")
@@ -547,6 +548,43 @@ def test_camera_neutral_correction():
         check(True, "8-pixel mosaic corruption rejected")
 
 
+def test_wrist_marker_and_target_geometry():
+    print("[wrist] blue-left/red-right eye-in-hand geometry + quality gate")
+    import numpy as np
+    import cv2
+
+    frame = np.full((720, 1280, 3), 125, dtype=np.uint8)
+    # Small distractors are not allowed to replace the lower-center finger pair.
+    cv2.rectangle(frame, (80, 80), (105, 95), (255, 0, 0), -1)
+    cv2.rectangle(frame, (1120, 90), (1145, 105), (0, 0, 255), -1)
+    cv2.rectangle(frame, (430, 520), (525, 565), (255, 0, 0), -1)
+    cv2.rectangle(frame, (755, 520), (850, 565), (0, 0, 255), -1)
+    target_box = cv2.boxPoints(((665, 410), (120, 55), 20)).astype(np.int32)
+    cv2.fillConvexPoly(frame, target_box, (0, 220, 70))
+
+    observation, _masks = WristDetector().detect(frame)
+    check(observation.gripper is not None,
+          "both physical finger colors produce one gripper pose")
+    check(observation.target is not None,
+          "colored object remains separate from finger markers")
+    check(abs(observation.gripper.center[0] - 640) < 2
+          and abs(observation.gripper.center[1] - 542.5) < 2,
+          "grasp point is the midpoint of blue-left and red-right tape")
+    check(observation.gripper.jaw_axis[0] > 0.99,
+          "jaw axis points mechanically from blue-left to red-right")
+    check(observation.error_xy[1] < 0 and observation.distance_px > 100,
+          "target-to-grasp alignment error is reported in image pixels")
+    check(observation.orientation_error_deg is not None,
+          "elongated target exposes wrist-roll orientation error")
+    check(not observation.aligned,
+          "target outside the fixed pixel tolerance is not ready")
+
+    clipped = np.full((720, 1280, 3), 255, dtype=np.uint8)
+    quality = frame_quality(clipped)
+    check(not quality.valid and quality.clipped_fraction == 1.0,
+          "overexposed view fails closed before visual alignment")
+
+
 def test_pick_place():
     print("[pickplace] visual correction is preserved through grasp + delivery")
     import random
@@ -613,6 +651,7 @@ if __name__ == "__main__":
     test_eeg_packet_timestamps()
     test_ring_recent_is_time_based()
     test_camera_neutral_correction()
+    test_wrist_marker_and_target_geometry()
     test_pick_place()
     test_servo_visibility_failure()
     print("\nALL TESTS PASSED")
