@@ -48,7 +48,7 @@ JOINT_NAMES = ["base", "shoulder", "elbow", "wrist_pitch", "gripper", "wrist_rol
 J_BASE, J_SHOULDER, J_ELBOW, J_WRIST, J_GRIP, J_ROLL = range(N_JOINTS)
 J_TILT = J_ROLL            # compatibility alias; servo6 is physically wrist roll
 GRIP_OPEN = 90             # physically verified: 90=open
-GRIP_CLOSED = 170          # latest verified mechanical closing limit
+GRIP_CLOSED = 180          # physically confirmed full-close endpoint
 
 # ---- Camera-calibrated planar arm mode (physically verified 2026-07-20) ----
 # Servo1 is operational again, but this legacy side-camera calibration is valid
@@ -59,7 +59,7 @@ PLANAR_FRAME_SIZE = (1920, 1080)
 PLANAR_ARM_CALIBRATED = True  # successful physical pick/lift/place on 2026-07-20
 PLANAR_BASE_ANGLE = 90
 PLANAR_SERVO_MIN = [90, 0, 0, 130, 90, 0]
-PLANAR_SERVO_MAX = [90, 150, 180, 180, 170, 180]
+PLANAR_SERVO_MAX = [90, 150, 180, 180, 180, 180]
 
 # Background-independent FastSAM perception and the calibrated local image
 # Jacobian. At the verified observation pose, an object centered at x=1435 px
@@ -133,7 +133,7 @@ L_HAND  = 8.0              # wrist axis -> gripper contact point
 SERVO_OFFSET    = [90, 90, 90, 90, 90, 90]
 SERVO_DIRECTION = [1, 1, 1, 1, 1, 1]
 SERVO_MIN       = [0, 0, 0, 130, 90, 0]
-SERVO_MAX       = [180, 150, 180, 180, 170, 180]
+SERVO_MAX       = [180, 150, 180, 180, 180, 180]
 
 # ======================================================================
 # EEG (LAXTHA PolyG-I)

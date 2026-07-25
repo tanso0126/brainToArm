@@ -37,7 +37,7 @@ const uint8_t PINS[N] = {13, 12, 11, 10, 9, 8};
 
 // Physically verified travel limits after removing the old unused third motor.
 const int MIN_DEG[N] = {0, 0, 0, 130, 90, 0};
-const int MAX_DEG[N] = {180, 150, 180, 180, 170, 180};
+const int MAX_DEG[N] = {180, 150, 180, 180, 180, 180};
 
 // Shared with laptop/config.py through home_pose.h; edit the six named values
 // there rather than duplicating the startup pose in multiple files.

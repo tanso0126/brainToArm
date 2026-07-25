@@ -1339,3 +1339,13 @@ red at `(657,618,117,102)`. Both correctly touch the bottom image boundary.
 - Added regressions proving that correctly sized red/blue objects outside the
   fixed mount zone and an inverted red-left/blue-right pair cannot masquerade
   as the gripper.
+
+## Patch 34 — confirm the 180° full-close endpoint
+
+- Accepted the operator's pending firmware calibration as authoritative:
+  motor 5 uses 90° for fully open and 180° for fully closed. The 170° HOME value
+  remains a nearly closed startup posture, not the mechanical close endpoint.
+- Synchronized the global host range, planar range, grasp command, validation,
+  regression expectations, firmware maximum, and README hardware table.
+- The physical search continues with the gripper open so an off-screen yellow
+  target can enter between the fingers without collision.

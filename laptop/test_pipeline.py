@@ -263,7 +263,7 @@ def test_arm_command_validation():
     check(config.HOME_POSE == [90, 70, 90, 140, 170, 170],
           "six-servo HOME pose matches the latest raised camera pose")
     check(config.SERVO_MIN == [0, 0, 0, 130, 90, 0]
-          and config.SERVO_MAX == [180, 150, 180, 180, 170, 180],
+          and config.SERVO_MAX == [180, 150, 180, 180, 180, 180],
           "host limits match the physical wrist/gripper/roll ranges")
     home_status = "C " + " ".join(str(angle) for angle in config.HOME_POSE)
     check(parse_status_line(home_status) == config.HOME_POSE,
@@ -320,8 +320,8 @@ def test_planar_pick_calibration_and_detection():
     from vision_segment import (
         ObjectDetection, select_gripper, select_pick_target)
 
-    check(config.GRIP_OPEN == 90 and config.GRIP_CLOSED == 170,
-          "physical gripper direction is 90=open, 170=closed")
+    check(config.GRIP_OPEN == 90 and config.GRIP_CLOSED == 180,
+          "physical gripper direction is 90=open, 180=closed")
     check(config.PLANAR_SERVO_MIN[config.J_BASE]
           == config.PLANAR_SERVO_MAX[config.J_BASE] == 90,
           "side-camera calibration keeps the working base at 90")

@@ -43,7 +43,7 @@ precise steps to bring it up. No other context is required.
 > deliberately fixed-plane mode: it locks servo1 at 90°,
 > re-detects the object before every attempt, corrects
 > shoulder/elbow in image pixels, rotates wrist pitch and roll to 180°, opens the
-> gripper at 90°, descends before closing it at 170°, verifies lift, transports,
+> gripper at 90°, descends before closing it at 180°, verifies lift, transports,
 > releases, and verifies displacement. The complete sequence was physically
 > demonstrated on 2026-07-20: the white object was picked up, moved right, and
 > placed back on the table.
@@ -183,7 +183,7 @@ pick another," otherwise we finish the grasp and delivery.**
   | servo2 | 12 | shoulder | first bend |
   | servo3 | 11 | elbow | second bend |
   | servo4 | 10 | wrist pitch | verified safe range 130°–180° |
-  | servo5 | 9 | gripper | 90° open, 170° closed |
+  | servo5 | 9 | gripper | 90° open, 180° closed |
   | servo6 | 8 | wrist roll | rotate gripper orientation |
 
   The former unused servo3 slot was removed completely. Elbow and wrist pitch

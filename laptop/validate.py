@@ -62,8 +62,8 @@ def validate():
                 == config.PLANAR_SERVO_MAX[config.J_BASE]
                 == config.PLANAR_BASE_ANGLE == 90):
             errs.append("camera-calibrated planar mode must keep servo1 at 90")
-    if config.GRIP_OPEN != 90 or config.GRIP_CLOSED != 170:
-        errs.append("physical gripper calibration requires 90=open and 170=closed")
+    if config.GRIP_OPEN != 90 or config.GRIP_CLOSED != 180:
+        errs.append("physical gripper calibration requires 90=open and 180=closed")
     if config.PLANAR_WRIST_ROLL != 180 or config.PLANAR_WRIST_PITCH != 180:
         errs.append("verified planar top grasp requires wrist pitch/roll 180")
 
