@@ -408,6 +408,15 @@ class WristDetector:
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         blue_mask = _combine_hsv_ranges(hsv, config.WRIST_BLUE_HSV)
         red_mask = _combine_hsv_ranges(hsv, config.WRIST_RED_HSV)
+        height, width = hsv.shape[:2]
+        x_min, x_max, y_min, y_max = config.WRIST_MARKER_ROI
+        marker_roi = np.zeros((height, width), dtype=np.uint8)
+        marker_roi[
+            int(round(y_min * height)):int(round(y_max * height)),
+            int(round(x_min * width)):int(round(x_max * width)),
+        ] = 255
+        blue_mask = cv2.bitwise_and(blue_mask, marker_roi)
+        red_mask = cv2.bitwise_and(red_mask, marker_roi)
         gripper = self._detect_gripper(hsv, blue_mask, red_mask)
         target_mask = self._target_mask(hsv, blue_mask, red_mask)
         target = self._detect_target(hsv, target_mask, gripper)

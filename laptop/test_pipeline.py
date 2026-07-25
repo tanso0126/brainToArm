@@ -558,6 +558,8 @@ def test_wrist_marker_and_target_geometry():
     check(LATEST_RAW_PATH != LATEST_PREVIEW_PATH
           and "raw" in LATEST_RAW_PATH.stem,
           "controller input is separate from the annotated operator preview")
+    check(config.WRIST_MARKER_ROI == (0.22, 0.75, 0.72, 1.0),
+          "rigid markers are extracted only from the measured lower-frame ROI")
 
     frame = np.full((720, 1280, 3), 125, dtype=np.uint8)
     # Small distractors are not allowed to replace the lower-center finger pair.

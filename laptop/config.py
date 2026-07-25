@@ -293,9 +293,12 @@ WRIST_CAMERA_WARMUP_FRAMES = 45
 # finger. Hue wrap-around requires two ranges for red. Values are deliberately
 # broad; pair geometry and the expected lower-center gripper location reject
 # unrelated colored objects.
-WRIST_BLUE_HSV = [([92, 70, 35], [140, 255, 255])]
+WRIST_BLUE_HSV = [([92, 90, 35], [140, 255, 255])]
 WRIST_RED_HSV = [([0, 75, 35], [12, 255, 255]),
                  ([165, 75, 35], [179, 255, 255])]
+# Crop marker masks before finding contours. The rigid camera mount guarantees
+# that real finger tapes stay inside this lower-frame region.
+WRIST_MARKER_ROI = (0.22, 0.75, 0.72, 1.0)
 # Measured from the rigid camera mount at 1280x720. A marker pair must match
 # both the tape geometry and its lower-frame mounting location; a coincidental
 # red/blue pair elsewhere in the scene is not a gripper.

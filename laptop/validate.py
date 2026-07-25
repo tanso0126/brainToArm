@@ -236,6 +236,17 @@ def validate():
             valid = False
         if not valid:
             errs.append(f"{name} must contain valid OpenCV HSV range pairs")
+    try:
+        marker_roi_ok = (
+            len(config.WRIST_MARKER_ROI) == 4
+            and all(0 <= float(value) <= 1
+                    for value in config.WRIST_MARKER_ROI)
+            and config.WRIST_MARKER_ROI[0] < config.WRIST_MARKER_ROI[1]
+            and config.WRIST_MARKER_ROI[2] < config.WRIST_MARKER_ROI[3])
+    except (TypeError, ValueError):
+        marker_roi_ok = False
+    if not marker_roi_ok:
+        errs.append("WRIST_MARKER_ROI must be ordered normalized bounds")
     if (not isinstance(config.WRIST_TARGET_COLOR_NAME, str)
             or not config.WRIST_TARGET_COLOR_NAME.strip()):
         errs.append("WRIST_TARGET_COLOR_NAME must be a non-empty label")

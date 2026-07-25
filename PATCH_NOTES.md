@@ -1381,3 +1381,20 @@ red at `(657,618,117,102)`. Both correctly touch the bottom image boundary.
   clutter along the bottom edge.
 - Added regressions for the measured yellow hue, a valid bottom-clipped object
   between the fingers, and invalid bottom-border clutter outside the gripper.
+
+## Patch 37 — isolate finger markers before contour extraction
+
+- At the open approach pose, the real blue tape still contained roughly 4,573
+  valid blue pixels, but cyan-shifted white paper connected it to upper-scene
+  pixels. The resulting giant contour failed the size gate, making both the
+  gripper and otherwise valid bottom target unavailable.
+- Marker masks are now cropped to the rigid mount's normalized lower ROI
+  `(x=0.22..0.75, y=0.72..1.0)` before connected-component extraction. Scene
+  colors outside the only physically possible finger zone cannot merge with a
+  tape contour.
+- Raised the measured blue saturation floor from 70 to 90. On the physical raw
+  frame this removes the paper bridge while retaining an independent blue tape
+  component of about 2,775 pixels; the red tape remains an independent roughly
+  2,441-pixel component.
+- Added configuration validation and regression coverage for the fixed marker
+  ROI. The arm stayed open and stationary during this perception-only change.
