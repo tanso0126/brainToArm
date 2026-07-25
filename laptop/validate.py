@@ -252,13 +252,46 @@ def validate():
             or config.WRIST_MARKER_MAX_ASPECT < 1
             or config.WRIST_MARKER_MAX_PAIR_AREA_RATIO < 1):
         errs.append("wrist marker compactness/pair limits are invalid")
-    if (not isinstance(config.WRIST_EXPECTED_GRIPPER_CENTER, (tuple, list))
-            or len(config.WRIST_EXPECTED_GRIPPER_CENTER) != 2
-            or not all(0 <= value <= 1
-                       for value in config.WRIST_EXPECTED_GRIPPER_CENTER)):
-        errs.append("WRIST_EXPECTED_GRIPPER_CENTER must be normalized x/y")
-    if not 0 < config.WRIST_MAX_GRIPPER_CENTER_ERROR_RATIO < 1:
-        errs.append("WRIST_MAX_GRIPPER_CENTER_ERROR_RATIO must be in (0, 1)")
+    marker_dimension_ranges = (
+        0 < config.WRIST_MARKER_MIN_WIDTH_RATIO
+        < config.WRIST_MARKER_MAX_WIDTH_RATIO < 1
+        and 0 < config.WRIST_MARKER_MIN_HEIGHT_RATIO
+        < config.WRIST_MARKER_MAX_HEIGHT_RATIO < 1
+        and 0 <= config.WRIST_MARKER_MAX_BOTTOM_GAP_RATIO < 1)
+    if not marker_dimension_ranges:
+        errs.append("wrist marker size/bottom-gap limits are invalid")
+    profiles = (
+        config.WRIST_GRIPPER_CLOSED_PROFILE,
+        config.WRIST_GRIPPER_OPEN_PROFILE)
+    profile_keys = {
+        "opening_ratio", "center", "blue_area_ratio", "red_area_ratio"}
+    if not all(
+            isinstance(profile, dict)
+            and set(profile) == profile_keys
+            and isinstance(profile["center"], (tuple, list))
+            and len(profile["center"]) == 2
+            and all(0 <= value <= 1 for value in profile["center"])
+            and 0 < profile["opening_ratio"] < 1
+            and 0 < profile["blue_area_ratio"] < 1
+            and 0 < profile["red_area_ratio"] < 1
+            for profile in profiles):
+        errs.append("wrist gripper endpoint profiles are invalid")
+    elif not (config.WRIST_GRIPPER_CLOSED_PROFILE["opening_ratio"]
+              < config.WRIST_GRIPPER_OPEN_PROFILE["opening_ratio"]):
+        errs.append("open gripper profile must have greater marker separation")
+    if (not isinstance(config.WRIST_GRIPPER_CENTER_TOLERANCE, (tuple, list))
+            or len(config.WRIST_GRIPPER_CENTER_TOLERANCE) != 2
+            or not all(0 < value < 1
+                       for value in config.WRIST_GRIPPER_CENTER_TOLERANCE)):
+        errs.append("WRIST_GRIPPER_CENTER_TOLERANCE must be normalized x/y")
+    if (not isinstance(config.WRIST_MARKER_PROFILE_AREA_FACTOR_RANGE,
+                       (tuple, list))
+            or len(config.WRIST_MARKER_PROFILE_AREA_FACTOR_RANGE) != 2
+            or not 0 < config.WRIST_MARKER_PROFILE_AREA_FACTOR_RANGE[0] < 1
+            or config.WRIST_MARKER_PROFILE_AREA_FACTOR_RANGE[1] <= 1):
+        errs.append("WRIST_MARKER_PROFILE_AREA_FACTOR_RANGE is invalid")
+    if config.WRIST_LATEST_PREVIEW_INTERVAL_S <= 0:
+        errs.append("WRIST_LATEST_PREVIEW_INTERVAL_S must be positive")
     if (config.WRIST_ALIGN_TOLERANCE_PX <= 0
             or not 0 <= config.WRIST_MAX_CLIPPED_FRACTION < 1
             or config.WRIST_MIN_FRAME_STD <= 0):

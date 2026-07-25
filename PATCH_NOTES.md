@@ -1313,3 +1313,29 @@ red at `(657,618,117,102)`. Both correctly touch the bottom image boundary.
 - The connected Uno initially reported stale firmware HOME
   `[90,70,90,140,180,0]`; connection failed closed and no host motion command
   was sent. Patch 32 must be uploaded before the search controller may connect.
+
+## Patch 33 — rigid-mount gripper identity and shared live preview
+
+- Replaced the broad red/blue-pair heuristic with constraints measured from the
+  rigid 1280x720 wrist-camera mount: normalized lower-frame center, per-marker
+  area and bounding-box envelope, bottom-edge proximity, closed-to-open
+  separation, blue-left/red-right order, and pair area balance must all agree.
+- The measured closed-gripper samples centered near `(0.475, 0.93)`, with
+  diagonal-normalized separation `0.081..0.089`, blue area ratio about `0.0066`,
+  and red area ratio `0.008..0.010`. Configuration limits include the wider
+  mechanically possible open-gripper separation and the smaller tape projection
+  expected when the jaws spread, without accepting arbitrary scene pairs.
+- Physically opened motor 5 from 170° to its verified 90° endpoint while the
+  preview remained live. All 20 sampled frames detected the open gripper:
+  separation `0.1918..0.1926`, blue area about `0.00325`, red area about
+  `0.00368`, and center near `(0.479,0.969)`.
+- Stored closed/open endpoint profiles and interpolate expected center and tape
+  areas from the observed jaw separation. This models the real projection
+  change across the full opening range instead of assuming one fixed silhouette.
+- Live mode now atomically refreshes
+  `data/vision/wrist_camera_latest.jpg` every 0.5 seconds. The operator keeps the
+  annotated OpenCV window visible while diagnostics and later controllers can
+  inspect exactly the same rendered result.
+- Added regressions proving that correctly sized red/blue objects outside the
+  fixed mount zone and an inverted red-left/blue-right pair cannot masquerade
+  as the gripper.

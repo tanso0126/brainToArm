@@ -32,6 +32,7 @@ import config
 
 
 DEBUG_DIR = Path(__file__).resolve().parents[1] / "data" / "vision"
+LATEST_PREVIEW_PATH = DEBUG_DIR / "wrist_camera_latest.jpg"
 
 
 @dataclass(frozen=True)
@@ -221,13 +222,36 @@ class WristDetector:
         diagonal = math.hypot(width, height)
         min_sep = diagonal * config.WRIST_MARKER_MIN_SEPARATION_RATIO
         max_sep = diagonal * config.WRIST_MARKER_MAX_SEPARATION_RATIO
-        expected = np.asarray([
-            config.WRIST_EXPECTED_GRIPPER_CENTER[0] * width,
-            config.WRIST_EXPECTED_GRIPPER_CENTER[1] * height,
-        ])
+        closed_profile = config.WRIST_GRIPPER_CLOSED_PROFILE
+        open_profile = config.WRIST_GRIPPER_OPEN_PROFILE
+        closed_opening = closed_profile["opening_ratio"]
+        opening_span = open_profile["opening_ratio"] - closed_opening
         pairs = []
         for left in blue:
             for right in red:
+                # The rigid mount always presents blue on image-left and red on
+                # image-right. Rejecting an inverted pair also prevents two
+                # unrelated scene objects from defining a grasp axis.
+                if left.center[0] >= right.center[0]:
+                    continue
+                dimensions_ok = True
+                for marker in (left, right):
+                    x, y, width_px, height_px = marker.bbox
+                    width_ratio = width_px / width
+                    height_ratio = height_px / height
+                    bottom_gap_ratio = (height - (y + height_px)) / height
+                    if not (
+                        config.WRIST_MARKER_MIN_WIDTH_RATIO <= width_ratio
+                        <= config.WRIST_MARKER_MAX_WIDTH_RATIO
+                        and config.WRIST_MARKER_MIN_HEIGHT_RATIO <= height_ratio
+                        <= config.WRIST_MARKER_MAX_HEIGHT_RATIO
+                        and bottom_gap_ratio
+                        <= config.WRIST_MARKER_MAX_BOTTOM_GAP_RATIO
+                    ):
+                        dimensions_ok = False
+                        break
+                if not dimensions_ok:
+                    continue
                 area_ratio = (max(left.area, right.area)
                               / max(1.0, min(left.area, right.area)))
                 if area_ratio > config.WRIST_MARKER_MAX_PAIR_AREA_RATIO:
@@ -236,16 +260,47 @@ class WristDetector:
                 separation = float(np.linalg.norm(delta))
                 if not min_sep <= separation <= max_sep:
                     continue
-                midpoint = (np.asarray(left.center) + np.asarray(right.center)) / 2
-                center_cost = float(np.linalg.norm(midpoint - expected)) / diagonal
-                if center_cost > config.WRIST_MAX_GRIPPER_CENTER_ERROR_RATIO:
+                separation_ratio = separation / diagonal
+                openness = float(np.clip(
+                    (separation_ratio - closed_opening) / opening_span,
+                    0.0, 1.0))
+                expected_area_ratios = np.asarray([
+                    closed_profile["blue_area_ratio"]
+                    + openness * (open_profile["blue_area_ratio"]
+                                  - closed_profile["blue_area_ratio"]),
+                    closed_profile["red_area_ratio"]
+                    + openness * (open_profile["red_area_ratio"]
+                                  - closed_profile["red_area_ratio"]),
+                ])
+                actual_area_ratios = np.asarray(
+                    [left.area / area, right.area / area])
+                area_factors = actual_area_ratios / expected_area_ratios
+                min_factor, max_factor = (
+                    config.WRIST_MARKER_PROFILE_AREA_FACTOR_RANGE)
+                if np.any(area_factors < min_factor) or np.any(
+                        area_factors > max_factor):
                     continue
+                midpoint = (np.asarray(left.center) + np.asarray(right.center)) / 2
+                closed_center = np.asarray(closed_profile["center"], dtype=float)
+                open_center = np.asarray(open_profile["center"], dtype=float)
+                expected_center = closed_center + openness * (
+                    open_center - closed_center)
+                expected = expected_center * np.asarray([width, height])
+                center_error = np.abs(midpoint - expected) / np.asarray(
+                    [width, height], dtype=float)
+                tolerance = np.asarray(
+                    config.WRIST_GRIPPER_CENTER_TOLERANCE, dtype=float)
+                if np.any(center_error > tolerance):
+                    continue
+                center_cost = float(np.linalg.norm(center_error / tolerance))
                 balance_cost = abs(math.log(max(left.area, 1.0)
                                             / max(right.area, 1.0)))
+                profile_cost = float(np.sum(np.abs(np.log(area_factors))))
                 # Geometry dominates raw area, preventing a large colored object
                 # elsewhere in the room from replacing one finger marker.
                 score = (math.log1p(left.area + right.area)
-                         - 7.0 * center_cost - 0.8 * balance_cost)
+                         - 7.0 * center_cost - 0.8 * balance_cost
+                         - 0.6 * profile_cost)
                 pairs.append((score, left, right, delta, separation, midpoint))
         if not pairs:
             return None
@@ -526,6 +581,7 @@ def run_live(camera_name=None, snapshot=False, seconds=None):
     previous = started
     fps_ema = None
     last_observation = None
+    latest_saved = float("-inf")
     try:
         for _ in range(config.WRIST_CAMERA_WARMUP_FRAMES):
             ok, _frame = camera.read()
@@ -544,11 +600,15 @@ def run_live(camera_name=None, snapshot=False, seconds=None):
             previous = now
             fps_ema = instant if fps_ema is None else 0.15 * instant + 0.85 * fps_ema
             rendered = annotate(frame, observation, fps=fps_ema)
-            if snapshot:
+            if now - latest_saved >= config.WRIST_LATEST_PREVIEW_INTERVAL_S:
                 DEBUG_DIR.mkdir(parents=True, exist_ok=True)
-                path = DEBUG_DIR / "wrist_camera_latest.jpg"
-                cv2.imwrite(str(path), rendered)
-                print(f"[wrist] saved {path}")
+                temporary = DEBUG_DIR / "wrist_camera_latest.tmp.jpg"
+                if not cv2.imwrite(str(temporary), rendered):
+                    raise RuntimeError(f"could not write live preview {temporary}")
+                temporary.replace(LATEST_PREVIEW_PATH)
+                latest_saved = now
+            if snapshot:
+                print(f"[wrist] saved {LATEST_PREVIEW_PATH}")
                 print(f"[wrist] {observation_summary(observation)}")
                 return observation
             cv2.imshow(window, rendered)

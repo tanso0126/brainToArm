@@ -559,8 +559,8 @@ def test_wrist_marker_and_target_geometry():
     cv2.rectangle(frame, (80, 80), (105, 95), (255, 0, 0), -1)
     cv2.rectangle(frame, (1120, 90), (1145, 105), (0, 0, 255), -1)
     cv2.rectangle(frame, (100, 390), (230, 470), (0, 105, 210), -1)  # skin/orange
-    cv2.rectangle(frame, (350, 620), (445, 719), (255, 0, 0), -1)
-    cv2.rectangle(frame, (690, 620), (785, 719), (0, 0, 255), -1)
+    cv2.rectangle(frame, (430, 667), (529, 719), (255, 0, 0), -1)
+    cv2.rectangle(frame, (705, 667), (797, 719), (0, 0, 255), -1)
     # A valid object can appear anywhere in the camera, including the upper half.
     target_box = cv2.boxPoints(((665, 180), (120, 55), 20)).astype(np.int32)
     cv2.fillConvexPoly(frame, target_box, (0, 255, 255))  # vivid yellow target
@@ -573,9 +573,9 @@ def test_wrist_marker_and_target_geometry():
     check(abs(observation.target.center[0] - 665) < 2
           and abs(observation.target.center[1] - 180) < 2,
           "vivid-yellow target detection covers the full frame")
-    check(abs(observation.gripper.center[0] - 567.5) < 2
-          and abs(observation.gripper.center[1] - 669.5) < 2,
-          "bottom-edge tapes define their measured midpoint")
+    check(abs(observation.gripper.center[0] - 615.25) < 2
+          and abs(observation.gripper.center[1] - 693) < 2,
+          "open-state bottom-edge tapes define their measured midpoint")
     check(observation.gripper.jaw_axis[0] > 0.99,
           "jaw axis points mechanically from blue-left to red-right")
     check(observation.error_xy[1] < 0 and observation.distance_px > 100,
@@ -584,6 +584,27 @@ def test_wrist_marker_and_target_geometry():
           "elongated target exposes wrist-roll orientation error")
     check(not observation.aligned,
           "target outside the fixed pixel tolerance is not ready")
+
+    wrong_location = np.full((720, 1280, 3), 125, dtype=np.uint8)
+    cv2.rectangle(wrong_location, (430, 260), (529, 312), (255, 0, 0), -1)
+    cv2.rectangle(wrong_location, (705, 260), (797, 312), (0, 0, 255), -1)
+    wrong_observation, _ = WristDetector().detect(wrong_location)
+    check(wrong_observation.gripper is None,
+          "correctly sized red/blue scene objects outside the mount zone are rejected")
+
+    inverted = np.full((720, 1280, 3), 125, dtype=np.uint8)
+    cv2.rectangle(inverted, (430, 667), (529, 719), (0, 0, 255), -1)
+    cv2.rectangle(inverted, (705, 667), (797, 719), (255, 0, 0), -1)
+    inverted_observation, _ = WristDetector().detect(inverted)
+    check(inverted_observation.gripper is None,
+          "red-left/blue-right distractor pair is rejected")
+
+    closed = np.full((720, 1280, 3), 125, dtype=np.uint8)
+    cv2.rectangle(closed, (500, 620), (590, 719), (255, 0, 0), -1)
+    cv2.rectangle(closed, (635, 620), (725, 719), (0, 0, 255), -1)
+    closed_observation, _ = WristDetector().detect(closed)
+    check(closed_observation.gripper is not None,
+          "measured closed-state tape profile remains valid")
 
     clipped = np.full((720, 1280, 3), 255, dtype=np.uint8)
     quality = frame_quality(clipped)

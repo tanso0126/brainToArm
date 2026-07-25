@@ -296,15 +296,39 @@ WRIST_CAMERA_WARMUP_FRAMES = 45
 WRIST_BLUE_HSV = [([92, 70, 35], [140, 255, 255])]
 WRIST_RED_HSV = [([0, 75, 35], [12, 255, 255]),
                  ([165, 75, 35], [179, 255, 255])]
-WRIST_MARKER_MIN_AREA_RATIO = 0.00004
-WRIST_MARKER_MAX_AREA_RATIO = 0.035
-WRIST_MARKER_MIN_SEPARATION_RATIO = 0.035
-WRIST_MARKER_MAX_SEPARATION_RATIO = 0.38
-WRIST_MARKER_MIN_FILL_RATIO = 0.32
-WRIST_MARKER_MAX_ASPECT = 5.0
-WRIST_MARKER_MAX_PAIR_AREA_RATIO = 4.0
-WRIST_EXPECTED_GRIPPER_CENTER = (0.44, 0.94)  # measured mounted-view x/y
-WRIST_MAX_GRIPPER_CENTER_ERROR_RATIO = 0.12  # fraction of image diagonal
+# Measured from the rigid camera mount at 1280x720. A marker pair must match
+# both the tape geometry and its lower-frame mounting location; a coincidental
+# red/blue pair elsewhere in the scene is not a gripper.
+# The apparent tape size changes as the jaws open and the finger faces rotate
+# away from the lens. These are an outer envelope for both endpoints; midpoint,
+# bottom anchoring, color order, and pair separation provide the tighter ID.
+WRIST_MARKER_MIN_AREA_RATIO = 0.00035
+WRIST_MARKER_MAX_AREA_RATIO = 0.018
+WRIST_MARKER_MIN_SEPARATION_RATIO = 0.05
+WRIST_MARKER_MAX_SEPARATION_RATIO = 0.24
+WRIST_MARKER_MIN_FILL_RATIO = 0.38
+WRIST_MARKER_MAX_ASPECT = 3.0
+WRIST_MARKER_MAX_PAIR_AREA_RATIO = 2.4
+WRIST_MARKER_MIN_WIDTH_RATIO = 0.012
+WRIST_MARKER_MAX_WIDTH_RATIO = 0.16
+WRIST_MARKER_MIN_HEIGHT_RATIO = 0.025
+WRIST_MARKER_MAX_HEIGHT_RATIO = 0.30
+WRIST_MARKER_MAX_BOTTOM_GAP_RATIO = 0.08
+WRIST_GRIPPER_CLOSED_PROFILE = {
+    "opening_ratio": 0.085,
+    "center": (0.475, 0.93),
+    "blue_area_ratio": 0.0066,
+    "red_area_ratio": 0.0092,
+}
+WRIST_GRIPPER_OPEN_PROFILE = {
+    "opening_ratio": 0.1924,
+    "center": (0.4788, 0.969),
+    "blue_area_ratio": 0.00325,
+    "red_area_ratio": 0.00368,
+}
+WRIST_GRIPPER_CENTER_TOLERANCE = (0.08, 0.06)
+WRIST_MARKER_PROFILE_AREA_FACTOR_RANGE = (0.42, 2.2)
+WRIST_LATEST_PREVIEW_INTERVAL_S = 0.5
 
 # Default target mode finds a compact, saturated object but explicitly removes
 # the two finger-marker masks. A left-click in the live preview locks detection
