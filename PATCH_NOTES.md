@@ -1349,3 +1349,18 @@ red at `(657,618,117,102)`. Both correctly touch the bottom image boundary.
   regression expectations, firmware maximum, and README hardware table.
 - The physical search continues with the gripper open so an off-screen yellow
   target can enter between the fingers without collision.
+
+## Patch 35 — prevent annotated-preview feedback into perception
+
+- Physical inspection caught a self-generated false target before any grasp:
+  the search helper had read `wrist_camera_latest.jpg`, which is the annotated
+  operator preview. Its yellow gripper-center cross was therefore a valid
+  yellow HSV blob located exactly between the fingers.
+- Live capture now atomically publishes two distinct files every 0.5 seconds:
+  `wrist_camera_latest_raw.jpg` for machine perception and
+  `wrist_camera_latest.jpg` for the human-readable annotated preview.
+- Search and control diagnostics must consume only the raw path. A regression
+  asserts that the controller input and operator preview cannot resolve to the
+  same file.
+- No close or grasp command was issued on the false detection. The arm remained
+  stopped at `[90,70,90,170,90,170]` with the gripper fully open.

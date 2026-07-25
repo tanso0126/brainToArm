@@ -17,7 +17,8 @@ from cognitive_load import AutonomyAllocator, CognitiveLoadEstimator
 from polyg_hid import (
     ADC_VOLTS_PER_COUNT, PolyGIHID, command_report, counts_to_adc_mv, decode_report)
 from eeg_dashboard import EEGSignalProcessor, analyze_signal_quality, sanitize_recording_name
-from wrist_vision import WristDetector, frame_quality
+from wrist_vision import (
+    LATEST_PREVIEW_PATH, LATEST_RAW_PATH, WristDetector, frame_quality)
 from wrist_search import PlanarSearchSafety, WristSearcher
 from capture_esp32_camera import correct_neutral_background, validate_frame_quality
 
@@ -553,6 +554,10 @@ def test_wrist_marker_and_target_geometry():
     print("[wrist] blue-left/red-right eye-in-hand geometry + quality gate")
     import numpy as np
     import cv2
+
+    check(LATEST_RAW_PATH != LATEST_PREVIEW_PATH
+          and "raw" in LATEST_RAW_PATH.stem,
+          "controller input is separate from the annotated operator preview")
 
     frame = np.full((720, 1280, 3), 125, dtype=np.uint8)
     # Small distractors are not allowed to replace the lower-center finger pair.

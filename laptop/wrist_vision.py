@@ -33,6 +33,17 @@ import config
 
 DEBUG_DIR = Path(__file__).resolve().parents[1] / "data" / "vision"
 LATEST_PREVIEW_PATH = DEBUG_DIR / "wrist_camera_latest.jpg"
+LATEST_RAW_PATH = DEBUG_DIR / "wrist_camera_latest_raw.jpg"
+
+
+def _atomic_write_jpeg(path, image):
+    """Publish a complete JPEG so concurrent readers never see a partial frame."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.stem + ".tmp" + path.suffix)
+    if not cv2.imwrite(str(temporary), image):
+        raise RuntimeError(f"could not write camera frame {temporary}")
+    temporary.replace(path)
 
 
 @dataclass(frozen=True)
@@ -601,11 +612,11 @@ def run_live(camera_name=None, snapshot=False, seconds=None):
             fps_ema = instant if fps_ema is None else 0.15 * instant + 0.85 * fps_ema
             rendered = annotate(frame, observation, fps=fps_ema)
             if now - latest_saved >= config.WRIST_LATEST_PREVIEW_INTERVAL_S:
-                DEBUG_DIR.mkdir(parents=True, exist_ok=True)
-                temporary = DEBUG_DIR / "wrist_camera_latest.tmp.jpg"
-                if not cv2.imwrite(str(temporary), rendered):
-                    raise RuntimeError(f"could not write live preview {temporary}")
-                temporary.replace(LATEST_PREVIEW_PATH)
+                # Never feed the annotated image back into perception: its
+                # yellow grasp cross and colored outlines are valid HSV pixels
+                # and can otherwise become self-generated false targets.
+                _atomic_write_jpeg(LATEST_RAW_PATH, frame)
+                _atomic_write_jpeg(LATEST_PREVIEW_PATH, rendered)
                 latest_saved = now
             if snapshot:
                 print(f"[wrist] saved {LATEST_PREVIEW_PATH}")
