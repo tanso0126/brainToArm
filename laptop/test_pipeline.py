@@ -20,6 +20,7 @@ from eeg_dashboard import EEGSignalProcessor, analyze_signal_quality, sanitize_r
 from wrist_vision import (
     LATEST_PREVIEW_PATH, LATEST_RAW_PATH, WristDetector, frame_quality)
 from wrist_search import PlanarSearchSafety, WristSearcher
+from visual_contact import JawBaseline, JawSample
 from capture_esp32_camera import correct_neutral_background, validate_frame_quality
 
 
@@ -709,6 +710,43 @@ def test_wrist_full_frame_search():
           "coordinated search stops immediately at first target-visible pose")
 
 
+def test_visual_gripper_contact():
+    print("[contact] scene-independent visual jaw obstruction")
+    from types import SimpleNamespace
+    samples = [
+        JawSample(90, 282.0, 1.2, 618.0, 701.0, 15),
+        JawSample(130, 251.0, 1.5, 618.0, 688.0, 15),
+        JawSample(150, 202.0, 1.8, 618.0, 681.0, 15),
+        JawSample(170, 126.0, 1.4, 618.0, 675.0, 15),
+        JawSample(180, 84.0, 1.5, 618.0, 672.0, 15),
+    ]
+    baseline = JawBaseline(samples, camera_name="test")
+    expected = baseline.expected(160)
+    check(abs(expected.opening_px - 164.0) < 1e-6,
+          "empty-jaw curve interpolates between calibrated commands")
+
+    def observation(opening):
+        return SimpleNamespace(gripper=SimpleNamespace(opening_px=opening))
+
+    free = baseline.assess(170, observation(128.0))
+    blocked = baseline.assess(170, observation(154.0))
+    missing = baseline.assess(170, None)
+    check(free.state == "FREE", "normal close matches the empty-jaw baseline")
+    check(blocked.contact and blocked.residual_px > blocked.threshold_px,
+          "physically wider jaw is classified as contact")
+    check(missing.state == "UNKNOWN",
+          "missing markers fail closed instead of inventing contact")
+    try:
+        JawBaseline([
+            samples[0],
+            JawSample(130, 290.0, 1.0, 618.0, 688.0, 10),
+            samples[-1],
+        ])
+        check(False, "non-monotonic empty-jaw calibration rejected")
+    except ValueError:
+        check(True, "non-monotonic empty-jaw calibration rejected")
+
+
 def test_pick_place():
     print("[pickplace] visual correction is preserved through grasp + delivery")
     import random
@@ -777,6 +815,7 @@ if __name__ == "__main__":
     test_camera_neutral_correction()
     test_wrist_marker_and_target_geometry()
     test_wrist_full_frame_search()
+    test_visual_gripper_contact()
     test_pick_place()
     test_servo_visibility_failure()
     print("\nALL TESTS PASSED")

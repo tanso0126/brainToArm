@@ -1398,3 +1398,41 @@ red at `(657,618,117,102)`. Both correctly touch the bottom image boundary.
   2,441-pixel component.
 - Added configuration validation and regression coverage for the fixed marker
   ROI. The arm stayed open and stationary during this perception-only change.
+
+## Patch 38 — scene-independent visual contact sensing
+
+- Rejected the invalid assumption that 2D target alignment proves graspable
+  depth. A single uncalibrated RGB frame has scale ambiguity, and target size,
+  color, background, or a scene-specific white board cannot be a safety gate.
+- Added `visual_contact.py`. It stores a one-time hardware-only empty-jaw curve:
+  commanded gripper angle, measured blue/red separation, robust MAD noise,
+  marker center, and sample count. It contains no object or venue features.
+- Contact is reported only when a sufficiently closed command leaves the
+  observed fingers significantly wider than the interpolated empty-jaw curve.
+  Missing calibration, missing markers, angles outside the measured range, and
+  inconsistent narrower-than-baseline geometry return `UNKNOWN`.
+- The calibration curve is validated as monotonic, versioned, atomically saved
+  under ignored local calibration data, and loaded fail-closed. Added synthetic
+  tests for interpolation, free close, physical obstruction, missing markers,
+  and invalid calibration.
+- This module deliberately detects physical jaw obstruction rather than
+  inventing metric monocular depth. It will gate the active approach/lift state
+  machine added next.
+- Added a physical calibration command that holds every arm joint at HOME,
+  releases any object at 90°, samples at least five unique raw frames at each
+  jaw command, records median/MAD geometry, validates the complete monotonic
+  curve, saves it atomically, and finishes with the empty jaw open. One serial
+  session is maintained throughout, avoiding the Uno reset between samples.
+- The first physical run was correctly rejected as non-monotonic and wrote no
+  baseline: firmware `DONE` preceded the real linkage, so the 90° sample still
+  showed a roughly 102 px closed jaw before the later 110° sample reached about
+  278 px. Calibration now waits for mechanical settling and discards multiple
+  newly published raw frames at every angle. Every exit path also makes a
+  best-effort 90° reopen, fixing the failed-run closed-jaw state.
+- The corrected physical run completed on the mounted AVerMedia camera at
+  1280x720. Median empty-jaw separations were 288.0, 279.5, 256.8, 201.1,
+  125.1, and 89.2 px at commands 90, 110, 130, 150, 170, and 180 degrees.
+  Per-angle MAD was 0.1..0.7 px, the curve was monotonic, and the ignored local
+  baseline was saved to `data/calibration/wrist_jaw_baseline.json`. These are
+  hardware/camera geometry values only; they do not encode the current object,
+  floor, background, or venue.
