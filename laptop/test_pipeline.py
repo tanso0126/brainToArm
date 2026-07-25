@@ -747,6 +747,73 @@ def test_visual_gripper_contact():
         check(True, "non-monotonic empty-jaw calibration rejected")
 
 
+def test_floor_motion_and_persistent_session():
+    print("[floor] absolute floor curves + persistent Uno command owner")
+    from arm_session import ArmSessionServer
+    from floor_motion import floor_pose, floor_vector, floor_waypoints
+
+    hover = floor_pose(90, "hover")
+    grasp = floor_pose(90, "grasp")
+    check(hover == [90, 124, 90, 180, 90, 170],
+          "reproduced floor hover uses the physically level 170-degree roll")
+    check(grasp == [90, 142, 90, 180, 90, 170],
+          "reproduced floor grasp reaches the absolute floor reference")
+    shifted = floor_pose(86, "hover")
+    check(shifted[config.J_SHOULDER] == 126
+          and shifted[config.J_ELBOW] == 86,
+          "elbow motion receives simultaneous shoulder height compensation")
+    shoulder_delta, elbow_delta = floor_vector(-4)
+    check(abs(shoulder_delta - 24 / 11) < 1e-9 and elbow_delta == -4,
+          "continuous floor vector cancels the measured vertical Jacobian")
+    waypoints = floor_waypoints(90, 78, "grasp", step=4)
+    check([pose[config.J_ELBOW] for pose in waypoints] == [86, 82, 78],
+          "bounded ground path includes its exact target elbow")
+    for pose in waypoints:
+        shoulder_change = pose[config.J_SHOULDER] - grasp[config.J_SHOULDER]
+        elbow_change = pose[config.J_ELBOW] - grasp[config.J_ELBOW]
+        check(abs(11 * shoulder_change + 6 * elbow_change) <= 5.5,
+              "rounded waypoints remain within half a shoulder-degree of floor height")
+    try:
+        floor_pose(77, "hover")
+        check(False, "uncalibrated floor extent rejected")
+    except ValueError:
+        check(True, "uncalibrated floor extent rejected")
+
+    class FakeArm:
+        def __init__(self):
+            self.pose = list(config.HOME_POSE)
+            self.moves = []
+
+        def send_angles(self, pose):
+            self.pose = list(pose)
+            self.moves.append(list(pose))
+            return "OK"
+
+        @staticmethod
+        def wait_done(timeout=15):
+            return True
+
+        def status(self):
+            return list(self.pose)
+
+        @staticmethod
+        def ping():
+            return True
+
+        @staticmethod
+        def close():
+            return None
+
+    fake = FakeArm()
+    server = ArmSessionServer("/tmp/brainToArm-test-arm.sock", arm=fake)
+    response = server.handle({
+        "command": "floor", "level": "hover", "elbow": 82, "step": 4,
+    })
+    check(response["pose"] == floor_pose(82, "hover")
+          and len(fake.moves) == 2,
+          "one persistent owner executes compensated waypoints without reopening Uno")
+
+
 def test_pick_place():
     print("[pickplace] visual correction is preserved through grasp + delivery")
     import random
@@ -816,6 +883,7 @@ if __name__ == "__main__":
     test_wrist_marker_and_target_geometry()
     test_wrist_full_frame_search()
     test_visual_gripper_contact()
+    test_floor_motion_and_persistent_session()
     test_pick_place()
     test_servo_visibility_failure()
     print("\nALL TESTS PASSED")

@@ -88,7 +88,10 @@ class ArmSerial:
             if not self.port:
                 raise RuntimeError("real arm requested but no serial board was found")
             try:
-                self.ser = serial.Serial(self.port, self.baud, timeout=0.2)
+                # TIOCEXCL prevents a second process from reopening this Uno and
+                # toggling DTR while a persistent arm session owns the board.
+                self.ser = serial.Serial(
+                    self.port, self.baud, timeout=0.2, exclusive=True)
             except Exception as exc:
                 raise RuntimeError(f"cannot open arm serial port {self.port}: {exc}") from exc
             time.sleep(2.0)  # wait out the auto-reset on connect

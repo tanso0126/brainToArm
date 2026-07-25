@@ -42,7 +42,8 @@ precise steps to bring it up. No other context is required.
 > it through 0–180°. The previously verified side-camera controller remains a
 > deliberately fixed-plane mode: it locks servo1 at 90°,
 > re-detects the object before every attempt, corrects
-> shoulder/elbow in image pixels, rotates wrist pitch and roll to 180°, opens the
+> shoulder/elbow in image pixels, rotates wrist pitch to 180° and the physically
+> level wrist roll to 170°, opens the
 > gripper at 90°, descends before closing it at 180°, verifies lift, transports,
 > releases, and verifies displacement. The complete sequence was physically
 > demonstrated on 2026-07-20: the white object was picked up, moved right, and
@@ -367,7 +368,7 @@ brainToArm/
   uses the MacBook side camera directly and detects the current tabletop
   object against a clean background, maps its pixel x-coordinate through the
   measured local elbow Jacobian, and executes the physically verified sequence:
-  fully open, pitch/roll 180°, descend in 2° steps, close, lift verification,
+  fully open, pitch 180° / level roll 170°, descend in 2° steps, close, lift verification,
   short transport, release, and displacement verification. The base is locked;
   a missing object, stale camera background, failed lift, or failed
   displacement stops the sequence rather than continuing blindly.

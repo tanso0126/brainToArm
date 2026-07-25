@@ -1436,3 +1436,31 @@ red at `(657,618,117,102)`. Both correctly touch the bottom image boundary.
   baseline was saved to `data/calibration/wrist_jaw_baseline.json`. These are
   hardware/camera geometry values only; they do not encode the current object,
   floor, background, or venue.
+
+## Patch 39 — persistent Uno session and absolute floor-plane motion
+
+- Corrected motor 6 from the stale 180° value to the operator-verified 170°
+  level wrist-roll command. Motor 4 wrist pitch remains 180° for the downward
+  floor view. Updated the planar controller, validation, documentation, and
+  regressions together.
+- Identified why repeated diagnostics were inefficient: every short Python
+  process reopened the Uno, toggled DTR, reset the firmware to HOME, moved to
+  the requested pose, and then exited. Added `arm_session.py`, a local
+  Unix-socket server that owns one exclusive serial handle for its entire
+  lifetime. Later commands reuse that handle and cannot reset the board between
+  pose, camera, gripper, or verification steps.
+- Added `floor_motion.py`. The robot and objects share a rigid floor, so target
+  depth no longer comes from apparent object size. The reproduced physical
+  reference is elbow 90° with shoulder 124° for hover and 142° for floor grasp,
+  wrist pitch 180°, open gripper 90°, and level roll 170°.
+- Encoded the previously measured local vertical Jacobian as a simultaneous
+  ground-plane vector. Since shoulder +1° contributes approximately +11 px
+  vertically and elbow +1° contributes +6 px, the compensated path uses
+  `d(shoulder)/d(elbow) = -6/11`. Moving elbow changes forward/back position
+  while the shoulder cancels the vertical component. Commands are bounded to
+  the physically calibrated elbow range 78..110° and emitted as complete
+  six-servo waypoints.
+- Added hardware-free tests for both absolute floor levels, the 170° wrist
+  level, continuous Jacobian cancellation, rounded bounded waypoints, rejection
+  outside the calibrated extent, and multi-command execution by one persistent
+  arm owner.
