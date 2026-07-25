@@ -1364,3 +1364,20 @@ red at `(657,618,117,102)`. Both correctly touch the bottom image boundary.
   same file.
 - No close or grasp command was issued on the false detection. The arm remained
   stopped at `[90,70,90,170,90,170]` with the gripper fully open.
+
+## Patch 36 — calibrate the real yellow target on a white workspace
+
+- With white paper under the object and the arm at
+  `[90,80,90,180,90,170]`, the physical target became visible between the open
+  fingers. The mounted camera measured it at `H=19..27, S>=45, V>=200`; the
+  previous saturation floor of 140 discarded every real target pixel.
+- The measured range isolated a single approximately 2,221-pixel component in
+  the raw frame while rejecting the lower-value wooden floor. The threshold is
+  based on the raw camera file introduced by Patch 35, never the UI overlay.
+- Targets normally touching the left, right, or top border remain invalid. A
+  bottom-clipped target is accepted only if both rigid finger markers exist, its
+  center lies horizontally between them, and it is vertically near the gripper.
+  This models an object entering the jaws without accepting arbitrary colored
+  clutter along the bottom edge.
+- Added regressions for the measured yellow hue, a valid bottom-clipped object
+  between the fingers, and invalid bottom-border clutter outside the gripper.

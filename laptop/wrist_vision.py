@@ -351,7 +351,29 @@ class WristDetector:
         blobs = _valid_blobs(
             mask, hsv,
             frame_area * config.WRIST_TARGET_MIN_AREA_RATIO,
-            frame_area * config.WRIST_TARGET_MAX_AREA_RATIO)
+            frame_area * config.WRIST_TARGET_MAX_AREA_RATIO,
+            allow_bottom=True)
+        if not blobs:
+            return None
+        spatially_valid = []
+        for blob in blobs:
+            x, y, blob_width, blob_height = blob.bbox
+            touches_bottom = y + blob_height >= height - 1
+            if touches_bottom:
+                # A graspable object naturally enters from below between the
+                # fingers. Permit that one border case only when both rigid
+                # finger markers prove its physical location; colored scene
+                # clutter elsewhere along the bottom remains invalid.
+                if gripper is None:
+                    continue
+                finger_x = sorted(
+                    [gripper.blue.center[0], gripper.red.center[0]])
+                if not (finger_x[0] <= blob.center[0] <= finger_x[1]):
+                    continue
+                if abs(blob.center[1] - gripper.center[1]) > 0.25 * height:
+                    continue
+            spatially_valid.append(blob)
+        blobs = spatially_valid
         if not blobs:
             return None
         reference = np.asarray(

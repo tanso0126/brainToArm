@@ -567,8 +567,10 @@ def test_wrist_marker_and_target_geometry():
     cv2.rectangle(frame, (430, 667), (529, 719), (255, 0, 0), -1)
     cv2.rectangle(frame, (705, 667), (797, 719), (0, 0, 255), -1)
     # A valid object can appear anywhere in the camera, including the upper half.
+    measured_yellow = tuple(int(value) for value in cv2.cvtColor(
+        np.uint8([[[22, 180, 245]]]), cv2.COLOR_HSV2BGR)[0, 0])
     target_box = cv2.boxPoints(((665, 180), (120, 55), 20)).astype(np.int32)
-    cv2.fillConvexPoly(frame, target_box, (0, 255, 255))  # vivid yellow target
+    cv2.fillConvexPoly(frame, target_box, measured_yellow)
 
     observation, _masks = WristDetector().detect(frame)
     check(observation.gripper is not None,
@@ -610,6 +612,22 @@ def test_wrist_marker_and_target_geometry():
     closed_observation, _ = WristDetector().detect(closed)
     check(closed_observation.gripper is not None,
           "measured closed-state tape profile remains valid")
+
+    bottom_target = np.full((720, 1280, 3), 245, dtype=np.uint8)
+    cv2.rectangle(bottom_target, (430, 667), (529, 719), (255, 0, 0), -1)
+    cv2.rectangle(bottom_target, (705, 667), (797, 719), (0, 0, 255), -1)
+    cv2.rectangle(bottom_target, (610, 645), (665, 719), measured_yellow, -1)
+    bottom_observation, _ = WristDetector().detect(bottom_target)
+    check(bottom_observation.target is not None,
+          "bottom-clipped yellow target between known fingers is accepted")
+
+    bottom_clutter = np.full((720, 1280, 3), 245, dtype=np.uint8)
+    cv2.rectangle(bottom_clutter, (430, 667), (529, 719), (255, 0, 0), -1)
+    cv2.rectangle(bottom_clutter, (705, 667), (797, 719), (0, 0, 255), -1)
+    cv2.rectangle(bottom_clutter, (900, 645), (970, 719), measured_yellow, -1)
+    clutter_observation, _ = WristDetector().detect(bottom_clutter)
+    check(clutter_observation.target is None,
+          "bottom-border yellow clutter outside the fingers is rejected")
 
     clipped = np.full((720, 1280, 3), 255, dtype=np.uint8)
     quality = frame_quality(clipped)
