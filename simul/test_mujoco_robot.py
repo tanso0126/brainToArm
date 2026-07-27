@@ -22,6 +22,8 @@ from simul.mujoco_robot import (  # noqa: E402
     set_servo_pose,
     site_position,
 )
+from simul.alignment_env import WristAlignmentEnv  # noqa: E402
+from simul.alignment_policy import AlignmentPolicyRunner  # noqa: E402
 
 
 class MuJoCoRobotTests(unittest.TestCase):
@@ -103,6 +105,48 @@ class MuJoCoRobotTests(unittest.TestCase):
             mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, "wrist"),
             1,
         )
+
+    def test_alignment_environment_hides_privileged_state(self):
+        env = WristAlignmentEnv(
+            domain_randomization=False, image_augmentation=False, max_steps=20)
+        try:
+            observation, info = env.reset(seed=12, options={
+                "current_elbow": 78, "target_elbow": 100, "target_y": 0})
+            self.assertEqual(
+                set(observation), {"image", "servo", "previous_action"})
+            self.assertNotIn("target_elbow", observation)
+            self.assertIn("target_elbow", info)
+            for _ in range(20):
+                observation, _, terminated, truncated, info = env.step(
+                    env.expert_action())
+                if terminated or truncated:
+                    break
+            self.assertTrue(info["success"])
+            self.assertLessEqual(env.steps, 12)
+        finally:
+            env.close()
+
+    def test_release_policy_direction_and_two_vote_stop(self):
+        runner = AlignmentPolicyRunner()
+        env = WristAlignmentEnv(
+            domain_randomization=False, image_augmentation=False)
+        try:
+            def recommendation(current, target, geometry_aligned=False):
+                observation, _ = env.reset(seed=5, options={
+                    "current_elbow": current, "target_elbow": target,
+                    "target_y": 0})
+                frame = np.transpose(observation["image"], (1, 2, 0))
+                return runner.recommend_elbow_delta(
+                    frame, env.commanded_pose,
+                    geometry_aligned=geometry_aligned)
+
+            self.assertGreater(recommendation(78, 105)[0], 0)
+            self.assertLess(recommendation(105, 78)[0], 0)
+            delta, _action, aligned = recommendation(90, 90, geometry_aligned=True)
+            self.assertEqual(delta, 0)
+            self.assertGreaterEqual(aligned, 0.65)
+        finally:
+            env.close()
 
 
 if __name__ == "__main__":

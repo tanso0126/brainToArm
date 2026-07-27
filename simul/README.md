@@ -72,3 +72,17 @@ python3 simul/test_mujoco_robot.py
 The smoke sheet is written to ignored
 `simul/generated/mujoco_smoke.png`. Expected tool-center heights are about 41 mm
 at the hover reference and 8 mm at the grasp reference.
+
+## Domain-randomized alignment policy
+
+`alignment_env.py` exposes a Gymnasium environment whose observation contains
+only wrist RGB, commanded servo angles, and the previous action. It randomizes
+object appearance, camera installation, lighting, exposure, white balance,
+noise, blur, and small image transforms. Privileged world/object positions are
+available only to reset, reward, and the expert teacher.
+
+`train_alignment.py` performs DAgger-style disturbed behavior cloning, evaluates
+held-out frames and randomized closed-loop episodes, and exports TorchScript.
+The reviewed v1 artifact and metrics are tracked in `models/`; ordinary datasets
+and checkpoints remain ignored. See `TRAINING_REPORT.md` for exact numbers,
+limitations, and the fail-closed Claude integration contract.

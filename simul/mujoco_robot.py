@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from html import escape
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable, Mapping
 import math
@@ -53,6 +54,13 @@ _SHOULDER_HOME_JOINT = -30.0
 _ELBOW_SCALE = 0.200
 _ELBOW_REFERENCE_JOINT = -70.0
 _WRIST_PITCH_SCALE = -1.500
+
+
+@lru_cache(maxsize=1)
+def _prepared_meshes() -> Path:
+    """Validate immutable source geometry once per Python process."""
+
+    return extract_sources()
 
 
 @dataclass(frozen=True)
@@ -156,6 +164,13 @@ def _range_text(values: tuple[float, float]) -> str:
     return f"{_f(values[0])} {_f(values[1])}"
 
 
+def _rgb_text(value: Iterable[float], name: str) -> str:
+    rgb = tuple(float(channel) for channel in value)
+    if len(rgb) != 3 or any(not 0.0 <= channel <= 1.0 for channel in rgb):
+        raise ValueError(f"{name} must contain three values in [0, 1]")
+    return " ".join(_f(channel) for channel in rgb)
+
+
 def build_mjcf(
     spec: RobotSpec | None = None,
     *,
@@ -179,12 +194,30 @@ def build_mjcf(
     # Physical tape convention in the upright wrist frame: blue appears on the
     # left jaw and red on the right jaw.
     camera_roll = float(parameters.get("camera_roll", -90.0))
+    floor_rgb1 = _rgb_text(parameters.get("floor_rgb1", (0.88, 0.88, 0.86)),
+                           "floor_rgb1")
+    floor_rgb2 = _rgb_text(parameters.get("floor_rgb2", (0.62, 0.64, 0.66)),
+                           "floor_rgb2")
+    target_rgb = _rgb_text(parameters.get("target_rgb", (1.0, 0.82, 0.02)),
+                           "target_rgb")
+    target_shape = str(parameters.get("target_shape", "box"))
+    if target_shape not in {"box", "cylinder", "sphere"}:
+        raise ValueError("target_shape must be box, cylinder, or sphere")
+    target_size = float(parameters.get("target_size", 0.020))
+    if not 0.012 <= target_size <= 0.030:
+        raise ValueError("target_size must be in [0.012, 0.030] meters")
+    if target_shape == "box":
+        target_size_text = f"{_f(target_size)} {_f(target_size)} {_f(target_size * 0.9)}"
+    elif target_shape == "cylinder":
+        target_size_text = f"{_f(target_size)} {_f(target_size * 0.9)}"
+    else:
+        target_size_text = _f(target_size)
     if not 0.94 <= link_scale <= 1.06:
         raise ValueError("link_scale must remain inside the calibrated ±6% envelope")
     if not 55.0 <= camera_fovy <= 90.0:
         raise ValueError("camera_fovy must be in [55, 90] degrees")
 
-    meshes = extract_sources()
+    meshes = _prepared_meshes()
     mesh_path = lambda name: escape(str(meshes / name), quote=True)
     upper = spec.upper_arm_m * link_scale
     fore = spec.forearm_m * link_scale
@@ -216,7 +249,7 @@ def build_mjcf(
     </default>
   </default>
   <asset>
-    <texture name="floor_tex" type="2d" builtin="checker" rgb1="0.88 0.88 0.86" rgb2="0.62 0.64 0.66" width="512" height="512"/>
+    <texture name="floor_tex" type="2d" builtin="checker" rgb1="{floor_rgb1}" rgb2="{floor_rgb2}" width="512" height="512"/>
     <material name="floor_mat" texture="floor_tex" texrepeat="4 4" reflectance="0.08"/>
     <mesh name="base_case" file="{mesh_path('Alt_Kasa.stl')}" scale="0.001 0.001 0.001"/>
     <mesh name="base_rotor" file="{mesh_path('Alt_Govde.stl')}" scale="0.001 0.001 0.001"/>
@@ -278,7 +311,7 @@ def build_mjcf(
 
     <body name="target" pos="0.46 0 0.018">
       <freejoint name="target_free"/>
-      <geom name="target_geom" type="box" size="0.020 0.020 0.018" mass="0.035" rgba="1 0.82 0.02 1" friction="1.1 0.01 0.001"/>
+      <geom name="target_geom" type="{target_shape}" size="{target_size_text}" mass="0.035" rgba="{target_rgb} 1" friction="1.1 0.01 0.001"/>
     </body>
   </worldbody>
   <actuator>
@@ -384,6 +417,26 @@ def place_target_below_tool(
     return data.qpos[address:address + 3].copy()
 
 
+def place_target(
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    xyz: Iterable[float],
+) -> np.ndarray:
+    """Place the free target for reset/reward code, never for actor input."""
+
+    position = np.asarray(tuple(xyz), dtype=np.float64)
+    if position.shape != (3,) or not np.isfinite(position).all():
+        raise ValueError("target position must be three finite world coordinates")
+    joint = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "target_free")
+    address = int(model.jnt_qposadr[joint])
+    data.qpos[address:address + 3] = position
+    data.qpos[address + 3:address + 7] = (1.0, 0.0, 0.0, 0.0)
+    velocity_address = int(model.jnt_dofadr[joint])
+    data.qvel[velocity_address:velocity_address + 6] = 0
+    mujoco.mj_forward(model, data)
+    return position.copy()
+
+
 def render_rgb(
     model: mujoco.MjModel,
     data: mujoco.MjData,
@@ -420,6 +473,6 @@ def model_summary(model: mujoco.MjModel) -> dict[str, object]:
 
 __all__ = [
     "RobotSpec", "SERVO_NAMES", "build_mjcf", "command_servo_pose",
-    "load_model", "model_summary", "place_target_below_tool", "render_rgb",
+    "load_model", "model_summary", "place_target", "place_target_below_tool", "render_rgb",
     "servo_to_joint_targets", "set_servo_pose", "site_position",
 ]

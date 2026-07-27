@@ -1587,6 +1587,35 @@ the brain signal will not touch the arm logic.
   sheet is ignored and therefore cannot pollute source control or training
   reproducibility.
 
+## Patch 43 — domain-randomized local alignment policy
+
+- Added `alignment_env.py`, a Gymnasium eye-in-hand environment whose deployed
+  observation is strictly RGB + six commanded angles + previous action. True
+  object pose and desired elbow exist only in reset/reward/teacher metadata.
+- Randomized target color, shape, and 12–28 mm size; camera position/FOV;
+  lighting, exposure, white balance, gamma, blur, noise, rotation, translation,
+  and scale. Refactored resets to mutate one loaded MuJoCo model instead of
+  recompiling a Metal renderer per episode, fixing both very slow repeated STL
+  validation and an Apple `compiled variants footprint` resource failure.
+- Added `alignment_policy.py` with a compact location-preserving CNN, a
+  TorchScript exporter, and a plan-only runner that cannot access hardware.
+  The two heads predict bounded elbow direction/magnitude and alignment
+  probability. The latter is explicitly a second vote and cannot authorize a
+  stop without the existing independent marker/candidate geometry gate.
+- Added `train_alignment.py` with disturbed teacher rollouts, explicit aligned
+  examples, MPS-compatible training, held-out direction/stop metrics, best-model
+  selection, and randomized closed-loop evaluation.
+- Trained the tracked 2.1 MB `alignment_policy_v1.ts` on 20,000 randomized
+  frames for 16 epochs. It reached 97.80% held-out direction accuracy. In a
+  later disjoint 500-seed simulated evaluation, 499/500 episodes aligned within
+  20 steps (99.8%, mean 4.664). These are simulation-only results; the model is
+  not represented as physically validated.
+- Added a model card/integration contract. V1 is deliberately scoped to one
+  visible selected candidate and local floor alignment over elbow 78..110.
+  FastSAM selection, search, descent, grasp/contact/lift, recovery, and the real
+  execution gate remain deterministic and fail closed. Real use must begin in
+  shadow mode with `FLOOR_GRASP_EXECUTE_VERIFIED=False`.
+
 ## Patch 42 — hardware-measured floor Jacobian and corrected depth alignment
 
 ### Intent

@@ -1,0 +1,30 @@
+{
+  "artifact": "alignment_policy_v1.ts",
+  "sha256": "becbb150a282299707b0b4f7c122ad4091cf259bc60d8ea4b8f29fc36fc1d7d6",
+  "training": {
+    "seed": 20260727,
+    "samples": 20000,
+    "epochs": 16,
+    "device": "mps",
+    "validation_mae": 0.0927600637,
+    "validation_direction_accuracy": 0.9779661298,
+    "validation_stop_accuracy": 0.9343333244,
+    "validation_stop_recall": 0.9609375,
+    "validation_false_stop_rate": 0.0728813559
+  },
+  "extended_closed_loop_evaluation": {
+    "seed_start": 20290727,
+    "episodes": 500,
+    "successes": 499,
+    "success_rate": 0.998,
+    "mean_steps": 4.664,
+    "maximum_steps": 20
+  },
+  "actor_inputs": [
+    "wrist_rgb_128x72",
+    "normalized_commanded_servo_angles_6",
+    "previous_action_1"
+  ],
+  "output": ["normalized_elbow_action", "aligned_probability"],
+  "hardware_verified": false
+}
