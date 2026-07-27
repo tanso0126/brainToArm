@@ -254,8 +254,19 @@ def run_constant_x_grasp(client, execute=False, advance_mm=-5.0,
     start = list(VECTOR_START_POSE)
     current = list(client.request({"command": "status"})["pose"])
 
-    # Select/reject at the current observation pose before any arm command. If
-    # every reachable candidate is vetoed, this returns a safe no-motion stop.
+    # Selection/reject must happen AT the vector start pose: choosing from a
+    # different observation pose and then moving makes every candidate pixel
+    # jump beyond the identity bound, which previously forced a safe stop
+    # ("selected target was not reacquired at vector start"). Move first (the
+    # transition is collision-checked), then look, then choose. Dry runs stay
+    # motionless and plan from the current view instead.
+    if execute:
+        if not safety.transition_is_safe(current, start):
+            raise RuntimeError(
+                "transition to vector start failed collision model")
+        mover.slow_move(start, final_settle=1.0)
+        current = list(client.request({"command": "status"})["pose"])
+
     initial_frame, initial_scene, target = acquire_initial_target(
         detector, target_selector=target_selector,
         reject_count=reject_count, pose=current,
@@ -295,21 +306,22 @@ def run_constant_x_grasp(client, execute=False, advance_mm=-5.0,
                 reject_count=0, pose=current, frame_source=frame_source)
     if target is None:
         print("[look-reach] no reachable non-vetoed target; no motion")
-        return {"state": "no-target", "moved": False}
+        return {"state": "no-target", "moved": bool(execute)}
     start[config.J_BASE] = int(mover.base_angle)
 
-    if not safety.transition_is_safe(current, start):
-        raise RuntimeError("transition to vector start failed collision model")
     if execute:
-        mover.slow_move(start, final_settle=1.0)
-
-        frame = frame_source(discard=2)
+        # Selection already happened at the vector start view; one fresh
+        # confirmation frame guards against a transient segmentation.
+        frame = frame_source(discard=1)
         scene, observation = detector.scene(frame)
         target = target_selector.match(scene)
         if target is None:
             raise RuntimeError(
                 "selected target was not reacquired at vector start")
     else:
+        if not safety.transition_is_safe(current, start):
+            raise RuntimeError(
+                "transition to vector start failed collision model")
         scene, observation = initial_scene, None
 
     gripper = scene.gripper
