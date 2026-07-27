@@ -592,6 +592,62 @@ footer {
 .sim-bottom-callout span { color: var(--sim-text2); font-size: 10px; line-height: 1.5; }
 .sim-bottom-callout strong { display: block; margin-bottom: 2px; color: var(--sim-text); font-size: 11px; }
 
+.sim-engine-loading { min-height: 620px; display: grid; place-items: center; }
+.sim-engine-empty { max-width: 520px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.sim-engine-empty svg { color: var(--sim-primary); }
+.sim-engine-empty h2 { margin: 8px 0 0; font-size: 24px; }
+.sim-engine-empty p { margin: 0 0 10px; color: var(--sim-text2); font-size: 12px; line-height: 1.6; }
+.sim-engine-error { min-height: 42px; display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 0 13px; border: 1px solid rgba(227,15,50,.2); border-radius: 9px; color: var(--sim-error); background: #fff3f4; font-size: 11px; font-weight: 700; }
+
+.sim-3d-layout { grid-template-columns: minmax(0, 2.2fr) minmax(330px, .78fr); }
+.sim-frame-wrap { position: relative; width: 100%; overflow: hidden; background: #090a0c; }
+.sim-frame-wrap.overview { aspect-ratio: 16 / 9; }
+.sim-frame-wrap.wrist { aspect-ratio: 16 / 9; }
+.sim-frame-wrap img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.sim-frame-hud { position: absolute; right: 10px; bottom: 10px; left: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; pointer-events: none; }
+.sim-frame-hud span { min-height: 27px; display: inline-flex; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid rgba(255,255,255,.12); border-radius: 6px; color: rgba(255,255,255,.82); background: rgba(8,10,13,.72); backdrop-filter: blur(8px); font: 600 9px/1 var(--font-mono), monospace; }
+.sim-3d-lower { grid-template-columns: minmax(0, 1.35fr) minmax(230px, .65fr); }
+
+.sim-joint-list { padding: 8px 12px 12px; }
+.sim-joint-list > div { position: relative; min-height: 40px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; border-bottom: 1px solid var(--sim-border); overflow: hidden; }
+.sim-joint-list > div:last-child { border-bottom: 0; }
+.sim-joint-list span { color: var(--sim-text2); font-size: 9px; }
+.sim-joint-list strong { font: 700 10px/1 var(--font-mono), monospace; }
+.sim-joint-list i { position: absolute; right: 0; bottom: 3px; left: 0; height: 2px; border-radius: 2px; background: linear-gradient(90deg, var(--sim-primary) var(--joint-value), #eeeeec var(--joint-value)); }
+
+.sim-placement-map { width: 100%; min-height: 205px; display: block; touch-action: none; background: #fafaf8; cursor: crosshair; }
+.sim-placement-map .workspace-band { fill: none; stroke: #d8d8d4; stroke-width: 24; }
+.sim-placement-map .workspace-band.inner { stroke: #fafaf8; stroke-width: 16; }
+.sim-placement-map .workspace-center { stroke: #d0d0cd; stroke-width: 1; stroke-dasharray: 3 4; }
+.sim-placement-map .workspace-base { fill: #202020; }
+.sim-placement-map text { fill: #777; font: 500 7px/1 var(--font-mono), monospace; pointer-events: none; }
+.sim-placement-map g { cursor: grab; }
+.sim-placement-map g circle { stroke: rgba(0,0,0,.18); stroke-width: 1; }
+.sim-placement-map g.selected circle, .sim-placement-map g.selected rect { stroke: var(--sim-primary); stroke-width: 3; }
+.sim-placement-map g.basket rect { fill: rgba(55,109,250,.18); stroke: var(--sim-blue); stroke-width: 1.5; }
+
+.sim-scene-list { max-height: 220px; overflow: auto; padding: 7px; border-bottom: 1px solid var(--sim-border); }
+.sim-scene-list button { width: 100%; min-height: 45px; display: grid; grid-template-columns: 14px 1fr 16px; align-items: center; gap: 9px; padding: 5px 8px; border: 1px solid transparent; border-radius: 7px; color: var(--sim-text); text-align: left; background: transparent; cursor: pointer; }
+.sim-scene-list button:hover, .sim-scene-list button.active { border-color: rgba(255,93,0,.22); background: var(--sim-primary-soft); }
+.sim-scene-list button.rejected { color: var(--sim-error); }
+.sim-scene-list button > i { width: 12px; height: 12px; border: 2px solid rgba(0,0,0,.08); border-radius: 50%; }
+.sim-scene-list button > span, .sim-scene-list button strong, .sim-scene-list button small { min-width: 0; display: block; }
+.sim-scene-list button strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.sim-scene-list button small { margin-top: 3px; color: var(--sim-text3); font-size: 8px; }
+.sim-scene-list button.basket > i { border: 1px solid var(--sim-blue); border-radius: 2px; background: rgba(55,109,250,.2); }
+
+.sim-object-editor.sim-3d-editor { display: flex; flex-direction: column; gap: 9px; padding: 12px; }
+.sim-object-editor.sim-3d-editor label { display: grid; grid-template-columns: 42px 1fr auto; align-items: center; gap: 7px; }
+.sim-object-editor.sim-3d-editor label b { color: var(--sim-text2); font: 600 8px/1 var(--font-mono), monospace; }
+.sim-object-editor.sim-3d-editor input, .sim-object-editor.sim-3d-editor select { min-width: 0; min-height: 29px; padding: 0 7px; border: 1px solid var(--sim-border); border-radius: 5px; color: var(--sim-text); background: #fff; font-size: 9px; }
+.sim-object-editor.sim-3d-editor input[type="range"] { grid-column: 2 / -1; width: 100%; padding: 0; accent-color: var(--sim-primary); }
+.sim-object-editor.sim-3d-editor input[type="color"] { padding: 3px; }
+.sim-object-editor.sim-3d-editor > div { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 3px; }
+.sim-save-button, .sim-delete-button { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--sim-border); border-radius: 6px; background: #fff; cursor: pointer; font-size: 9px; font-weight: 700; }
+.sim-save-button { color: var(--sim-primary); }
+.sim-delete-button { color: var(--sim-error); }
+.sim-empty.compact { min-height: 82px; padding: 12px; text-align: center; line-height: 1.5; }
+
 .sim-lab button:disabled { opacity: .38; cursor: not-allowed; transform: none; }
 
 @media (max-width: 1180px) {
@@ -609,6 +665,7 @@ footer {
   .sim-status-strip > div:nth-child(2) { border-right: 0; }
   .sim-status-strip > div:nth-child(-n+2) { border-bottom: 1px solid var(--sim-border); }
   .sim-lower-row, .sim-side-column, .sim-bottom-callout { grid-template-columns: 1fr; }
+  .sim-3d-lower { grid-template-columns: 1fr; }
   .sim-event-card { grid-column: auto; }
   .sim-world-canvas { height: 460px; }
   .sim-object-tools > span { display: none; }

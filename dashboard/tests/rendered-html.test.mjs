@@ -21,7 +21,7 @@ test("server-renders the shared-autonomy simulation studio", async () => {
   assert.match(html, /<title>brainToArm · Shared Autonomy Studio<\/title>/i);
   assert.match(html, /Simulation Studio/);
   assert.match(html, /시뮬레이션 작업실/);
-  assert.match(html, /물체를 놓고, 로봇의 선택을 지켜보세요/);
+  assert.match(html, /MuJoCo 3D 엔진에 연결하는 중입니다/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
 

@@ -135,22 +135,36 @@ precise steps to bring it up. No other context is required.
 > [`docs/AUTONOMOUS_GRASP_VALIDATION.md`](docs/AUTONOMOUS_GRASP_VALIDATION.md);
 > general physical success is not claimed yet.
 
-> ### ✅ Human-facing multi-object simulation + ErrP handoff
+> ### ✅ Human-facing MuJoCo multi-object studio + ErrP handoff
 >
-> The local dashboard now opens on a direct-manipulation simulation studio.
-> Several objects and the destination basket can be dragged around the table;
-> the simulated wrist view is rendered, re-read as RGB pixels, segmented, and
-> used to choose a candidate. A rejection may arrive before grasp, while
-> carrying, after basket drop, or after completion. The robot returns that
-> object to its saved origin, remembers the veto, and tries another; rejecting
-> every object clears the veto set and begins a new cycle.
+> The dashboard now drives the existing `simul/` MuJoCo model rather than a 2D
+> kinematic mock. Its main viewport and wrist panel are JPEG streams rendered
+> from the live model containing the original STL visuals, bounded servo
+> actuators, free object bodies, contact friction, and a shallow destination
+> tray. Object selection is gated by connected components read from the rendered
+> wrist RGB frame; MuJoCo coordinates are reserved for dynamics, saved origins,
+> and physical lift/follow verification.
+>
+> The compact top-down widget is only a scene-authoring control. It edits object
+> shape, color, size, radius, yaw, and tray placement inside the reachable
+> annulus; it is not used as a control observation or success signal. The studio
+> adds servo-1 yaw for the final repaired-arm target configuration so objects can
+> be physically separated. The promoted policy/evaluation model remains fixed
+> base and unchanged. The real servo 1 was last observed non-responsive, so yaw
+> behavior is a simulation target until that hardware is repaired again.
+>
+> A rejection may arrive before grasp, while carrying, after tray drop, or after
+> completion. A late rejection causes a real simulated re-grasp, lift, return,
+> release near the saved origin, rejection-memory update, and camera search for
+> another object. Rejecting every eligible object clears the set and begins a
+> new cycle.
 >
 > Manual and mock ErrP modes work without hardware. The PolyG-I mode uses the
 > existing native HID acquisition plus new onset-locked calibration/decision
 > endpoints, so tomorrow's device session only requires starting acquisition,
 > recording eight seconds of rest, and selecting `PolyG-I` in the simulator.
-> Run `python3 laptop/eeg_dashboard.py`; detailed operating notes and the honest
-> simulation/physics boundary are in [`QHAND.md`](QHAND.md).
+> Run `python3 laptop/eeg_dashboard.py`; detailed operating notes and the
+> sim-to-real boundary are in [`QHAND.md`](QHAND.md).
 
 ---
 

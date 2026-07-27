@@ -2366,3 +2366,53 @@ serial port and issued no physical motion.
   by browser extensions (the reported environment added `webcrx=""`).
 - This fixes the actual text mismatch without hiding mismatches inside the
   application tree.
+
+## Patch 60 — replace the 2D mock with the real MuJoCo 3D studio
+
+### Why
+
+The earlier browser tab animated a planar canvas scene. Although useful for
+testing rejection semantics, it was not the requested `simul/` environment and
+could not establish collision, grasp, lift, release, or eye-in-hand behavior.
+It has been replaced as the simulation source of truth. A compact top-down
+diagram remains only as a scene-placement control.
+
+### MuJoCo runtime
+
+- Added `simul/studio.py`, a persistent, hardware-isolated engine built from the
+  existing calibrated MuJoCo robot and original STL visuals.
+- Added editable MuJoCo box/cylinder/sphere free bodies and a physical shallow
+  destination tray. Placement is clamped to the modeled reachable annulus.
+- Added live overview and gripper-camera JPEG rendering. Target candidates are
+  gated from wrist RGB color components, with the blue/red finger markers
+  excluded, rather than read directly from simulator object coordinates.
+- Added bounded two-degree servo waypoints, tool/body/floor safety checks, and
+  physical grasp validation: a grasp passes only after the free body rises and
+  follows the gripper.
+- Added a reversible task machine for scan, reach, grasp, delivery, evaluation,
+  and completion. Rejection at any phase is supported; a late rejection
+  physically re-grasps a delivered object, returns it near its saved origin,
+  records the object ID, and selects a different object. Exhausting all objects
+  clears the rejection cycle.
+- The interactive studio has a target-configuration base-yaw joint so a repaired
+  seven-axis task can be exercised. It is explicitly separated from the existing
+  fixed-base policy and is not presented as proof that the currently failed real
+  motor 1 works.
+
+### Browser and EEG bridge
+
+- Replaced `SimulationLab.tsx` with live MuJoCo overview/wrist views, phase and
+  detector status, six-servo telemetry, object/tray editing, event history,
+  rejection memory, and manual/mock/PolyG-I ErrP controls.
+- Extended `eeg_dashboard.py` with lazy simulation lifecycle management, scene
+  CRUD, start/stop/reset/reject commands, status, and binary camera-frame routes.
+- Kept initial render content deterministic, preserving the hydration fix.
+
+### Verification
+
+- `simul/test_studio.py` checks STL/RGB/target-yaw construction, safe scene
+  clamping, physical delivery, late tray recovery, return, rejection memory,
+  next-object selection, and second physical delivery.
+- The existing fixed-base MuJoCo model, complete-task physics suite, dashboard
+  build/render tests, lint, Python compilation, and EEG pipeline are rerun as
+  regression gates for this patch.

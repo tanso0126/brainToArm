@@ -18,6 +18,7 @@ import re
 import socket
 import statistics
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -162,6 +163,19 @@ class EEGDashboardService:
         self._errp_lock = threading.Lock()
         self._errp_baseline_ready = False
         self._errp_last = None
+        self._simulation = None
+
+    @property
+    def simulation(self):
+        """Lazily start MuJoCo without making EEG-only startup depend on OpenGL."""
+        with self._lock:
+            if self._simulation is None:
+                root = str(REPO_ROOT)
+                if root not in sys.path:
+                    sys.path.insert(0, root)
+                from simul.studio import MuJoCoStudio
+                self._simulation = MuJoCoStudio()
+            return self._simulation
 
     def device_available(self):
         with self._lock:
@@ -240,6 +254,9 @@ class EEGDashboardService:
             self.stop()
         except (RuntimeError, TimeoutError, OSError):
             pass
+        simulation, self._simulation = self._simulation, None
+        if simulation is not None:
+            simulation.close()
 
     def _capture_loop(self):
         try:
@@ -607,6 +624,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _binary(self, body, content_type):
+        self.send_response(HTTPStatus.OK)
+        self._cors()
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _body(self):
         length = int(self.headers.get("Content-Length", "0") or "0")
         if length > 64 * 1024:
@@ -624,6 +649,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/api/status":
                 self._json(self.service.status())
+                return
+            if parsed.path == "/api/simulation/status":
+                self._json(self.service.simulation.status())
+                return
+            if parsed.path == "/api/simulation/frame":
+                query = parse_qs(parsed.query)
+                camera = query.get("camera", ["overview"])[0]
+                width = int(query.get("width", ["960"])[0])
+                height = int(query.get("height", ["540"])[0])
+                self._binary(
+                    self.service.simulation.render_jpeg(
+                        camera=camera, width=width, height=height),
+                    "image/jpeg",
+                )
                 return
             if parsed.path == "/api/data":
                 query = parse_qs(parsed.query)
@@ -682,6 +721,28 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 payload = self.service.calibrate_errp(body.get("seconds"))
             elif parsed.path == "/api/errp/check":
                 payload = self.service.check_errp(body.get("marker", "SIM_DECISION"))
+            elif parsed.path == "/api/simulation/start":
+                payload = self.service.simulation.start()
+            elif parsed.path == "/api/simulation/stop":
+                payload = self.service.simulation.stop()
+            elif parsed.path == "/api/simulation/reset":
+                payload = self.service.simulation.reset()
+            elif parsed.path == "/api/simulation/reject":
+                payload = self.service.simulation.reject()
+            elif parsed.path == "/api/simulation/objects/add":
+                payload = self.service.simulation.add_object(
+                    shape=body.get("shape", "box"),
+                    color=body.get("color"),
+                    label=body.get("label"),
+                )
+            elif parsed.path == "/api/simulation/objects/update":
+                payload = self.service.simulation.update_object(
+                    body.get("id", ""), body)
+            elif parsed.path == "/api/simulation/objects/delete":
+                payload = self.service.simulation.delete_object(body.get("id", ""))
+            elif parsed.path == "/api/simulation/basket/update":
+                payload = self.service.simulation.update_basket(
+                    body.get("xMm"), body.get("yMm", 0))
             else:
                 self._json({"error": "API 경로를 찾을 수 없습니다"}, HTTPStatus.NOT_FOUND)
                 return

@@ -1,22 +1,29 @@
-# brainToArm quick handoff — simulation + EEG demo
+# brainToArm quick handoff — MuJoCo 3D + EEG demo
 
 Updated: 2026-07-28 (KST)
 
-## 1. Immediate objective
+## 1. What the demo is now
 
-The physical arm is intentionally out of scope for the next demo. The deliverable
-is a safe local simulation in which a participant can:
+The earlier browser-only 2D simulator has been removed. The default dashboard
+workspace is a client for a live MuJoCo engine under `simul/`.
 
-1. place several objects and a destination basket;
-2. watch a wrist-camera-style RGB view detect and choose an object;
-3. watch the simulated arm grasp, carry, and place it;
-4. send a late or early “wrong object” signal;
-5. see the robot retrieve the object if necessary, return it to its exact origin,
-   remember the rejection, and try the next object;
-6. replace the manual signal with the PolyG-I ErrP detector without changing the
-   task state machine.
+The participant can:
 
-## 2. One-command launch
+1. create and arrange several 3D objects and a destination tray;
+2. see the original robot STL assembly in a MuJoCo overview camera;
+3. see the robot's eye-in-hand RGB camera, including the blue-left/red-right
+   finger markers;
+4. run camera-gated search, contact-physics grasp, lift, carry, and release;
+5. send “wrong object” before grasp, during movement, after drop, or after the
+   task says complete;
+6. watch a late rejection physically re-grasp the delivered free body, return it
+   near its saved origin, remember the rejection, and choose another object;
+7. use the same rejection entry point from a manual button, mock ErrP, or the
+   PolyG-I onset-locked detector.
+
+No physical serial port or webcam is opened by this simulation.
+
+## 2. Start
 
 From the repository root:
 
@@ -26,179 +33,188 @@ python3 laptop/eeg_dashboard.py
 
 This starts:
 
-- the local API at `http://127.0.0.1:8765`;
-- the UI at `http://localhost:3000`;
-- the existing EEG monitor;
-- the new simulation studio, which is the default tab.
+- UI: `http://localhost:3000`
+- local API: `http://127.0.0.1:8765`
+- the EEG monitor
+- the MuJoCo studio API, loaded lazily on first simulation request
 
-The simulation itself runs even when the EEG API/device is offline. A separate
-UI launch is:
+Separate processes for debugging:
 
 ```bash
-cd dashboard
-npm run dev
+python3 laptop/eeg_dashboard.py --api-only --no-browser
+cd dashboard && npm run dev -- --port 3000
 ```
 
-## 3. Simulation Studio
+## 3. Files and boundaries
 
-Main file: `dashboard/app/SimulationLab.tsx`
+| File | Responsibility |
+|---|---|
+| `simul/studio.py` | editable MuJoCo scene, RGB detection, bounded motion, reversible physics task |
+| `simul/mujoco_robot.py` | original fixed-base training/evaluation robot and calibrated planar mapping |
+| `dashboard/app/SimulationLab.tsx` | 3D/wrist streams, scene controls, state/servo/event UI, ErrP bridge |
+| `laptop/eeg_dashboard.py` | local HTTP ownership of EEG and MuJoCo services |
+| `simul/test_studio.py` | scene, rendering, delivery, late rejection, and next-object regression tests |
 
-### Direct manipulation
+The original `mujoco_robot.py`, trained TorchScript policy, and its reported
+fixed-base evaluation remain unchanged. `studio.py` builds a separate runtime
+MJCF from it and adds:
 
-- Drag any table object to a new location while stopped.
-- Drag the dashed blue basket.
-- Add circles, blocks, or capsules.
-- Select an object to rename it, change its color, or change its size.
-- Delete the selected object.
-- `Space`: start/pause.
-- `X`: send the current rejection signal.
+- editable box/cylinder/sphere free bodies;
+- a low physical destination tray;
+- a seventh MuJoCo actuator representing servo-1 yaw;
+- a target workspace annulus: radius 387–414 mm, yaw -38° to +38°.
 
-### Perception path
+This yaw actuator is the **final repaired-arm target configuration**. The real
+servo 1 was last observed mechanically/electrically non-responsive. The 3D demo
+must not be presented as proof that current hardware yaw works.
 
-The wrist-camera panel is not just a decorative crop. It:
+## 4. What the screen means
 
-1. renders the table from the current simulated eye-in-hand pose;
-2. re-reads the rendered RGB pixel buffer;
-3. segments learned object colors;
-4. builds bounding boxes/confidence values;
-5. passes only those detections to the selection loop.
+### MuJoCo 3D overview
 
-The selection loop performs a three-heading camera sweep and cannot choose an
-object that did not appear in the pixel-derived detection list. Blue/red bars at
-the image bottom reproduce the physical finger-tape convention.
+This is a live render of the physics state, not a CSS/Canvas arm drawing.
+Objects can be pushed, pinched, lifted, dropped, and retrieved through MuJoCo
+contact.
 
-### Reversible task state machine
+### Wrist RGB camera
 
-The normal state sequence is:
+The selection gate renders a 320×180 wrist image and finds connected color
+regions. Marker-colored pixels around the known blue/red finger tapes are
+excluded before candidate scoring. An object cannot be selected unless its
+pixels appeared in a scan frame.
+
+The detector does use the editable object's RGB color to associate the blob with
+the task identity. It does not receive depth, object pose, contact, or
+segmentation buffers. MuJoCo pose is still legitimately used by the physics
+engine, origin bookkeeping, delivery planning, and success verification.
+
+### Scene placement map
+
+The small top-down SVG is only an authoring tool. Select a point or the blue
+tray and drag it; the backend projects the request into the reachable
+radius/yaw limits and rebuilds the paused MuJoCo scene. It is deliberately not
+used for robot perception or task success.
+
+### Success
+
+“Grasped” requires both:
+
+- the free body rose at least 3 mm;
+- its XY position follows the gripper tool within 55 mm.
+
+A symbolic `held=true` alone cannot pass. Placement is also actual open/release
+physics. A measured local object-to-tool offset compensates the destination
+command so return error stays bounded instead of silently teleporting the body.
+
+## 5. Reversible state machine
 
 ```text
 SCANNING
-  -> TARGET_PRESENTED / ErrP window
+  -> TARGET / ErrP window
   -> REACHING
-  -> GRASPING
+  -> GRASPING (contact + lift verification)
   -> TRANSPORTING
-  -> BASKET_DROP / ErrP window
+  -> EVALUATING / ErrP window
   -> COMPLETED
 ```
 
-A rejection can arrive during any of those states.
+`X` or the red button sends the same reject event at any time.
 
-- Before grasp: abandon the reach and return home.
-- While holding: carry the object back to its saved origin and release.
-- After basket drop or even after `COMPLETED`: move back to the basket, pick the
-  delivered object up, return it to its saved origin, and release.
-- Add the object ID to the rejection set and continue with the next detected
-  candidate.
-- Never select an ID in the current rejection set.
-- If every table object is rejected, clear the set, increment the cycle counter,
-  and begin again from the first camera-detected candidate.
+- Before grasp: remember the rejection and scan another camera-visible object.
+- While held: return and release at the saved origin.
+- After tray drop or `COMPLETED`: go back to the tray, close on the free body,
+  lift it, return it, release it, then scan the next non-rejected object.
+- Rejected IDs cannot be chosen within the cycle.
+- If every eligible table object is rejected, clear the rejection memory,
+  increment the cycle, and search again.
 
-The right-side action trace is the observable audit log for these transitions.
+## 6. Scene editing
 
-## 4. External signal modes
+Editing is disabled while the physics task is running.
 
-The simulation’s “거부 신호” panel has three sources.
+- Add: sphere, box, cylinder
+- Edit: name, shape, RGB color, half-size 4.5–8.0 mm
+- Place: radius 387–414 mm, yaw -38° to +38°
+- Move tray: same bounded annulus
+- Delete: selected table object
+- Reset: return every object to its authored origin and clear task memory
 
-### Manual
+The bounds are ceilings from the current simulated floor curve, not a claim
+that every real point is calibrated.
 
-Press the red button or `X`. This is the reliable no-device demo path.
+## 7. PolyG-I
 
-### Mock ErrP
+Hardware path:
 
-The same button is labeled “가상 ErrP 보내기”. It exercises the identical
-rollback/rejection logic while presenting it as a simulated brain event.
-
-### PolyG-I
-
-The browser uses the existing native macOS HID stack:
-
-- VID `0x0F1F`
-- PID `0x0010`
-- D1WD10 1,024-byte HID reports
-- 32 rows/report, 16 physical channels, EEG CH1–CH8
-- 256 Hz (`sample selector 8`)
+- VID `0x0F1F`, PID `0x0010`
+- D1WD10 HID reports
+- EEG CH1–CH8 at 256 Hz
 
 Preparation:
 
-1. Connect PolyG-I exactly as in the prior verified setup.
-2. Run `python3 laptop/eeg_dashboard.py`.
-3. Open **EEG 실시간 모니터** and press **측정 시작**.
-4. Keep still/resting for at least 8 seconds.
-5. Return to **시뮬레이션 작업실**.
-6. Select **PolyG-I** under `거부 신호`.
-7. Press **최근 8초로 ErrP 보정**.
-8. Start the simulation.
+1. Connect PolyG-I and run the one-command launcher.
+2. Open **EEG 실시간 모니터** and press **측정 시작**.
+3. Rest for at least eight seconds.
+4. Return to **시뮬레이션 작업실** and choose **PolyG-I**.
+5. Press **최근 8초로 ErrP 보정**.
+6. Start the 3D task.
 
-At both `SIM_TARGET_PRESENTED` and `SIM_BASKET_DROP`, the API opens an onset-
-locked epoch:
+At `SIM_TARGET_PRESENTED` and `SIM_BASKET_DROP`, the API evaluates:
 
 ```text
 0.2 s pre-onset baseline + 0.8 s post-onset response
 ```
 
-It requires at least 80% of the expected 256 Hz samples. Missing/short epochs do
-not become a rejection. The existing `ErrPDetector` returns probability and the
-configured threshold (`0.5`) decides whether the same rollback state machine is
-triggered.
+At least 80% of the expected 256 Hz samples are required. A missing or short
+epoch fails closed and does not become a rejection. If CSV recording is active,
+the onset marker is written into the sample stream.
 
-New local endpoints:
-
-```text
-POST /api/errp/calibrate  {"seconds": 8}
-POST /api/errp/check      {"marker": "SIM_TARGET_PRESENTED"}
-POST /api/errp/check      {"marker": "SIM_BASKET_DROP"}
-```
-
-If CSV recording is active, the decision marker is attached to the next sample
-row.
-
-## 5. Design
-
-The simulation UI follows `docs/DESIGN.md`:
-
-- one saturated primary orange (`#ff5d00`);
-- grayscale surfaces and low-contrast hairlines;
-- flat cards rather than decorative texture/gradient;
-- short Korean action labels;
-- 8–20 px rounded scale and pill statuses;
-- explicit error red, informative blue, and success green.
-
-The existing EEG tab remains available in the same shell. Its waveform still
-uses fixed shared scales and buffered `requestAnimationFrame` rendering.
-
-## 6. Important honesty boundary
-
-The new human-facing studio is a browser kinematic/interaction simulator. It
-uses a rendered wrist-camera pixel pipeline and deterministic grasp/transport
-state, but it is **not claiming MuJoCo rigid-body contact physics**.
-
-The repository’s separate `simul/` MuJoCo environment remains the physics and
-policy-evaluation layer. It currently models one primary target and a fixed
-planar base. Connecting the editable multi-object UI directly to live MuJoCo
-free bodies is future work; the current studio is intended for tomorrow’s
-human/EEG shared-autonomy protocol demonstration and state-machine validation.
-
-## 7. Physical-arm safety status
-
-Do not infer that this simulation re-enables physical execution.
-
-- Physical motion is still separate.
-- The persistent Uno session has a swept-volume collision interlock.
-- Autonomous movement requires a fresh wrist-camera frame.
-- The previous body-hook incident path is a regression test and is rejected.
-- Motor 1 was last physically observed non-responsive; see `PATCH_NOTES.md`.
-
-## 8. Verification performed
+## 8. Local endpoints
 
 ```text
-dashboard npm build: pass
-dashboard SSR tests: 2/2 pass
-dashboard ESLint: pass after warning cleanup
-eeg_dashboard.py py_compile: pass
-synthetic 8-second ErrP baseline calibration: pass (2,046 samples)
-laptop/test_pipeline.py: all pass
+GET  /api/simulation/status
+GET  /api/simulation/frame?camera=overview|wrist&width=...&height=...
+POST /api/simulation/start
+POST /api/simulation/stop
+POST /api/simulation/reset
+POST /api/simulation/reject
+POST /api/simulation/objects/add
+POST /api/simulation/objects/update
+POST /api/simulation/objects/delete
+POST /api/simulation/basket/update
+
+POST /api/errp/calibrate
+POST /api/errp/check
 ```
 
-No real robot-arm serial port was opened and no physical motion was commanded for
-this simulation/EEG patch.
+## 9. Verification
 
+```bash
+PYTHONPATH=laptop:. python3 -m unittest simul.test_studio -v
+PYTHONPATH=laptop:. python3 -m unittest \
+  simul.test_mujoco_robot simul.test_full_task simul.test_studio -v
+cd dashboard && npm run lint && npm test
+python3 -m py_compile simul/studio.py laptop/eeg_dashboard.py
+```
+
+The studio regression suite covers:
+
+- original STL arm plus overview/wrist JPEG rendering;
+- servo-1 target yaw actuator and seven MuJoCo controls;
+- scene edit clamping;
+- physical delivery;
+- rejection after completion;
+- physical tray retrieval and return;
+- rejection memory and a different next delivery.
+
+## 10. Honest status
+
+- This is now a real MuJoCo rigid-body/contact studio, not the removed 2D mock.
+- Its success is simulation evidence, not a real-arm success rate.
+- The final multi-object task assumes servo 1 is repaired. Current real servo 1
+  must be fixed and recalibrated before this yaw policy transfers.
+- RGB candidate gating is exercised, but the complete autonomous transport
+  planner still uses known authored origin/tray coordinates. That task metadata
+  is not claimed to be inferred from monocular RGB.
+- The physical arm remains separately safety-gated; this patch sends no Uno
+  commands.

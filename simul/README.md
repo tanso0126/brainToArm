@@ -73,6 +73,47 @@ The smoke sheet is written to ignored
 `simul/generated/mujoco_smoke.png`. Expected tool-center heights are about 41 mm
 at the hover reference and 8 mm at the grasp reference.
 
+## Interactive 3D studio
+
+`studio.py` is the stateful MuJoCo backend for the browser simulation tab. It
+uses the same STL visuals, calibrated arm model, servo limits, collision
+geometry, floor, and eye-in-hand RGB camera as the headless simulation. Objects
+and the destination tray are MuJoCo free bodies rather than canvas sprites.
+The small top-down editor in the browser only changes the initial 3D scene; it
+is not the simulator and is not used as robot perception.
+
+Start the API and UI:
+
+```bash
+python3 -u laptop/eeg_dashboard.py --api-only --no-browser
+cd dashboard
+npm run dev -- --port 3000
+```
+
+Open `http://localhost:3000`, select **3D 시뮬레이션**, place several objects,
+and start the run. The page displays:
+
+- a live MuJoCo overview camera and the exact RGB wrist-camera observation;
+- physical scan, reach, grasp, lift, delivery, and release phases;
+- manual/mock/PolyG-I ErrP rejection input and persistent rejected-object IDs;
+- late rejection recovery, including re-grasping an object already released in
+  the tray and returning it near its recorded origin;
+- commanded six-servo telemetry and an event trace.
+
+The studio makes no serial or webcam connection and cannot move the real arm.
+Its extra `studio_base_yaw` joint represents the intended final arm after motor
+1 is repaired, so multiple objects around the base can be tested today. The
+currently verified physical arm still has a non-responsive motor 1, and the
+fixed-base policy/evaluation model described below remains unchanged. A studio
+result is therefore evidence about the target 3D task and controller logic, not
+proof that the present broken-base hardware can reproduce yaw motion.
+
+Run the studio physics tests:
+
+```bash
+PYTHONPATH=laptop:. python3 -m unittest simul.test_studio -v
+```
+
 ## Domain-randomized complete-task policy
 
 `full_task_env.py` trains search, target alignment, descent, close, lift, and
