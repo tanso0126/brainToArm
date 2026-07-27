@@ -926,6 +926,55 @@ def match_locked_target(scene, lock, selector=None):
     return min(eligible, key=lambda item: item[0])[1] if eligible else None
 
 
+BACKGROUND_RING_PX = 45
+BACKGROUND_MIN_SAT_DELTA = 22.0
+BACKGROUND_MIN_VAL_DELTA = 28.0
+
+
+def background_distinctness(frame, candidate):
+    """Return (sat_delta, val_delta) of a candidate against its local ring.
+
+    The workspace legitimately contains a large flat white sheet (tissue/paper
+    covering the Uno's USB run). Its folds segment as compact blobs and sit
+    right in front of the jaws, so they out-rank the real object on proximity
+    alone. A graspable object, unlike a fold of the sheet it lies on, differs
+    from its immediate surroundings in saturation or brightness. This is a
+    figure/ground test, not a colour preset: any object distinct from its own
+    background passes, whatever its hue.
+    """
+    import cv2
+
+    height, width = frame.shape[:2]
+    x, y, box_width, box_height = candidate.bbox
+    inset_x = max(1, int(box_width * 0.15))
+    inset_y = max(1, int(box_height * 0.15))
+    ix0, ix1 = max(0, x + inset_x), min(width, x + box_width - inset_x)
+    iy0, iy1 = max(0, y + inset_y), min(height, y + box_height - inset_y)
+    if ix1 - ix0 < 3 or iy1 - iy0 < 3:
+        return 0.0, 0.0
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    inner = hsv[iy0:iy1, ix0:ix1].reshape(-1, 3)
+    ox0, ox1 = max(0, x - BACKGROUND_RING_PX), min(width, x + box_width + BACKGROUND_RING_PX)
+    oy0, oy1 = max(0, y - BACKGROUND_RING_PX), min(height, y + box_height + BACKGROUND_RING_PX)
+    outer = hsv[oy0:oy1, ox0:ox1].copy()
+    outer[max(0, y - oy0):max(0, y - oy0) + box_height,
+          max(0, x - ox0):max(0, x - ox0) + box_width] = 0
+    ring = outer.reshape(-1, 3)
+    ring = ring[ring.any(axis=1)]
+    if ring.size == 0:
+        return 0.0, 0.0
+    sat_delta = abs(float(np.median(inner[:, 1])) - float(np.median(ring[:, 1])))
+    val_delta = abs(float(np.median(inner[:, 2])) - float(np.median(ring[:, 2])))
+    return sat_delta, val_delta
+
+
+def is_graspable_figure(frame, candidate):
+    """True when the candidate stands out from its own local background."""
+    sat_delta, val_delta = background_distinctness(frame, candidate)
+    return (sat_delta >= BACKGROUND_MIN_SAT_DELTA
+            or val_delta >= BACKGROUND_MIN_VAL_DELTA)
+
+
 def _laterally_fixable_candidate(scene, target_selector, pose=None,
                                  safety=None):
     """Best non-vetoed candidate whose ONLY gate failure is the lateral window.
@@ -964,6 +1013,11 @@ def acquire_initial_target(detector, samples=3, target_selector=None,
     for _ in range(samples):
         latest_frame = frame_source(discard=1)
         latest_scene, _ = detector.scene(latest_frame)
+        # Drop folds of the flat sheet covering the workspace: they segment as
+        # compact blobs nearest the jaws and would otherwise always out-rank the
+        # real object. Only figures distinct from their own background survive.
+        latest_scene.ranked = [item for item in latest_scene.ranked
+                               if is_graspable_figure(latest_frame, item)]
         if selected is None:
             selected = target_selector.choose(latest_scene, pose=pose)
             while selected is not None and remaining_rejects:
@@ -1118,7 +1172,7 @@ def main():
     parser.add_argument("--max-steps", type=int, default=24)
     parser.add_argument("--vector-grasp", action="store_true",
                         help="fixed-tool-x coordinated 2/3/4 grasp and lift")
-    parser.add_argument("--vector-inset-mm", type=float, default=-5.0,
+    parser.add_argument("--vector-inset-mm", type=float, default=0.0,
                         help="signed endpoint-x correction for vector grasp")
     parser.add_argument("--reject-count", type=int, default=0,
                         help="veto this many ranked reachable targets before run")
