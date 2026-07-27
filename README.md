@@ -110,13 +110,25 @@ precise steps to bring it up. No other context is required.
 > previous action; simulator pose/depth/contact never enters inference. A
 > deterministic shield and two-frame vote guard every irreversible transition.
 >
-> Independent MuJoCo contact evaluation physically lifted 1,960/2,000 randomized
+> Independent MuJoCo contact evaluation physically lifted 1,959/2,000 randomized
 > 28–44 mm box/cylinder/sphere targets, including 1,488/1,488 at the current
-> <=40 mm normal simulated jaw envelope. These are **simulation results, not a
-> claim of real-hardware success**. The hardware-free adapter in
-> `laptop/full_task_adapter.py` is ready for shadow comparison while the physical
-> execution gate remains off. See
-> [`simul/TRAINING_REPORT.md`](simul/TRAINING_REPORT.md) before integration.
+> <=40 mm normal simulated jaw envelope. The percentages remain simulation-only,
+> but the adapter and fixed-reach controller have now completed one separately
+> recorded real toy-car close/lift/contact trial. The physical execution gate was
+> promoted after that trial. See
+> [`simul/TRAINING_REPORT.md`](simul/TRAINING_REPORT.md) and
+> [`docs/PHYSICAL_GRASP_VALIDATION.md`](docs/PHYSICAL_GRASP_VALIDATION.md).
+
+> ### ✅ Real fixed-reach floor pinch verified
+>
+> The runtime FK now exactly matches the current calibrated MuJoCo joint map.
+> At hover the controller aligns the selected object's approach-side edge, locks
+> forward reach, and lowers through shoulder height compensation from 35 mm to
+> 6 mm. Close and lift require fresh-frame guarded policy votes plus calibrated
+> jaw-obstruction checks. On 2026-07-27 the real arm retained a toy car through
+> lift and safely placed it back. `floor_grasp.py --live --arm` now routes its
+> selected/rejected candidate into this controller; `floor_servo.py
+> --candidate-index N` and `--reject-count N` provide headless operation.
 
 ---
 
@@ -608,11 +620,13 @@ brainToArm/
 
 ## 8. Current status: what works, what is assumed
 
-**Everything is implemented and runs today in mock (no hardware).** The full
-shared-autonomy loop — detect, select, hover, ErrP veto, visual-servo align,
-grasp, verify, transport, place, repeat until the table is clear — executes end
-to end, and all unit tests pass. The data pipeline (record → train → load model)
-is verified. All Python modules compile.
+The full shared-autonomy loop — detect, select, hover, ErrP veto, visual-servo
+align, grasp, verify, transport, place, repeat until the table is clear —
+executes end to end in mock, and all unit tests pass. In hardware, one real
+single-object fixed-reach close/lift/replace trial is verified. Multiple-object
+selection and reject/next are connected to that controller but still need a
+two-object live scene for separate physical goal-2/3 validation. The data
+pipeline (record → train → load model) is verified. All Python modules compile.
 
 The parts that are written against **documented assumptions** and can only be
 *confirmed* (not written) once the physical hardware is present:

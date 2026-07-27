@@ -76,6 +76,26 @@ class FullTaskTests(unittest.TestCase):
             second.next_pose,
             tuple(floor_pose(90, "grasp", gripper=config.GRIP_OPEN)))
 
+    def test_locked_target_can_close_through_grasp_occlusion(self):
+        """The eye-in-hand target vanishes between the fingers at contact."""
+        gripper = SimpleNamespace(center=(640.0, 700.0), opening_px=280.0)
+        scene = SimpleNamespace(
+            gripper=gripper, frame_shape=(720, 1280, 3), ranked=[])
+        wrist = SimpleNamespace(quality=SimpleNamespace(valid=True))
+        pose = floor_pose(90, "grasp", gripper=config.GRIP_OPEN)
+        controller = FullTaskShadowController(DEFAULT_FULL_TASK_MODEL)
+        first = controller.decide(
+            scene, wrist, pose, target=None, target_locked=True)
+        second = controller.decide(
+            scene, wrist, pose, target=None, target_locked=True)
+        self.assertEqual(first.action, TaskAction.WAIT)
+        self.assertEqual(second.action, TaskAction.CLOSE)
+
+        controller.reset()
+        blocked = controller.decide(
+            scene, wrist, pose, target=None, target_locked=False)
+        self.assertNotEqual(blocked.action, TaskAction.CLOSE)
+
     def test_contact_physics_not_symbolic_state_decides_success(self):
         evaluator = PhysicsTaskEvaluator(DEFAULT_FULL_TASK_MODEL, seed=20260729)
         try:

@@ -124,7 +124,9 @@ def shield_action(observation, proposed: TaskAction | int) -> TaskAction:
     values = np.asarray(observation, dtype=np.float32)
     proposed = TaskAction(int(proposed))
     quality = values[0] > 0
-    target = values[1] > 0 and values[3] > 0
+    target_visible = values[1] > 0
+    continuity = values[3] > 0
+    target = target_visible and continuity
     markers = values[2] > 0
     depth_error = float(values[4] * 420.0)
     lateral_error = float(values[5] * 220.0)
@@ -146,7 +148,12 @@ def shield_action(observation, proposed: TaskAction | int) -> TaskAction:
         return TaskAction.WAIT
     if at_grasp:
         if gripper_command_open:
-            return TaskAction.CLOSE if target else TaskAction.RECOVER
+            # The real eye-in-hand camera loses the object as the fingers
+            # straddle it. A selection locked before the verified fixed-reach
+            # descent is stronger evidence than switching to a new close-range
+            # blob; continuity may therefore authorize CLOSE without a current
+            # target mask.
+            return TaskAction.CLOSE if continuity else TaskAction.RECOVER
         if jaw_opening > 0.12:
             return TaskAction.LIFT
         return TaskAction.RECOVER

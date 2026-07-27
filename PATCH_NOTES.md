@@ -1834,3 +1834,71 @@ which could omit close/lift when search took longer. It now samples eight frames
 uniformly from the complete rollout, so the ignored reproducibility sheet shows
 both search/alignment and the terminal physical outcome. This changes no policy,
 physics, metric, or hardware behavior.
+
+## Patch 49 — compensate wrist height and verify a real vertical pinch
+
+### Intent
+
+Stop closing above the object. Aiming wrist pitch upward also raises the physical
+fingers, so the controller must explicitly lower farther without resuming the
+forward chase that previously bulldozed the target.
+
+### Root cause
+
+- `laptop/arm_fk.py` still contained a pre-contact-simulator shoulder/elbow map.
+  It substantially overestimated how low the real fingers were at wrist pitch
+  143°. The runtime map is now identical to `simul/mujoco_robot.py`; a direct
+  multi-pose regression matches tool-center coordinates to numerical precision.
+- The old descent changed forward reach again after FastSAM occlusion, allowing
+  a replacement blob to push the object away.
+- Lift copied an observation pose whose gripper command was open, releasing the
+  object before verification.
+
+### Changes
+
+- Align the approach-side bbox edge rather than the object centroid, tighten the
+  final pixel tolerance, and use 1° reach steps near the goal.
+- Lock the selected forward reach for the whole 35→6 mm descent. Shoulder height
+  compensation lowers the fingers; near-field masks are diagnostic and cannot
+  change reach or target identity.
+- Preserve a bottom-clipped candidate only when its bbox is fully between the
+  measured blue/red fingers. Collapse nested FastSAM part masks into one physical
+  choice.
+- Gate descend/close/lift with the simulation-trained two-frame controller.
+  Target continuity may survive expected grasp occlusion only after a verified
+  selection lock.
+- Require calibrated visual jaw obstruction immediately after close and again
+  after a closed lift. Recovery is open hover; successful lift never copies an
+  open-gripper pose.
+- Connect the live multi-object `n` reject / `y` confirm UI to this verified
+  `FloorServo`. Add headless `--candidate-index` and `--reject-count`; the exact
+  selected candidate is tracked rather than silently reverting to rank zero.
+- Promote `FLOOR_GRASP_EXECUTE_VERIFIED=True` only after the real trial below.
+- Retrain the complete policy with randomized target-mask occlusion at grasp and
+  promote artifact SHA-256
+  `b4a5cf2b976b7571bf38b2b7e96d30d5159d00186e12d93569fe91cdfa4772b7`.
+
+### Real-arm verification
+
+- Open hover `[90,115,90,143,90,170]`; target edge/marker `du=21,dv=21`.
+- Reach stayed 37 through 30, 24, 18, 12, and 6 mm targets; final observed
+  alignment was `du=10,dv=23`.
+- At gripper 180 the close assessment was `CONTACT`, 203 px wider than the
+  calibrated empty-jaw curve. After closed lift it remained `CONTACT`, about
+  196 px wider than empty.
+- Final held pose was `[90,115,90,143,180,170]`. The object was then lowered to
+  the same point, released, and the arm returned to open hover. Full evidence is
+  in `docs/PHYSICAL_GRASP_VALIDATION.md`.
+- This completes physical goal 1. Goals 2/3 share the same physical controller
+  but are not labelled physically complete until two reachable objects are
+  present for separate select and reject-next trials.
+
+### Automated verification
+
+- `python3 -m unittest simul.test_full_task simul.test_mujoco_robot -v`: 13/13.
+- `PYTHONPATH=laptop python3 laptop/test_pipeline.py`: all tests passed,
+  including nested-mask consolidation and bottom-edge jaw geometry.
+- Retrained guarded randomized task: 9,998/10,000 (99.98%); deterministic:
+  1,000/1,000.
+- Independent MuJoCo free-body contact: 1,959/2,000 (97.95%); objects <=40 mm:
+  1,488/1,488 (100%). These percentages remain simulation-only.

@@ -96,6 +96,7 @@ class FullFloorPickEnv(gym.Env):
         self.last_event = "RESET"
         self.milestones = set()
         self.recoveries = 0
+        self.selection_locked = False
 
     @property
     def commanded_pose(self) -> list[int]:
@@ -130,8 +131,16 @@ class FullFloorPickEnv(gym.Env):
         target = self._target_is_geometrically_visible()
         if randomized and self.np_random.random() < 0.055:
             target = False
-        continuity = target and not (
-            randomized and self.np_random.random() < 0.025)
+        # At floor contact the wrist-mounted fingers intentionally occlude the
+        # object.  A verified pre-descent selection remains continuous even
+        # while the current segmentation disappears; this matches the real
+        # fixed-reach vertical pinch rather than forcing a blind blob switch.
+        if (self.pose_level == "grasp" and self.selection_locked
+                and randomized and self.np_random.random() < 0.78):
+            target = False
+        continuity = ((target or (self.pose_level == "grasp"
+                                  and self.selection_locked))
+                      and not (randomized and self.np_random.random() < 0.025))
 
         depth = self._true_depth_error() if target else 0.0
         lateral = self.centerline_error_px if target else 0.0
@@ -209,6 +218,7 @@ class FullFloorPickEnv(gym.Env):
         self.last_event = "RESET"
         self.milestones = set()
         self.recoveries = 0
+        self.selection_locked = False
         return self._observe(), self._info()
 
     def expert_action(self) -> int:
@@ -217,7 +227,7 @@ class FullFloorPickEnv(gym.Env):
             return int(TaskAction.WAIT)
         if self.pose_level == "grasp":
             if self.gripper_open:
-                return int(TaskAction.CLOSE if target and continuity
+                return int(TaskAction.CLOSE if continuity
                            else TaskAction.RECOVER)
             return int(TaskAction.LIFT if self.contact else TaskAction.RECOVER)
         if not target or not continuity:
@@ -290,6 +300,7 @@ class FullFloorPickEnv(gym.Env):
                        <= config.FLOOR_ALIGN_X_CENTERLINE_TOL_PX)
             if self.pose_level == "hover" and valid_sensors and target_seen and aligned:
                 self.pose_level = "grasp"
+                self.selection_locked = True
                 if "descended" not in self.milestones:
                     self.milestones.add("descended")
                     reward += 0.55
@@ -329,6 +340,7 @@ class FullFloorPickEnv(gym.Env):
             self.gripper_open = True
             self.contact = False
             self.holding = False
+            self.selection_locked = False
             self.recoveries += 1
             reward -= 0.20 + 0.08 * self.recoveries
 

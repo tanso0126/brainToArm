@@ -819,8 +819,8 @@ def test_floor_grasp_selection_and_reject():
     from types import SimpleNamespace
     from vision_segment import ObjectDetection
     from floor_grasp import (
-        CandidateSelector, FloorGraspController, filter_wrist_candidates,
-        rank_wrist_candidates)
+        CandidateSelector, FloorGraspController, consolidate_wrist_candidates,
+        filter_wrist_candidates, rank_wrist_candidates)
 
     frame_shape = (720, 1280, 3)
     near = ObjectDetection((900, 420), (870, 400, 70, 60), 4200, 0.9)
@@ -859,6 +859,26 @@ def test_floor_grasp_selection_and_reject():
     selector.reject(near)
     check(selector.choose([moved_near, mid]) is mid,
           "veto follows image position, not a per-frame segment id")
+
+    # FastSAM commonly emits an outer mask and multiple part masks for one toy.
+    # They must remain one physical choice or a reject would select another part
+    # of the same object instead of advancing to the next object.
+    outer = ObjectDetection((640, 500), (580, 450, 120, 100), 12000, 0.9)
+    nested = ObjectDetection((642, 502), (605, 472, 75, 60), 4500, 0.8)
+    separate = ObjectDetection((900, 500), (860, 465, 80, 70), 5600, 0.9)
+    merged = consolidate_wrist_candidates([nested, separate, outer])
+    check(merged == [outer, separate],
+          "nested FastSAM masks collapse to one physical object choice")
+
+    # Near contact the selected object is legitimately clipped by the lower
+    # edge. Preserve it only when it is geometrically between both finger tapes.
+    near_field = ObjectDetection((635, 680), (560, 640, 150, 80), 12000, 0.9)
+    bottom_clutter = ObjectDetection((200, 680), (140, 640, 120, 80), 9600, 0.9)
+    wide_markers = [(380, 665, 135, 55), (730, 665, 85, 55)]
+    near_valid = filter_wrist_candidates(
+        [near_field, bottom_clutter], frame_shape, wide_markers)
+    check(near_valid == [near_field],
+          "only a bottom-clipped object fully between the jaws survives")
 
     # ---- fail-closed state machine (gated + executed paths) ----
     class FakeArm:

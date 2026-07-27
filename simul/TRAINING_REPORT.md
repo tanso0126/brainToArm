@@ -10,7 +10,7 @@ recover`; deterministic safety code still converts each macro into bounded
 for integration.
 
 The artifact SHA-256 is
-`e4451c8bc64399a8b7382d50874a262a0c205eddccc263fe33c9c379abf40323`.
+`b4a5cf2b976b7571bf38b2b7e96d30d5159d00186e12d93569fe91cdfa4772b7`.
 
 ## Transfer boundary
 
@@ -33,15 +33,15 @@ opening a camera or serial port.
 
 DAgger-style behavior cloning collected 120,000 expert/noisy states plus three
 40,000-state policy-disturbance rounds (240,000 total). A 15->192->128->64->8
-MLP reached 98.3715% held-out action accuracy. Raw randomized closed-loop
-success was 95.15% over 2,000 episodes. The camera/pose safety shield raised it
-to 99.65% over 10,000 episodes.
+MLP reached 98.2882% held-out action accuracy. Raw randomized closed-loop
+success was 95.55% over 2,000 episodes. The two-frame camera/pose safety guard
+completed 9,998/10,000 randomized episodes (99.98%, mean 11.4678 macro frames)
+and 1,000/1,000 deterministic episodes.
 
-Descent, close, and lift additionally require the same guarded decision from two
-fresh frames. On a later disjoint 10,000-seed evaluation this completed 9,997
-episodes (99.97%, mean 12.0048 macro frames). The three failures stopped or
-timed out; the shield never converts missing quality/markers into permission.
-Deterministic evaluation completed 1,000/1,000.
+Training randomization now explicitly hides the target mask through most grasp
+poses, matching the real eye-in-hand occlusion. A selection locked by verified
+hover alignment may remain continuous through that occlusion; a missing mask
+without such a lock still cannot authorize close.
 
 ## Independent contact-physics evaluation
 
@@ -58,10 +58,10 @@ Final disjoint 2,000-seed result:
 | Set | Result |
 |---|---:|
 | symbolic task completion | 2,000/2,000 (100%) |
-| physical lift, all 28--44 mm objects | 1,960/2,000 (98.0%) |
-| first-attempt physical lift | 1,953/2,000 (97.65%) |
+| physical lift, all 28--44 mm objects | 1,959/2,000 (97.95%) |
+| first-attempt physical lift | 1,952/2,000 (97.6%) |
 | normal envelope, width <=40 mm | 1,488/1,488 (100%) |
-| 40--44 mm edge-size stress | 472/512 (92.1875%) |
+| 40--44 mm edge-size stress | 471/512 (91.9922%) |
 
 All remaining failures were oversized edge-stress objects. They are reported as
 failures, not relabelled by lowering the lift threshold. The 40 mm normal
@@ -70,11 +70,12 @@ real limit only after measuring the physical fingers.
 
 ## Safety and reality boundary
 
-These numbers prove repeatable behavior in the corrected simulator, not a real
-robot success rate. `FLOOR_GRASP_EXECUTE_VERIFIED` remains `False`. Reality
-promotion is a shadow comparison using the adapter, followed by a cleared-workspace
-test that verifies marker visibility, contact against the empty-jaw baseline,
-and coherent post-lift motion. No learned output may bypass those checks.
+These percentages are simulation-only and are not presented as a real robot
+success rate. The guarded model was nevertheless used as a macro gate during
+the real 2026-07-27 trial; the fixed-reach controller then achieved one physical
+close-and-lift success with visual jaw contact retained after lift. See
+`docs/PHYSICAL_GRASP_VALIDATION.md`. No learned output bypasses the real marker,
+alignment, or jaw-contact checks.
 
 ## Reproduce
 

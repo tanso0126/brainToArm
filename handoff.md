@@ -824,3 +824,40 @@ PYTHONPATH=laptop python3 laptop/test_pipeline.py
 
 현재 결과는 local alignment 데모가 아니라 탐색부터 물리적 lift/recovery까지의 전체
 시뮬레이션 전달물이다. 다만 실제 성공률 주장은 실물 shadow/접촉/상승 검증 뒤에만 한다.
+
+## 23. 2026-07-27 실제 수직 pinch 승격
+
+22절 이후 실제 장난감차를 대상으로 한 번의 완전한 close/lift가 성공했다.
+`arm_fk.py`의 오래된 joint map이 손끝 높이를 크게 잘못 계산해 물체 위에서 닫던 것이
+직접 원인이었다. 현재 runtime FK는 `simul/mujoco_robot.py`와 대표 자세 전체에서
+수치 오차 없이 일치한다.
+
+실행된 실제 경로:
+
+- open hover `[90,115,90,143,90,170]`, 선택 edge/marker 오차 `du=21,dv=21`.
+- reach 37을 잠근 채 shoulder 높이 보상으로 30→24→18→12→6mm 수직 하강.
+- 최종 오차 `du=10,dv=23`; occlusion 중 다른 FastSAM mask는 무시.
+- gripper 180 close 후 empty-jaw 대비 residual 203px `CONTACT`.
+- closed hover lift 후 residual 약 196px `CONTACT`, 실제 hold 확인.
+- 같은 floor point에 closed로 내려간 뒤 open, 다시 open hover 복귀.
+
+따라서 `FLOOR_GRASP_EXECUTE_VERIFIED=True`로 승격했다. 이 gate를 False로 바꾸면
+모든 실제 descend/close/lift가 다시 차단된다. 상세 증거는
+`docs/PHYSICAL_GRASP_VALIDATION.md`에 있다.
+
+FastSAM nested mask 병합, bottom-edge object의 양 finger 사이 제한, 선택한 candidate
+identity 전달도 추가했다. 이제 `floor_grasp.py --live --arm`의 `n` reject와 `y`
+confirm이 legacy 옆쓸기 controller가 아니라 검증된 `FloorServo`를 호출한다.
+headless 실행은 `floor_servo.py --candidate-index N` 또는 `--reject-count N`이다.
+
+시뮬레이션 정책도 grasp-pose target occlusion을 포함해 다시 학습했다.
+
+- SHA-256: `b4a5cf2b976b7571bf38b2b7e96d30d5159d00186e12d93569fe91cdfa4772b7`.
+- guarded randomized: 9,998/10,000 (99.98%).
+- deterministic: 1,000/1,000.
+- MuJoCo free-body contact: 1,959/2,000 (97.95%).
+- <=40mm nominal objects: 1,488/1,488 (100%).
+
+목표 1은 실물 성공이다. 목표 2/3은 동일한 실물 controller까지 연결됐지만, 각각의
+실물 완료 판정에는 카메라에 별도 도달 가능한 물체가 두 개 놓인 시험 장면이 필요하다.
+그 전에는 테스트 성공을 실물 성공이라고 부르지 않는다.

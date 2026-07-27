@@ -429,9 +429,7 @@ FLOOR_ALIGN_X_CENTERLINE_TOL_PX = 140.0  # base is fixed; object must be near ce
 FLOOR_ALIGN_VERIFIED = True          # depth axis + sign + gain confirmed on camera 2026-07-27
 FLOOR_SETTLE_S = 1.9                 # DONE is a software slew; wait real linkage settle
 FLOOR_SETTLE_DISCARD_FRAMES = 3      # then drop stale camera frames before measuring
-# Master execution gate. While False, the controller performs the full
-# recognize/select/reject/plan loop and reports the planned motion, but never
-# commands physical descent/close/lift. Flip True only after the wrist-camera
-# floor grasp (align sign, descend, close, contact, lift) is verified on the
-# real arm with the workspace clear -- see handoff section 13.
-FLOOR_GRASP_EXECUTE_VERIFIED = False
+# Master execution gate. The fixed-reach path was promoted only after the
+# 2026-07-27 real close/lift/contact trial. Set False to retain recognition,
+# selection, and align-only while blocking physical descend/close/lift.
+FLOOR_GRASP_EXECUTE_VERIFIED = True

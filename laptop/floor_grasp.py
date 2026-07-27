@@ -25,7 +25,9 @@ Live selection/reject demo (needs ``wrist_vision.py --live`` publishing frames):
     python3 laptop/floor_grasp.py --live
 
 Add ``--arm`` to also drive a running ``arm_session.py serve`` session; physical
-motion additionally requires the execution gate above to be True.
+motion additionally requires the execution gate above to be True. The live UI
+passes its exact chosen/rejected candidate into the verified fixed-reach
+vertical-pinch controller.
 """
 
 from dataclasses import dataclass, field
@@ -81,9 +83,20 @@ def filter_wrist_candidates(candidates, frame_shape, marker_boxes=(),
     valid = []
     for item in candidates:
         x, y, box_width, box_height = item.bbox
+        touches_bottom = y + box_height >= height - border_margin
+        ordered_markers = sorted(marker_boxes, key=lambda box: box[0])
+        between_jaws = (
+            len(ordered_markers) >= 2
+            and x >= ordered_markers[0][0] + ordered_markers[0][2]
+            and x + box_width <= ordered_markers[-1][0]
+        )
+        # During the final vertical pinch the selected object is intentionally
+        # clipped by the bottom image edge, but remains fully between the two
+        # known finger markers. Preserve that one near-field case; other border
+        # masks are still floor/arm spill and remain rejected.
         if (x <= border_margin or y <= border_margin
                 or x + box_width >= width - border_margin
-                or y + box_height >= height - border_margin):
+                or (touches_bottom and not between_jaws)):
             continue
         ratio = (box_width * box_height) / frame_area
         if not min_area_ratio <= ratio <= max_area_ratio:
@@ -95,7 +108,41 @@ def filter_wrist_candidates(candidates, frame_shape, marker_boxes=(),
                for marker_box in marker_boxes):
             continue
         valid.append(item)
-    return valid
+    return consolidate_wrist_candidates(valid)
+
+
+def consolidate_wrist_candidates(candidates):
+    """Collapse FastSAM's nested masks for one physical object.
+
+    FastSAM often returns an outer object plus several part masks. Treating
+    those as separate choices breaks multi-object selection/reject semantics.
+    Keep the largest representative whenever boxes strongly overlap or their
+    centers describe the same compact image region.
+    """
+
+    kept = []
+    for item in sorted(candidates, key=lambda candidate: candidate.area,
+                       reverse=True):
+        ix, iy, iw, ih = item.bbox
+        idiagonal = math.hypot(iw, ih)
+        duplicate = False
+        for representative in kept:
+            rx, ry, rw, rh = representative.bbox
+            left, top = max(ix, rx), max(iy, ry)
+            right, bottom = min(ix + iw, rx + rw), min(iy + ih, ry + rh)
+            intersection = max(0, right - left) * max(0, bottom - top)
+            smaller = max(1, min(iw * ih, rw * rh))
+            distance = math.hypot(
+                item.center[0] - representative.center[0],
+                item.center[1] - representative.center[1])
+            if (intersection / smaller >= 0.62
+                    or distance <= 0.22 * min(
+                        idiagonal, math.hypot(rw, rh))):
+                duplicate = True
+                break
+        if not duplicate:
+            kept.append(item)
+    return kept
 
 
 def rank_wrist_candidates(candidates, frame_shape, gripper_center=None):
@@ -472,14 +519,8 @@ def run_live(use_arm=False):
     selector = CandidateSelector(
         reject_radius_px=config.FLOOR_REJECT_RADIUS_RATIO * diagonal)
     arm = None
-    baseline = None
     if use_arm:
         arm = SessionArmClient()
-        try:
-            from visual_contact import JawBaseline
-            baseline = JawBaseline.load()
-        except Exception as exc:            # noqa: BLE001
-            print(f"[floor-grasp] no jaw baseline ({exc}); lift stays disabled")
 
     window = "brainToArm floor grasp (n reject, y confirm, q quit)"
     cv2.namedWindow(window, cv2.WINDOW_NORMAL)
@@ -516,17 +557,16 @@ def run_live(use_arm=False):
             if key == ord("y") and selected is not None:
                 print("[floor-grasp] CONFIRM selection", flush=True)
                 if arm is not None:
-                    def perceive():
-                        mtime = None
-                        for _ in range(config.FLOOR_SETTLE_DISCARD_FRAMES + 1):
-                            new_frame, mtime = _read_fresh_raw(mtime)
-                        return detector.scene(new_frame)
-                    controller = FloorGraspController(
-                        arm, perceive, baseline=baseline)
-                    result = controller.grasp(selected)
-                    print(f"[floor-grasp] result ok={result.ok} "
-                          f"state={result.state}: {result.reason}", flush=True)
-                    if result.ok and result.executed:
+                    # Preserve the UI's chosen/rejected object all the way into
+                    # the physically verified vertical-pinch controller.
+                    from floor_calibrate import FloorHomography
+                    from floor_servo import FloorServo
+                    controller = FloorServo(
+                        arm.client, FloorHomography.load())
+                    reach = controller.align(selected=selected)
+                    ok = (reach is not None and controller.grasp(reach))
+                    print(f"[floor-grasp] physical grasp ok={ok}", flush=True)
+                    if ok:
                         selector.confirm()
                 else:
                     print("[floor-grasp] no --arm session; selection confirmed "

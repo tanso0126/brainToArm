@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "laptop"))
 
 from floor_motion import floor_pose  # noqa: E402
+from arm_fk import tool_position  # noqa: E402
 from simul.mujoco_robot import (  # noqa: E402
     load_model,
     model_summary,
@@ -78,6 +79,19 @@ class MuJoCoRobotTests(unittest.TestCase):
             self.assertLess(max(z_values) - min(z_values), 0.004)
             self.assertGreater(max(x_values) - min(x_values), 0.015)
             self.assertAlmostEqual(points[1][2], expected_z, delta=0.003)
+
+    def test_runtime_height_fk_matches_current_simulator(self):
+        """The real descent solver must use this model's current joint map."""
+        for shoulder in (70, 113, 115, 123, 133, 138, 150):
+            for elbow in (78, 90, 100):
+                for wrist_pitch in (130, 143, 170, 180):
+                    pose = [90, shoulder, elbow, wrist_pitch, 90, 170]
+                    set_servo_pose(
+                        self.model, self.data, pose, spec=self.spec)
+                    expected = site_position(
+                        self.model, self.data, "tool_center")
+                    np.testing.assert_allclose(
+                        tool_position(pose), expected, atol=1e-9)
 
     def test_wrist_render_contains_real_marker_order_and_target(self):
         set_servo_pose(

@@ -66,6 +66,7 @@ def build_policy_observation(
     target=None,
     previous_target_center=None,
     coherent_lift_motion=False,
+    target_locked=False,
     previous_action=TaskAction.WAIT,
 ):
     """Build only from quantities available on the real Mac/camera pipeline."""
@@ -78,7 +79,7 @@ def build_policy_observation(
     gripper = getattr(scene, "gripper", None)
     markers = gripper is not None
     target_visible = target is not None
-    continuity = target_visible
+    continuity = bool(target_visible or target_locked)
     if target_visible and previous_target_center is not None:
         diagonal = math.hypot(scene.frame_shape[1], scene.frame_shape[0])
         distance = math.hypot(
@@ -160,13 +161,14 @@ class FullTaskShadowController:
 
     def decide(
         self, scene, wrist_observation, commanded_pose, *, target=None,
-        coherent_lift_motion=False,
+        coherent_lift_motion=False, target_locked=False,
     ):
         observation = build_policy_observation(
             scene, wrist_observation, commanded_pose,
             target=target,
             previous_target_center=self.previous_target_center,
             coherent_lift_motion=coherent_lift_motion,
+            target_locked=target_locked,
             previous_action=self.previous_action,
         )
         action, probabilities = self.runner.predict(

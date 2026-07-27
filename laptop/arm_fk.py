@@ -8,7 +8,7 @@ the laptop runtime never imports the simulation package.
 
 Frames (base frame: x forward, y left, z up; the arm moves in the x-z plane):
 
-    base -> shoulder(+z=0.205) -Ry(sh)-> upper(0.242) -Ry(el)-> fore(0.1725)
+    base -> shoulder(+z=0.210) -Ry(sh)-> upper(0.242) -Ry(el)-> fore(0.1725)
          -Ry(wp)-> wrist(0.045) -Rx(roll)-> tool(0.090, dz=-0.008)
 
 All rotations for shoulder/elbow/wrist_pitch are about the base y axis; wrist
@@ -27,15 +27,15 @@ FORE_M = 0.1725
 HAND_M = 0.090
 TOOL_DZ_M = -0.008
 WRISTROLL_M = 0.045
-SHOULDER_HEIGHT_M = 0.205
+SHOULDER_HEIGHT_M = 0.210
 
 _SH_FLOOR_SCALE = 0.25
 _SH_FLOOR_ANCHOR_SERVO = 113.0
-_SH_FLOOR_ANCHOR_JOINT = 57.25
-_SH_HOME_JOINT = -30.0
+_SH_FLOOR_ANCHOR_JOINT = -20.5529
+_SH_HOME_JOINT = -60.0
 _SH_HOME_SERVO = 70.0
-_EL_SCALE = 0.20
-_EL_REF_JOINT = -70.0
+_EL_SCALE = 0.30
+_EL_REF_JOINT = 68.4919
 _WP_SCALE = -1.5
 
 

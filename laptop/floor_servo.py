@@ -1,20 +1,11 @@
-"""Closed-loop floor-coordinate visual servo (no blind elbow sweeping).
+"""Eye-in-hand floor servo with a fixed-reach vertical pinch.
 
-At the fixed observation pose the wrist camera sees BOTH the object and the two
-finger-tape markers. The Phase-1 homography maps any pixel to floor(x,y) in one
-metric frame, so the object and the gripper's marker-midpoint live in the same
-coordinates. We:
-
-  1. Measure a local 2x2 Jacobian J = d(gripper floor xy)/d(elbow, wrist_pitch)
-     by nudging each joint a few degrees and re-observing (real hardware, no
-     trusted kinematic model).
-  2. Drive the gripper's floor projection onto the object with delta =
-     J^-1 (object - gripper), applied in small clamped steps and RE-MEASURED each
-     iteration, so the gripper tip visually chases the object.
-  3. When aligned in the floor plane, descend on the floor curve and close.
-
-This replaces trial-and-error: every motion is computed from the measured
-Jacobian and the metric floor error.
+The open blue/red finger markers and the selected object's approach-side edge
+are aligned at a safe 35 mm hover. Forward reach is then locked: the fingers
+descend by shoulder height compensation only, so temporary FastSAM occlusion
+cannot switch targets or push the object away. A simulation-trained macro
+policy gates descend/close/lift, and the calibrated empty-jaw curve must confirm
+physical obstruction both before and after lift.
 """
 
 from pathlib import Path
@@ -25,7 +16,7 @@ import time
 import numpy as np
 
 import config
-from floor_calibrate import FloorHomography, OBSERVATION_POSE
+from floor_calibrate import FloorHomography
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,7 +28,6 @@ J_SHOULDER, J_ELBOW, J_WRIST = 1, 2, 3
 
 MAX_STEP_DEG = 3          # gentle per-waypoint joint change
 STEP_SETTLE_S = 0.25
-ALIGN_TOL_MM = 8.0        # floor-plane convergence tolerance
 ALIGN_MAX_ITERS = 26
 JAC_PERTURB_DEG = 4       # nudge size for Jacobian measurement
 OBJ_JUMP_REJECT_PX = 160  # reject a frame whose object pixel jumps this far
@@ -71,6 +61,8 @@ class FloorServo:
         from wrist_vision import WristDetector
         self.scene_detector = WristSceneDetector()
         self.marker_detector = WristDetector()
+        self.locked_target_center = None
+        self.shadow = None
 
     # -- gentle stepped motion -------------------------------------------------
     def slow_move(self, target, final_settle=None):
@@ -154,41 +146,76 @@ class FloorServo:
     HOVER_Z = 0.035
     GRASP_Z = 0.006
 
-    def _obj_and_marker_px(self):
-        """Return (object_pixel, marker_midpoint_pixel) at the current pose."""
+    @staticmethod
+    def candidate_grasp_edge(candidate):
+        """Approach-side edge used for both selection identity and alignment."""
+        return np.array((candidate.center[0],
+                         candidate.bbox[1] + candidate.bbox[3]), dtype=float)
+
+    def _obj_and_marker_px(self, reference=None):
+        """Return (object grasp-edge pixel, marker midpoint) at current pose.
+
+        The arm approaches toward increasing image y. Aligning an object's
+        centroid over-reaches by half its image height and bulldozes large
+        objects. The near bbox edge is the size-aware first-contact point.
+        """
         frame = _fresh_frame()
         scene, _ = self.scene_detector.scene(frame)
         obs, _ = self.marker_detector.detect(frame)
-        obj = None if not scene.ranked else np.array(scene.ranked[0].center)
+        if not scene.ranked:
+            obj = None
+        elif reference is None:
+            candidate = scene.ranked[0]
+            obj = self.candidate_grasp_edge(candidate)
+        else:
+            candidate = min(
+                scene.ranked,
+                key=lambda candidate: np.linalg.norm(
+                    self.candidate_grasp_edge(candidate)
+                    - reference))
+            obj = self.candidate_grasp_edge(candidate)
         mid = None if obs.gripper is None else np.array(obs.gripper.center)
         return obj, mid
 
-    def align(self, verbose=True):
+    def align(self, verbose=True, start_reach=0, selected=None):
         """Drive the object's image row onto the fingertip row at hover, using a
-        single forward-reach scalar (wrist_pitch then elbow)."""
+        single forward-reach scalar (wrist_pitch then elbow).
+
+        ``selected`` preserves the choice made by the multi-object/reject UI;
+        subsequent frames track the nearest grasp edge rather than silently
+        falling back to rank zero.
+        """
         # The open jaws span ~288px, so an object within ~half that of the
         # fingertip midpoint is already inside the jaws and graspable. Near
         # contact the object detection gets noisy (the gripper occludes it), so
         # we accept the first frame that lands the object within the jaw span and
         # also remember the best reach seen to fall back on.
-        ACCEPT_DV, ACCEPT_DU = 110.0, 70.0
-        reach = 0
+        # The old 110 px depth threshold only proved that the object was inside
+        # the projected jaw span.  It still left the fingertips in front of the
+        # object, which encouraged a bulldozing approach.  Center tightly before
+        # locking the forward axis and beginning vertical descent.
+        ACCEPT_DV, ACCEPT_DU = 26.0, 55.0
+        reach = int(np.clip(start_reach, 0, self.REACH_MAX))
         pose, wp, elbow = self._reach_pose(reach, self.HOVER_Z)
         self.slow_move(pose)
-        last_obj = None
+        last_obj = (None if selected is None
+                    else self.candidate_grasp_edge(selected))
+        tracking_initialized = selected is None
         best = None  # (abs(dv), reach)
         for it in range(ALIGN_MAX_ITERS):
-            obj, mid = self._obj_and_marker_px()
+            obj, mid = self._obj_and_marker_px(last_obj)
             if mid is None:
                 print(f"[servo] it={it}: markers lost; stopping"); break
             if obj is None:
                 print(f"[servo] it={it}: object not detected; retrying")
                 continue
-            if last_obj is not None and np.linalg.norm(obj - last_obj) > OBJ_JUMP_REJECT_PX:
+            if (tracking_initialized and last_obj is not None
+                    and np.linalg.norm(obj - last_obj) > OBJ_JUMP_REJECT_PX):
                 print(f"[servo] it={it}: object pixel jumped "
                       f"{np.linalg.norm(obj-last_obj):.0f}px -> outlier, ignoring frame")
                 continue
             last_obj = obj
+            tracking_initialized = True
             du, dv = float(obj[0] - mid[0]), float(obj[1] - mid[1])
             if verbose:
                 print(f"[servo] it={it} reach={reach}(wp={wp},el={elbow}) "
@@ -197,12 +224,14 @@ class FloorServo:
             if best is None or abs(dv) < best[0]:
                 best = (abs(dv), reach)
             if abs(dv) <= ACCEPT_DV and abs(du) <= ACCEPT_DU:
+                self.locked_target_center = obj.copy()
                 print(f"[servo] object within the jaw span at hover "
                       f"(du={du:.0f},dv={dv:.0f}) reach={reach} -> descend & close")
                 return reach
             if reach >= self.REACH_MAX:
                 break
-            delta = MAX_STEP_DEG if dv < 0 else -MAX_STEP_DEG
+            step = 1 if abs(dv) < 120 else MAX_STEP_DEG
+            delta = step if dv < 0 else -step
             reach = int(min(self.REACH_MAX, max(0, reach + delta)))
             pose, wp, elbow = self._reach_pose(reach, self.HOVER_Z)
             self.slow_move(pose)
@@ -214,55 +243,197 @@ class FloorServo:
               "move it a little closer to the base")
         return None
 
+    def _authorize_macro(self, expected, canonical_pose, *, target_visible):
+        """Require the simulation-trained shield and temporal vote on real data."""
+
+        from full_task_adapter import FullTaskShadowController, TaskAction
+
+        if self.shadow is None:
+            self.shadow = FullTaskShadowController()
+        self.shadow.reset()
+        expected = TaskAction(expected)
+        for vote in range(8):
+            frame = _fresh_frame(discard=1)
+            scene, observation = self.scene_detector.scene(frame)
+            target = None
+            if target_visible and scene.ranked:
+                reference = self.locked_target_center
+                candidate = (scene.ranked[0] if reference is None else min(
+                    scene.ranked,
+                    key=lambda candidate: np.linalg.norm(
+                        np.asarray((candidate.center[0],
+                                    candidate.bbox[1] + candidate.bbox[3]))
+                        - reference)))
+                from types import SimpleNamespace
+                target = SimpleNamespace(center=(
+                    candidate.center[0],
+                    candidate.bbox[1] + candidate.bbox[3]))
+            decision = self.shadow.decide(
+                scene, observation, canonical_pose, target=target,
+                target_locked=self.locked_target_center is not None)
+            print(f"[servo] policy vote={vote + 1} action={decision.action.name} "
+                  f"model_score={decision.confidence:.3f} expected={expected.name}")
+            if decision.action == expected:
+                return True
+            if decision.action != TaskAction.WAIT:
+                print(f"[servo] policy blocked {expected.name}: {decision.reason}")
+                return False
+        print(f"[servo] policy did not confirm {expected.name} in time")
+        return False
+
+    def _recover_open_hover(self, reach, reason):
+        print(f"[servo] RECOVER: {reason}")
+        self.slow_move(self._reach_pose(
+            reach, self.HOVER_Z, gripper=config.GRIP_OPEN)[0])
+        return False
+
+    def _contact_assessment(self):
+        from visual_contact import JawBaseline
+        baseline = JawBaseline.load()
+        observation, _ = self.marker_detector.detect(_fresh_frame())
+        return baseline.assess(config.GRIP_CLOSED, observation)
+
     def grasp(self, reach):
-        """Tracked descent: step the tool height down while re-observing and
-        nudging reach so the object stays under the fingertips all the way to the
-        floor (the fingertip floor point shifts with height, so a fixed reach
-        would miss). Then close, lift, and verify by object-disappearance."""
-        last_obj = None
+        """Fixed-reach vertical pinch, then camera-verified closed-jaw lift.
+
+        Once hover alignment has selected a reach, forward motion is forbidden.
+        Only shoulder changes lower the open fingers. Near-field FastSAM output
+        is diagnostic and never changes the target or reach after occlusion.
+        """
+        from full_task_adapter import TaskAction
+
+        if not config.FLOOR_GRASP_EXECUTE_VERIFIED:
+            print("[servo] physical grasp gate is disabled; stopping open at hover")
+            return False
+
+        if not self._authorize_macro(
+                TaskAction.DESCEND,
+                self._reach_pose(
+                    reach, self.HOVER_Z, gripper=config.GRIP_OPEN)[0],
+                target_visible=True):
+            return self._recover_open_hover(
+                reach, "trained policy did not authorize descent")
+
+        locked_obj, _locked_mid = self._obj_and_marker_px(
+            self.locked_target_center)
         for z in (0.030, 0.024, 0.018, 0.012, self.GRASP_Z):
             pose, wp, elbow = self._reach_pose(reach, z, gripper=config.GRIP_OPEN)
             self.slow_move(pose)
-            obj, mid = self._obj_and_marker_px()
+            obj, mid = self._obj_and_marker_px(locked_obj)
             if obj is not None and mid is not None:
-                if last_obj is None or np.linalg.norm(obj - last_obj) <= OBJ_JUMP_REJECT_PX:
-                    last_obj = obj
+                if (locked_obj is None
+                        or np.linalg.norm(obj - locked_obj) <= OBJ_JUMP_REJECT_PX):
                     du, dv = float(obj[0] - mid[0]), float(obj[1] - mid[1])
-                    print(f"[servo] descend z={z*1000:.0f}mm reach={reach} "
-                          f"du={du:.0f} dv={dv:.0f}")
-                    if dv < -40 and reach < self.REACH_MAX:      # object still beyond
-                        reach = int(min(self.REACH_MAX, reach + MAX_STEP_DEG))
-                    elif dv > 40 and reach > 0:                  # overshot toward base
-                        reach = int(max(0, reach - MAX_STEP_DEG))
+                    locked_obj = obj
+                    print(f"[servo] vertical descend z={z*1000:.0f}mm "
+                          f"LOCKED reach={reach} du={du:.0f} dv={dv:.0f}")
                 else:
-                    print(f"[servo] descend z={z*1000:.0f}mm: object occluded, hold reach")
-        # close at the floor, lift, verify
+                    print(f"[servo] vertical descend z={z*1000:.0f}mm: "
+                          "near-field mask changed; ignore it and keep locked reach")
+            else:
+                print(f"[servo] vertical descend z={z*1000:.0f}mm: "
+                      "target occluded; keep locked reach")
+
+        if not self._authorize_macro(
+                TaskAction.CLOSE,
+                self._reach_pose(
+                    reach, self.GRASP_Z, gripper=config.GRIP_OPEN)[0],
+                target_visible=False):
+            return self._recover_open_hover(
+                reach, "trained policy did not authorize close")
+
+        # Close at the fixed floor point. A hobby servo has no torque sensor, so
+        # the calibrated empty-jaw visual curve is the physical contact sensor.
         self.slow_move(self._reach_pose(reach, self.GRASP_Z, gripper=config.GRIP_CLOSED)[0])
+        try:
+            closed = self._contact_assessment()
+        except Exception as exc:
+            return self._recover_open_hover(
+                reach, f"contact baseline unavailable/inconsistent: {exc}")
+        print(f"[servo] close contact={closed.state}: {closed.reason}")
+        if not closed.contact:
+            return self._recover_open_hover(
+                reach, f"grasp not confirmed after close ({closed.state})")
+
+        if not self._authorize_macro(
+                TaskAction.LIFT,
+                self._reach_pose(
+                    reach, self.GRASP_Z, gripper=config.GRIP_CLOSED)[0],
+                target_visible=False):
+            return self._recover_open_hover(
+                reach, "trained policy did not authorize lift")
+
+        # Lift without ever opening. The previous code copied OBSERVATION_POSE,
+        # whose gripper component is 90=open, and therefore dropped the object
+        # before verification. Verify obstruction again at hover instead.
         self.slow_move(self._reach_pose(reach, self.HOVER_Z, gripper=config.GRIP_CLOSED)[0])
-        self.slow_move(list(OBSERVATION_POSE))
-        obj = self.object_floor()
-        if obj is None:
-            print("[servo] GRASP CONFIRMED: object no longer on the floor")
-            return True
-        print(f"[servo] grasp not confirmed: object still on floor at {np.round(obj,1)}")
-        return False
+        try:
+            lifted = self._contact_assessment()
+        except Exception as exc:
+            return self._recover_open_hover(
+                reach, f"post-lift contact check unavailable: {exc}")
+        print(f"[servo] lifted contact={lifted.state}: {lifted.reason}")
+        if not lifted.contact:
+            return self._recover_open_hover(
+                reach, f"object not retained through lift ({lifted.state})")
+        print("[servo] GRASP CONFIRMED: jaw remains obstructed after vertical lift")
+        return True
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--align-only", action="store_true",
                    help="run the floor-plane alignment servo and stop (no grasp)")
+    p.add_argument("--start-reach", type=int, default=0,
+                   help="start near a previously observed safe hover reach")
+    p.add_argument("--candidate-index", type=int, default=0,
+                   help="ranked object to grasp; 0 is the nearest candidate")
+    p.add_argument("--reject-count", type=int, default=0,
+                   help="apply this many 'not that one' vetoes before grasping")
     _args = p.parse_args()
+    if _args.candidate_index < 0 or _args.reject_count < 0:
+        p.error("candidate index and reject count must be non-negative")
+    if _args.candidate_index and _args.reject_count:
+        p.error("use either --candidate-index or --reject-count, not both")
     from arm_session import ArmSessionClient
+    from floor_grasp import CandidateSelector
     servo = FloorServo(ArmSessionClient(), FloorHomography.load())
-    wp = servo.align()
+    frame = _fresh_frame(discard=1)
+    scene, _ = servo.scene_detector.scene(frame)
+    if not scene.ranked:
+        print("[servo] no portable object detected; not moving")
+        return False
+    for index, candidate in enumerate(scene.ranked):
+        print(f"[servo] candidate #{index} center={candidate.center} "
+              f"bbox={candidate.bbox} area={candidate.area:.0f}")
+    if _args.candidate_index >= len(scene.ranked):
+        print(f"[servo] candidate #{_args.candidate_index} does not exist; "
+              f"only {len(scene.ranked)} detected")
+        return False
+    selected = scene.ranked[_args.candidate_index]
+    if _args.reject_count:
+        selector = CandidateSelector(
+            reject_radius_px=(config.FLOOR_REJECT_RADIUS_RATIO
+                              * math.hypot(frame.shape[1], frame.shape[0])))
+        selected = selector.choose(scene.ranked)
+        for rejection in range(_args.reject_count):
+            if selected is None:
+                break
+            print(f"[servo] REJECT #{rejection + 1}: center={selected.center}")
+            selector.reject(selected)
+            selected = selector.choose(scene.ranked)
+        if selected is None:
+            print("[servo] all detected objects were rejected; not moving")
+            return False
+    print(f"[servo] SELECTED center={selected.center}")
+    wp = servo.align(start_reach=_args.start_reach, selected=selected)
     if wp is None:
         print("[servo] alignment failed; not grasping")
-        return
+        return False
     if _args.align_only:
         print(f"[servo] align-only: aligned at wp={wp}, stopping before grasp")
-        return
-    servo.grasp(wp)
+        return True
+    return servo.grasp(wp)
 
 
 if __name__ == "__main__":
