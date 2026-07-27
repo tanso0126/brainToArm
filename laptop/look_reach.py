@@ -73,7 +73,7 @@ VECTOR_LATERAL_OPENING_FRACTION = 0.42
 # known-good grasp corridor spans roughly this band. A base row above it means
 # the object stands beyond the fixed reach (the sagging USB cable crosses the
 # corridor there and was once grabbed instead - hence the hard refusal).
-VECTOR_DEPTH_CORRIDOR_ROWS = (420.0, 660.0)
+VECTOR_DEPTH_CORRIDOR_ROWS = (420.0, 700.0)
 
 
 def cumulative_tool_angle_deg(pose):
