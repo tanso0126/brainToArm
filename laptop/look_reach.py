@@ -60,7 +60,11 @@ APPROACH_MIN_TOOL_Z_M = 0.026
 GRASP_MIN_TOOL_Z_M = 0.007
 MIN_PROGRESS_MM = 0.45
 MAX_TRACK_JUMP_PX = 190.0
-MIN_TRACK_CONFIDENCE = 0.32
+# FastSAM confidence sags for a correctly detected object once it is close
+# to the jaws (partial occlusion, low texture). Geometry - jaw corridor,
+# portable-area envelope, solved reach band - plus the fail-closed contact
+# and retention proofs are the real discriminators, so keep this low.
+MIN_TRACK_CONFIDENCE = 0.22
 MEASURED_TARGET_PX_PER_WRIST_DEG = -6.0
 AIM_ONLY_THRESHOLD_PX = 35.0
 VECTOR_START_POSE = [90, 110, 87, 150, 90, 170]
@@ -132,8 +136,11 @@ def task_delta(start, target):
 REACH_SOLVE_MIN_M = 0.285
 REACH_SOLVE_MAX_M = 0.375
 REACH_PROBE_MM = 8.0
-REACH_TOL_PX = 14.0
-REACH_MAX_ITERS = 7
+# The open jaws span ~285 px for ~45 mm, so 25 px is about 4 mm - well
+# inside the jaw span for a pencil-sized object. A tighter tolerance only
+# forced needless probes that pushed a nearly-aligned object out of view.
+REACH_TOL_PX = 25.0
+REACH_MAX_ITERS = 10
 REACH_MAX_STEP_MM = 18.0
 
 
@@ -201,14 +208,28 @@ def solve_object_reach(mover, detector, target_selector, start_pose,
     ``(pose, tool_x_m)`` at convergence, or ``(None, None)`` when the object
     cannot be reached inside the verified band.
     """
+    def reacquire(attempts=3):
+        """Re-lock the selected object after a commanded reach change.
+
+        A legitimate reach step moves the object a long way in the image, so a
+        single missed segmentation must not abort the approach; only repeated
+        failure does.
+        """
+        for _ in range(attempts):
+            scene, _ = detector.scene(frame_source(discard=1))
+            matched = target_selector.match(scene)
+            if matched is not None:
+                return scene, matched
+        return None, None
+
     pose = list(start_pose)
     tool = arm_fk.tool_position(pose)
     x_m, z_m = float(tool[0]), float(tool[2])
     gain = None
     previous = None
+    reprobes = 0
     for iteration in range(REACH_MAX_ITERS):
-        scene, _ = detector.scene(frame_source(discard=1))
-        target = target_selector.match(scene)
+        scene, target = reacquire()
         if target is None:
             logger("[look-reach] reach solve: target lost")
             return None, None
@@ -228,8 +249,7 @@ def solve_object_reach(mover, detector, target_selector, start_pose,
                                         REACH_SOLVE_MIN_M, REACH_SOLVE_MAX_M))
             probe_pose = pose_at_reach(start_pose, probe_x, z_m)
             mover.slow_move(probe_pose, final_settle=0.6)
-            probe_scene, _ = detector.scene(frame_source(discard=1))
-            probe_target = target_selector.match(probe_scene)
+            probe_scene, probe_target = reacquire()
             probe_error = _depth_error_px(probe_scene, probe_target)
             if probe_error is None:
                 logger("[look-reach] reach solve: lost target during probe")
@@ -253,8 +273,17 @@ def solve_object_reach(mover, detector, target_selector, start_pose,
                    "verified reach band")
             return None, None
         if previous is not None and abs(error) > abs(previous) + 6.0:
-            logger("[look-reach] depth error diverging; refusing descent")
-            return None, None
+            # Close to the jaws the row response is nonlinear, so a worsening
+            # step means the single measured gain is stale rather than that the
+            # object is unreachable. Re-measure it; only repeated failure aborts.
+            reprobes += 1
+            if reprobes > 2:
+                logger("[look-reach] depth error keeps diverging; no descent")
+                return None, None
+            logger("[look-reach] depth error grew; re-measuring reach gain")
+            gain = None
+            previous = None
+            continue
         previous = error
         pose = pose_at_reach(start_pose, new_x, z_m)
         mover.slow_move(pose, final_settle=0.6)
@@ -486,8 +515,12 @@ def run_constant_x_grasp(client, execute=False, advance_mm=-5.0,
                 "could not reach the selected object's depth; no descent")
         start = solved
         print(f"[look-reach] reach solved: tool x={solved_x*1000:.0f}mm")
-        scene, _ = detector.scene(frame_source(discard=1))
-        target = target_selector.match(scene)
+        scene = target = None
+        for _ in range(3):
+            scene, _ = detector.scene(frame_source(discard=1))
+            target = target_selector.match(scene)
+            if target is not None:
+                break
         if target is None:
             raise RuntimeError("target lost after reach solve")
         gripper = scene.gripper
@@ -522,9 +555,13 @@ def run_constant_x_grasp(client, execute=False, advance_mm=-5.0,
 
     _calibrate_empty_close(mover, high)
     mover.slow_move(start)
-    reacquired_frame = frame_source(discard=2)
-    reacquired_scene, _ = detector.scene(reacquired_frame)
-    target = target_selector.match(reacquired_scene)
+    target = None
+    for _ in range(3):
+        reacquired_frame = frame_source(discard=2)
+        reacquired_scene, _ = detector.scene(reacquired_frame)
+        target = target_selector.match(reacquired_scene)
+        if target is not None:
+            break
     if target is None:
         raise RuntimeError(
             "selected target was not reacquired after empty-close calibration")
@@ -715,8 +752,11 @@ def candidate_reachability(scene, candidate, pose=None, safety=None):
         return False, f"area ratio {ratio:.4f} outside portable-object envelope"
     if not 0.20 * width <= cx <= 0.80 * width:
         return False, f"x={cx:.0f}px outside bounded base-yaw search view"
-    if cy >= 0.82 * height:
-        return False, f"y={cy:.0f}px overlaps the near jaw/cable region"
+    # With adaptive reach the object's depth is solved and bounded to the
+    # verified 285-375 mm band, so a merely CLOSE object is legitimate. Only
+    # reject detections sitting essentially on top of the finger markers.
+    if cy >= 0.95 * height:
+        return False, f"y={cy:.0f}px sits on the finger markers"
 
     gripper = getattr(scene, "gripper", None)
     if gripper is None:
