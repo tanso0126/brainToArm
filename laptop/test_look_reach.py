@@ -212,6 +212,42 @@ class LookReachTests(unittest.TestCase):
                             and "base-yaw window" in item
                             for item in messages))
 
+    def test_lateral_only_failure_is_base_centering_candidate(self):
+        from look_reach import _laterally_fixable_candidate
+
+        class _AlwaysSafe:
+            @staticmethod
+            def pose_is_safe(_pose):
+                return True
+
+        off_center = candidate((470, 253), (440, 213, 60, 80), 4800, 0.9)
+        reachable = candidate((640, 450), (610, 410, 60, 80), 4800, 0.9)
+        selection = LookReachTargetSelector(logger=lambda *_: None)
+        found = _laterally_fixable_candidate(
+            multi_object_scene([off_center]), selection,
+            pose=[90, 124, 90, 180, 90, 170], safety=_AlwaysSafe())
+        self.assertIs(found, off_center)
+        # A reachable candidate suppresses centring entirely.
+        self.assertIsNone(_laterally_fixable_candidate(
+            multi_object_scene([off_center, reachable]), selection,
+            pose=None, safety=_AlwaysSafe()))
+
+    def test_vetoed_position_is_never_base_centered(self):
+        from look_reach import _laterally_fixable_candidate
+
+        class _AlwaysSafe:
+            @staticmethod
+            def pose_is_safe(_pose):
+                return True
+
+        off_center = candidate((470, 253), (440, 213, 60, 80), 4800, 0.9)
+        selection = LookReachTargetSelector(logger=lambda *_: None)
+        scene = multi_object_scene([off_center])
+        selection._ensure_selector(scene)
+        selection.selector.rejected_points = [(470.0, 253.0)]
+        self.assertIsNone(_laterally_fixable_candidate(
+            scene, selection, pose=None, safety=_AlwaysSafe()))
+
 
 if __name__ == "__main__":
     unittest.main()

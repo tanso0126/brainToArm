@@ -260,9 +260,43 @@ def run_constant_x_grasp(client, execute=False, advance_mm=-5.0,
         detector, target_selector=target_selector,
         reject_count=reject_count, pose=current,
         frame_source=frame_source)
+    if target is None and initial_scene is not None:
+        # A candidate that failed ONLY the lateral jaw window may still be
+        # reachable through the verified bounded base-yaw centring already
+        # exercised by FloorServo (measured Jacobian, ±BASE_CENTER_RANGE_DEG,
+        # <=3 deg steps, re-observed). Rejected (vetoed) locations are never
+        # centred on; reachability skips are not vetoes.
+        fixable = _laterally_fixable_candidate(
+            initial_scene, target_selector, pose=current)
+        if fixable is not None and not execute:
+            print("[look-reach] DRY RUN: candidate at "
+                  f"{tuple(round(v) for v in fixable.center)} needs base "
+                  "centring; no motion in dry run")
+            return {"state": "needs-base-centering", "moved": False}
+        if fixable is not None and execute:
+            pre_center = np.asarray(fixable.center, dtype=float)
+            print(f"[look-reach] BASE CENTERING on candidate at "
+                  f"{tuple(round(v) for v in pre_center)}")
+            centered_obj, _mid = mover._center_base_lateral(pre_center)
+            if centered_obj is None:
+                print("[look-reach] base centring failed closed; no motion")
+                return {"state": "no-target", "moved": True}
+            # Persistent vetoes are image positions; the rotation shifted the
+            # whole scene, so translate them by the centred candidate's
+            # observed displacement before re-selecting.
+            displacement = np.asarray(centered_obj, dtype=float) - pre_center
+            vetoes = target_selector.selector.rejected_points
+            target_selector.selector.rejected_points = [
+                (float(x + displacement[0]), float(y + displacement[1]))
+                for x, y in vetoes]
+            current = list(client.request({"command": "status"})["pose"])
+            initial_frame, initial_scene, target = acquire_initial_target(
+                detector, target_selector=target_selector,
+                reject_count=0, pose=current, frame_source=frame_source)
     if target is None:
         print("[look-reach] no reachable non-vetoed target; no motion")
         return {"state": "no-target", "moved": False}
+    start[config.J_BASE] = int(mover.base_angle)
 
     if not safety.transition_is_safe(current, start):
         raise RuntimeError("transition to vector start failed collision model")
@@ -671,6 +705,30 @@ def match_locked_target(scene, lock, selector=None):
             + 0.08 * abs(math.log(area_ratio)) - 0.08 * confidence
         eligible.append((score, candidate))
     return min(eligible, key=lambda item: item[0])[1] if eligible else None
+
+
+def _laterally_fixable_candidate(scene, target_selector, pose=None,
+                                 safety=None):
+    """Best non-vetoed candidate whose ONLY gate failure is the lateral window.
+
+    Used to decide bounded base centring. Returns ``None`` when any candidate
+    is already reachable (no centring needed) or when nothing fails purely
+    laterally. Vetoed image positions are excluded exactly as in selection.
+    """
+    safety = safety or PlanarSearchSafety()
+    ranked = getattr(scene, "ranked", None) or []
+    selector = target_selector._ensure_selector(scene)
+    fixable = None
+    for candidate in ranked:
+        if selector._is_rejected(candidate):
+            continue
+        ok, reason = candidate_reachability(
+            scene, candidate, pose=pose, safety=safety)
+        if ok:
+            return None
+        if fixable is None and reason.startswith("lateral error"):
+            fixable = candidate
+    return fixable
 
 
 def acquire_initial_target(detector, samples=3, target_selector=None,
