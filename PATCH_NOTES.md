@@ -1679,3 +1679,52 @@ Stepping elbow across four poses and tracking the object centroid:
 - Physical setup still required for a real pick: object placed within the floor
   band (nearer the base, near the centerline) and the workspace cables removed
   from the motion path.
+
+## Patch 43 — look-then-move floor calibration (Phase 1: pixel->floor homography)
+
+### Intent
+
+Real-hardware testing proved the actual blocker for the wrist-camera grasp is
+DEPTH, not reach: with the gripper tilted to aim at the object (wrist_pitch
+servo) and shoulder/elbow coordinated, the object could be driven to appear
+between the jaws in the image (gap ~20 px, x-centered), yet every close read the
+empty-jaw opening (~86 px) -- the fingertips closed at a different 3D depth than
+the object. One uncalibrated RGB camera cannot resolve that. The fix is to use
+the KNOWN floor plane as the depth constraint via a calibrated pixel->floor
+homography at a fixed observation pose (look-then-move).
+
+Also recorded honestly: the sim/analytic forward-kinematics reach (~0.44 m at
+floor) under-models the real arm, so grasp poses must be fitted on the real arm
+(Phase 2), not taken from the model.
+
+### Changes
+
+- Added `laptop/floor_calibrate.py`:
+  - Fixed `OBSERVATION_POSE = [90,112,90,158,90,170]` where the wrist camera views
+    the tabletop workspace (verified on hardware).
+  - `solve_homography` / `apply_homography` / `reprojection_rms`: pure DLT planar
+    homography (no camera intrinsics, no arm FK, no monocular depth). Because the
+    floor is a plane and the camera a pinhole, pixel<->floor is an exact
+    projective map -- this is what turns the known floor into real depth.
+  - `observe` parks at the observation pose and publishes a frame; `homography`
+    solves H from a checkerboard; `add-point`/`solve-points` are a
+    no-checkerboard fallback using >=4 manually measured object points; `test`
+    back-projects a pixel. Result saved to
+    `data/calibration/wrist_floor_homography.json`.
+- Added `test_floor_homography` (recovers a known projective map, reprojects a
+  held-out point exactly, rejects too-few correspondences).
+
+### Verification
+
+- `python3 laptop/test_pipeline.py` full suite passes.
+- Homography solver validated on synthetic pinhole+plane data: 0.18 mm RMS under
+  pixel noise; held-out floor point recovered to <0.2 mm.
+- `floor_calibrate.py observe` confirmed on hardware: arm parks at the
+  observation pose and a workspace frame is captured.
+
+### Remaining (Phase 2, before any physical-grasp claim)
+
+- floor(x,y) -> grasp servo pose fitted from real jaw-contact-confirmed grasps.
+- Physical checkerboard (or measured points) placement by the operator to solve H.
+- Milestones 1/2/3 are NOT considered done until a real object is grasped,
+  lifted, and verified on the physical arm.

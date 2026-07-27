@@ -940,6 +940,40 @@ def floor_pose_closed(elbow):
     return floor_pose(elbow, "grasp", gripper=config.GRIP_CLOSED)
 
 
+def test_floor_homography():
+    print("[floor-cal] pixel->floor homography from planar correspondences")
+    import numpy as np
+    from floor_calibrate import (
+        apply_homography, reprojection_rms, solve_homography, FloorHomography)
+    # A known floor->pixel projective map; recover its inverse pixel->floor and
+    # check a held-out point. This is the depth-from-known-plane core.
+    h_true = np.array([[2.1, 0.3, 640.0], [0.1, 2.4, 360.0],
+                       [0.0005, 0.0009, 1.0]])
+
+    def floor_to_pixel(point):
+        d = h_true @ np.array([point[0], point[1], 1.0])
+        return d[:2] / d[2]
+
+    floor = np.array([[0, 0], [200, 0], [200, 150], [0, 150],
+                      [100, 75], [50, 120], [180, 30]], dtype=float)
+    pixels = np.array([floor_to_pixel(p) for p in floor])
+    h = solve_homography(pixels, floor)
+    check(reprojection_rms(h, pixels, floor) < 1e-6,
+          "recovered homography reprojects the calibration points exactly")
+    held = apply_homography(h, floor_to_pixel([130, 90]))
+    check(abs(held[0] - 130) < 1e-3 and abs(held[1] - 90) < 1e-3,
+          "held-out floor point recovered from its pixel (known-plane depth)")
+    try:
+        solve_homography([[0, 0], [1, 1], [2, 2]], [[0, 0], [1, 1], [2, 2]])
+        check(False, "too-few correspondences rejected")
+    except ValueError:
+        check(True, "too-few correspondences rejected")
+    saved = FloorHomography(matrix=h.tolist(), observation_pose=[90, 112, 90, 158, 90, 170],
+                            rms_mm=0.0, source="test", created_at="t")
+    check(abs(saved.pixel_to_floor(floor_to_pixel([50, 50]))[0] - 50) < 1e-3,
+          "serializable calibration reprojects through its stored matrix")
+
+
 def test_pick_place():
     print("[pickplace] visual correction is preserved through grasp + delivery")
     import random
@@ -1011,6 +1045,7 @@ if __name__ == "__main__":
     test_visual_gripper_contact()
     test_floor_motion_and_persistent_session()
     test_floor_grasp_selection_and_reject()
+    test_floor_homography()
     test_pick_place()
     test_servo_visibility_failure()
     print("\nALL TESTS PASSED")
