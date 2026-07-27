@@ -49,10 +49,10 @@ _SHOULDER_FLOOR_SCALE = 0.250
 # The calibrated floor curve spans shoulder commands 113..131 when elbow moves
 # through 110..78, so the near-floor slope must cover that full interval.
 _SHOULDER_FLOOR_ANCHOR_SERVO = 113.0
-_SHOULDER_FLOOR_ANCHOR_JOINT = 57.25
-_SHOULDER_HOME_JOINT = -30.0
-_ELBOW_SCALE = 0.200
-_ELBOW_REFERENCE_JOINT = -70.0
+_SHOULDER_FLOOR_ANCHOR_JOINT = -20.5529
+_SHOULDER_HOME_JOINT = -60.0
+_ELBOW_SCALE = 0.300
+_ELBOW_REFERENCE_JOINT = 68.4919
 _WRIST_PITCH_SCALE = -1.500
 
 
@@ -74,9 +74,11 @@ class RobotSpec:
     upper_arm_m: float = 0.241767
     forearm_m: float = 0.1725
     hand_m: float = 0.090
+    # Physical jaw-row reference used by the wrist camera and floor controller.
+    grasp_center_x_m: float = 0.090
     # Fitted so the measured 142-degree grasp reference puts the tool center
     # just above the shared z=0 floor while 124 degrees remains a safe hover.
-    shoulder_height_m: float = 0.205
+    shoulder_height_m: float = 0.210
 
     @classmethod
     def from_manifest(cls) -> "RobotSpec":
@@ -164,6 +166,12 @@ def _range_text(values: tuple[float, float]) -> str:
     return f"{_f(values[0])} {_f(values[1])}"
 
 
+def _angular_joint_range_text(values: tuple[float, float]) -> str:
+    """MJCF joint ranges follow compiler angle=degree; actuator ctrl stays rad."""
+
+    return _range_text(tuple(math.degrees(value) for value in values))
+
+
 def _rgb_text(value: Iterable[float], name: str) -> str:
     rgb = tuple(float(channel) for channel in value)
     if len(rgb) != 3 or any(not 0.0 <= channel <= 1.0 for channel in rgb):
@@ -222,10 +230,18 @@ def build_mjcf(
     upper = spec.upper_arm_m * link_scale
     fore = spec.forearm_m * link_scale
     hand = spec.hand_m * link_scale
-    shoulder_range = _range_text(_joint_range("shoulder", spec))
-    elbow_range = _range_text(_joint_range("elbow", spec))
-    wrist_range = _range_text(_joint_range("wrist_pitch", spec))
-    roll_range = _range_text(_joint_range("wrist_roll", spec))
+    shoulder_values = _joint_range("shoulder", spec)
+    elbow_values = _joint_range("elbow", spec)
+    wrist_values = _joint_range("wrist_pitch", spec)
+    roll_values = _joint_range("wrist_roll", spec)
+    shoulder_range = _range_text(shoulder_values)
+    elbow_range = _range_text(elbow_values)
+    wrist_range = _range_text(wrist_values)
+    roll_range = _range_text(roll_values)
+    shoulder_joint_range = _angular_joint_range_text(shoulder_values)
+    elbow_joint_range = _angular_joint_range_text(elbow_values)
+    wrist_joint_range = _angular_joint_range_text(wrist_values)
+    roll_joint_range = _angular_joint_range_text(roll_values)
 
     # The camera's default optical axis is local -Z.  A randomized pitch is an
     # installation-tolerance perturbation, not privileged policy information.
@@ -242,10 +258,11 @@ def build_mjcf(
     <joint damping="1.5" armature="0.015"/>
     <geom friction="0.9 0.01 0.001" solref="0.01 1" solimp="0.9 0.95 0.001"/>
     <default class="visual">
-      <geom type="mesh" contype="0" conaffinity="0" group="2" rgba="0.12 0.14 0.17 1"/>
+      <geom type="mesh" contype="0" conaffinity="0" group="2" mass="0" rgba="0.12 0.14 0.17 1"/>
     </default>
     <default class="collision">
-      <geom group="3" rgba="0.22 0.24 0.28 1"/>
+      <!-- Robot geoms contact floor/objects (class 1/2) but not each other. -->
+      <geom group="3" contype="2" conaffinity="1" rgba="0.22 0.24 0.28 1"/>
     </default>
   </default>
   <asset>
@@ -272,19 +289,19 @@ def build_mjcf(
       <geom name="base_mesh" class="visual" mesh="base_case"/>
       <geom name="rotor_mesh" class="visual" mesh="base_rotor" pos="0 0 0.08"/>
       <body name="shoulder_link" pos="0 0 {_f(spec.shoulder_height_m)}">
-        <joint name="shoulder" type="hinge" axis="0 1 0" range="{shoulder_range}"/>
+        <joint name="shoulder" type="hinge" axis="0 1 0" range="{shoulder_joint_range}"/>
         <geom name="upper_collision" class="collision" type="capsule" fromto="0 0 0 {_f(upper)} 0 0" size="0.025"/>
         <geom name="upper_mesh" class="visual" mesh="upper_visual" pos="0.1275 0 0.02" euler="0 90 0"/>
         <body name="elbow_link" pos="{_f(upper)} 0 0">
-          <joint name="elbow" type="hinge" axis="0 1 0" range="{elbow_range}"/>
+          <joint name="elbow" type="hinge" axis="0 1 0" range="{elbow_joint_range}"/>
           <geom name="fore_collision" class="collision" type="capsule" fromto="0 0 0 {_f(fore)} 0 0" size="0.024"/>
           <geom name="fore_mesh" class="visual" mesh="fore_visual" pos="0.1525 0 0"/>
           <body name="wrist_pitch_link" pos="{_f(fore)} 0 0">
-            <joint name="wrist_pitch" type="hinge" axis="0 1 0" range="{wrist_range}"/>
+            <joint name="wrist_pitch" type="hinge" axis="0 1 0" range="{wrist_joint_range}"/>
             <geom name="wrist_collision" class="collision" type="capsule" fromto="0 0 0 0.045 0 0" size="0.022"/>
             <geom name="wrist_mesh" class="visual" mesh="wrist_visual" pos="0.022 0 0" euler="0 90 0"/>
             <body name="wrist_roll_link" pos="0.045 0 0">
-              <joint name="wrist_roll" type="hinge" axis="1 0 0" range="{roll_range}"/>
+              <joint name="wrist_roll" type="hinge" axis="1 0 0" range="{roll_joint_range}"/>
               <geom name="palm_collision" class="collision" type="box" pos="0.022 0 0" size="0.027 0.028 0.012"/>
               <geom name="palm_mesh" class="visual" mesh="palm_visual" pos="0.022 0 -0.0075"/>
               <camera name="wrist" pos="{_f(camera_x)} 0 {_f(camera_z)}" euler="0 {_f(camera_pitch)} {_f(camera_roll)}" fovy="{_f(camera_fovy)}"/>
@@ -292,17 +309,17 @@ def build_mjcf(
 
               <body name="left_finger" pos="0 0 0">
                 <joint name="grip_left" type="slide" axis="0 1 0" range="0.007 0.045" damping="3"/>
-                <geom name="left_finger_collision" class="collision" type="box" pos="0.064 0 -0.004" size="0.037 0.006 0.009"/>
+                <geom name="left_finger_collision" class="collision" type="box" pos="0.064 0 -0.004" size="0.037 0.007 0.011" friction="2.8 0.08 0.02" solref="0.006 1"/>
                 <geom name="left_finger_mesh" class="visual" mesh="finger_visual" pos="0.034 -0.008 -0.006"/>
                 <geom name="blue_marker" type="box" pos="0.074 0 0.007" size="0.016 0.007 0.004" contype="0" conaffinity="0" rgba="0.02 0.20 1 1"/>
               </body>
               <body name="right_finger" pos="0 0 0">
                 <joint name="grip_right" type="slide" axis="0 -1 0" range="0.007 0.045" damping="3"/>
-                <geom name="right_finger_collision" class="collision" type="box" pos="0.064 0 -0.004" size="0.037 0.006 0.009"/>
+                <geom name="right_finger_collision" class="collision" type="box" pos="0.064 0 -0.004" size="0.037 0.007 0.011" friction="2.8 0.08 0.02" solref="0.006 1"/>
                 <geom name="right_finger_mesh" class="visual" mesh="finger_visual" pos="0.034 -0.008 -0.006" euler="180 0 0"/>
                 <geom name="red_marker" type="box" pos="0.074 0 0.007" size="0.016 0.007 0.004" contype="0" conaffinity="0" rgba="1 0.03 0.02 1"/>
               </body>
-              <site name="tool_center" pos="{_f(hand)} 0 -0.008" size="0.0001" rgba="0 0 0 0"/>
+              <site name="tool_center" pos="{_f(spec.grasp_center_x_m * link_scale)} 0 -0.008" size="0.0001" rgba="0 0 0 0"/>
             </body>
           </body>
         </body>
@@ -315,12 +332,12 @@ def build_mjcf(
     </body>
   </worldbody>
   <actuator>
-    <position name="shoulder_position" joint="shoulder" kp="45" kv="6" ctrllimited="true" ctrlrange="{shoulder_range}"/>
-    <position name="elbow_position" joint="elbow" kp="38" kv="5" ctrllimited="true" ctrlrange="{elbow_range}"/>
-    <position name="wrist_pitch_position" joint="wrist_pitch" kp="18" kv="2.5" ctrllimited="true" ctrlrange="{wrist_range}"/>
-    <position name="wrist_roll_position" joint="wrist_roll" kp="12" kv="1.5" ctrllimited="true" ctrlrange="{roll_range}"/>
-    <position name="grip_left_position" joint="grip_left" kp="80" kv="5" ctrllimited="true" ctrlrange="0.007 0.045"/>
-    <position name="grip_right_position" joint="grip_right" kp="80" kv="5" ctrllimited="true" ctrlrange="0.007 0.045"/>
+    <position name="shoulder_position" joint="shoulder" kp="220" kv="18" ctrllimited="true" ctrlrange="{shoulder_range}"/>
+    <position name="elbow_position" joint="elbow" kp="180" kv="14" ctrllimited="true" ctrlrange="{elbow_range}"/>
+    <position name="wrist_pitch_position" joint="wrist_pitch" kp="90" kv="8" ctrllimited="true" ctrlrange="{wrist_range}"/>
+    <position name="wrist_roll_position" joint="wrist_roll" kp="60" kv="5" ctrllimited="true" ctrlrange="{roll_range}"/>
+    <position name="grip_left_position" joint="grip_left" kp="520" kv="20" ctrllimited="true" ctrlrange="0.007 0.045"/>
+    <position name="grip_right_position" joint="grip_right" kp="520" kv="20" ctrllimited="true" ctrlrange="0.007 0.045"/>
   </actuator>
 </mujoco>"""
 

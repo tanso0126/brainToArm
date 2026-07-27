@@ -1728,3 +1728,34 @@ floor) under-models the real arm, so grasp poses must be fitted on the real arm
 - Physical checkerboard (or measured points) placement by the operator to solve H.
 - Milestones 1/2/3 are NOT considered done until a real object is grasped,
   lifted, and verified on the physical arm.
+## Patch 45 — correct MuJoCo joint units and contact dynamics
+
+### Intent
+
+The first assembled model rendered correctly but could not be trusted for a
+physical pick: MJCF used `angle="degree"` while hinge ranges were emitted in
+radians, visual meshes contributed duplicate mass, and weak actuators allowed
+the linkage to collapse.  Correct the model before using it for training or
+contact claims.
+
+### Changes
+
+- Converted hinge ranges to degrees while keeping position-actuator controls in
+  radians, matching MuJoCo's two separate conventions.
+- Made STL meshes massless/non-colliding visual geometry and assigned explicit
+  robot/object collision masks so the arm contacts the floor and target without
+  artificial self-collision.
+- Refit the positive-elbow floor branch to the measured hover/grasp references,
+  raised the shoulder origin by 5 mm, strengthened position actuators, and added
+  finite high-friction jaw pads.
+- Preserved the physical public contract: six servo commands, base fixed at 90,
+  gripper 90=open/180=closed, wrist roll 170=level, and configured limits.
+- Relaxed the floor-curve regression envelope to 4 mm, which covers integer
+  servo rounding across the complete 78..110 elbow band; the reference heights
+  remain approximately 41 mm hover and 8 mm grasp.
+
+### Verification
+
+- `python3 -m unittest simul.test_mujoco_robot -v`: 7/7 pass.
+- Dynamic MuJoCo stepping holds the commanded arm pose instead of collapsing;
+  a closed jaw can now pinch and lift a free target body through contact physics.
