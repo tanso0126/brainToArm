@@ -2283,3 +2283,26 @@ PYTHONPATH=laptop python3 laptop/table_touch_calibrate.py \
 - Targeted `py_compile` and `git diff --check`: pass.
 - No serial port or camera device was opened. No `simul/` or training file was
   modified or executed.
+
+## Patch 57 — physical finding: base servo (motor 1) non-responsive
+
+### Evidence
+
+- Bounded base centring engaged correctly on the laterally offset target
+  (u≈470 vs jaw line u≈630) but measured only 0.13 px/deg image response.
+- Direct test: base commanded 92→95→100 produced 0.2–1.9 px scene shift
+  (hundreds expected). A 85↔98 stiction-break jiggle changed nothing
+  (8° → 1.7 px). Firmware accepts and slews the command; the physical
+  servo does not turn. Motor 1 previously failed and was repaired; it is
+  again electrically dead or mechanically decoupled (possibly a connector
+  pulled during the bench rearrangement).
+
+### Consequence
+
+- The planar arm cannot cancel lateral offsets. The only graspable object
+  currently sits ~140 px (~15 mm) left of the sagittal line, so physical
+  goals 2/3 are blocked by hardware, not software. Software for goals 2/3
+  (multi-candidate selection, position-veto reject, bounded base centring)
+  is complete and green (16/16 look_reach tests).
+- Resolution requires one of: reseating/repairing the motor-1 servo lead,
+  or placing target objects on the arm's centerline corridor (±4 mm).
