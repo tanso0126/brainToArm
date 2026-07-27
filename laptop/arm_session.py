@@ -33,6 +33,7 @@ from floor_motion import floor_pose, floor_waypoints
 
 ROOT = Path(__file__).resolve().parents[1]
 WRIST_RAW_FRAME = ROOT / "data" / "vision" / "wrist_camera_latest_raw.jpg"
+DEEPEST_TABLE_TOUCH_Z_M = -0.020
 
 
 def session_socket_path(value=None):
@@ -86,13 +87,14 @@ class ArmSessionServer:
                 f"autonomous motion rejected: wrist frame is stale ({age:.1f}s old)")
 
     def _move_sequence(self, poses, timeout=15.0, settle_s=0.0,
-                       require_camera=False):
+                       require_camera=False, safety=None):
         poses = self._validated_sequence(poses)
         current = self.arm.status()
+        safety = self.safety if safety is None else safety
         for pose in poses:
             if require_camera:
                 self._assert_camera_live()
-            report = self.safety.transition_report(current, pose)
+            report = safety.transition_report(current, pose)
             if not report.safe:
                 raise RuntimeError(
                     "motion rejected before serial write: " + report.explain())
@@ -128,6 +130,23 @@ class ArmSessionServer:
                 settle_s=request.get("settle_s", 0.0),
                 require_camera=bool(request.get("require_camera", False)))
             return {"ok": True, "pose": pose}
+        if command == "table_touch_move":
+            table_z_m = float(request.get("table_z_m"))
+            if not DEEPEST_TABLE_TOUCH_Z_M <= table_z_m <= 0.0:
+                raise ValueError(
+                    "table-touch z floor must be between "
+                    f"{DEEPEST_TABLE_TOUCH_Z_M * 1000:.0f} and 0 mm")
+            # Calibration may probe below the old z=0 estimate, but it does not
+            # bypass collision checking: only the table plane moves. Base,
+            # mast, self, camera, and swept-trajectory checks all remain active.
+            calibration_safety = PhysicalArmSafety(table_z_m=table_z_m)
+            pose = self._move_sequence(
+                [request.get("pose")],
+                timeout=request.get("timeout", 15.0),
+                settle_s=request.get("settle_s", 0.0),
+                require_camera=bool(request.get("require_camera", False)),
+                safety=calibration_safety)
+            return {"ok": True, "pose": pose, "table_z_m": table_z_m}
         if command == "sequence":
             pose = self._move_sequence(
                 request.get("poses"),

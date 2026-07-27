@@ -135,11 +135,15 @@ def _segment_cylinder_distance(start, end, radius, bottom, top):
 class PhysicalArmSafety:
     """Collision report for a pose and every firmware slew state."""
 
-    def __init__(self, margin_m=MODEL_MARGIN_M, slew_step_deg=TRAJECTORY_STEP_DEG):
+    def __init__(self, margin_m=MODEL_MARGIN_M, slew_step_deg=TRAJECTORY_STEP_DEG,
+                 table_z_m=0.0):
         self.margin_m = float(margin_m)
         self.slew_step_deg = float(slew_step_deg)
+        self.table_z_m = float(table_z_m)
         if self.margin_m < 0 or self.slew_step_deg <= 0:
             raise ValueError("safety margin must be nonnegative and step positive")
+        if not math.isfinite(self.table_z_m):
+            raise ValueError("table z must be finite")
 
     @staticmethod
     def _validate_pose(pose):
@@ -199,11 +203,15 @@ class PhysicalArmSafety:
             ("forearm", (g.elbow, g.wrist_pitch), FORE_RADIUS_M),
             ("wrist", (g.wrist_pitch, g.wrist_roll), WRIST_RADIUS_M),
         ):
-            clearance = min(float(point[2]) for point in points) - radius - self.margin_m
+            clearance = (min(float(point[2]) for point in points)
+                         - self.table_z_m - radius - self.margin_m)
             check("table", clearance, f"{name} envelope reaches below table")
-        check("tool-through-table", float(g.tool[2]) - MIN_TOOL_Z_M,
+        minimum_tool_z_m = self.table_z_m + MIN_TOOL_Z_M
+        check("tool-through-table", float(g.tool[2]) - minimum_tool_z_m,
               "fingertip centre is commanded below calibrated floor tolerance")
-        check("camera-table", float(g.camera[2]) - CAMERA_RADIUS_M - self.margin_m,
+        check("camera-table",
+              float(g.camera[2]) - self.table_z_m
+              - CAMERA_RADIUS_M - self.margin_m,
               "mounted webcam reaches the table")
 
         # Non-adjacent self-collision.  Adjacent links share their joint by

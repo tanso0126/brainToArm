@@ -99,9 +99,11 @@ def _fresh_frame(discard=None, timeout=8.0):
 
 
 class FloorServo:
-    def __init__(self, client, calib):
+    def __init__(self, client, calib, move_command="move", move_options=None):
         self.client = client
         self.calib = calib
+        self.move_command = str(move_command)
+        self.move_options = dict(move_options or {})
         from floor_grasp import WristSceneDetector
         from wrist_vision import WristDetector
         self.scene_detector = WristSceneDetector()
@@ -127,10 +129,12 @@ class FloorServo:
         for i in range(1, steps + 1):
             frac = i / steps
             wp = [int(round(c + (t - c) * frac)) for c, t in zip(current, target)]
-            self.client.request({
-                "command": "move", "pose": wp,
+            request = dict(self.move_options)
+            request.update({
+                "command": self.move_command, "pose": wp,
                 "require_camera": True,
                 "settle_s": final_settle if i == steps else STEP_SETTLE_S})
+            self.client.request(request)
 
     # -- observation -----------------------------------------------------------
     def object_floor(self):

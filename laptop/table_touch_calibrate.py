@@ -2,7 +2,7 @@
 
 The eye-in-hand finger tapes are rigid in camera coordinates, so their ordinary
 pixel motion cannot reveal a world-space descent.  Instead this routine compares
-the table background immediately before/after each 2 mm fixed-pitch command.
+the table background immediately before/after each fixed-pitch command.
 Before contact the wrist camera moves and table features flow; first contact can
 momentarily collapse that flow.  The compliant printed fingers may then flex
 while the camera resumes moving, so two consecutive large finger-marker shifts
@@ -23,23 +23,26 @@ from scipy.optimize import least_squares
 
 import arm_fk
 import config
-from arm_session import ArmSessionClient
+from arm_safety import PhysicalArmSafety
+from arm_session import ArmSessionClient, DEEPEST_TABLE_TOUCH_Z_M
 from floor_servo import FloorServo, _fresh_frame
 from look_reach import VECTOR_START_POSE, cumulative_tool_angle_deg
-from wrist_search import PlanarSearchSafety
 
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "data" / "calibration" / "table_touch.json"
-# The current object is centred near x=0.350 m. Touch on the clear, proximal
-# table while remaining outside the conservative 287 mm base/hand keep-out.
-# This remains configurable at the CLI for a changed setup.
-TOUCH_X_M = 0.300
+# The verified clean wood is at x=0.330 m, just proximal to the known-good
+# object at x=0.350 m. x=0.300 is forbidden: the sagging USB cable, Uno-box
+# edge, and table edge there generated misleading snag/deformation evidence.
+TOUCH_X_M = 0.330
 START_Z_M = 0.040
-# The collision interlock permits only a small negative FK tolerance. Integer
-# servo quantisation puts this request near -1.6 mm, still above that bound.
+# Default remains the old hardware-safe dry limit. At clean x=0.330 m, physical
+# contact is now expected around FK z=-12..-6 mm; the operator explicitly opts
+# into that deeper probe with ``--min-z-mm -18``.
 MIN_COMMAND_Z_M = -0.002
 STEP_Z_M = 0.002
+FINE_APPROACH_BELOW_Z_M = -0.004
+FINE_STEP_Z_M = 0.001
 SETTLE_S = 1.2
 BACKLASH_DEG = 5
 MARKER_CONTACT_SHIFT_PX = 3.0
@@ -93,6 +96,47 @@ def solve_fixed_pitch_pose(x_m, z_m, pitch_deg, guess, template=None):
     return pose
 
 
+def _fine_descent_pose(x_m, z_m, pitch_deg, candidate, previous,
+                       previous_z_m):
+    """Choose a distinct nearby integer pose for a real ~1 mm descent."""
+    best = None
+    for shoulder in range(previous[config.J_SHOULDER] - 3,
+                          previous[config.J_SHOULDER] + 4):
+        for elbow in range(previous[config.J_ELBOW] - 3,
+                           previous[config.J_ELBOW] + 4):
+            for wrist in range(previous[config.J_WRIST] - 3,
+                               previous[config.J_WRIST] + 4):
+                values = (shoulder, elbow, wrist)
+                if any(not config.SERVO_MIN[joint] <= value
+                       <= config.SERVO_MAX[joint]
+                       for joint, value in zip(
+                           (config.J_SHOULDER, config.J_ELBOW,
+                            config.J_WRIST), values)):
+                    continue
+                pose = list(candidate)
+                for joint, value in zip(
+                        (config.J_SHOULDER, config.J_ELBOW, config.J_WRIST),
+                        values):
+                    pose[joint] = value
+                tool = arm_fk.tool_position(pose)
+                residual = np.asarray((
+                    (tool[0] - x_m) * 1000.0,
+                    (tool[2] - z_m) * 1000.0,
+                    cumulative_tool_angle_deg(pose) - pitch_deg))
+                # Preserve the existing x/pitch tolerances and require a real
+                # sub-2 mm downward move despite integer servo quantization.
+                descent = previous_z_m - float(tool[2])
+                if (not 0.00035 <= descent <= 0.0016
+                        or abs(residual[0]) > 2.0
+                        or abs(residual[1]) > 1.2
+                        or abs(residual[2]) > 1.5):
+                    continue
+                score = float(np.dot(residual, residual))
+                if best is None or score < best[0]:
+                    best = (score, pose)
+    return candidate if best is None else best[1]
+
+
 def fixed_pitch_path(x_m=TOUCH_X_M, start_z_m=START_Z_M,
                      minimum_z_m=MIN_COMMAND_Z_M, step_z_m=STEP_Z_M):
     pitch = cumulative_tool_angle_deg(VECTOR_START_POSE)
@@ -103,17 +147,26 @@ def fixed_pitch_path(x_m=TOUCH_X_M, start_z_m=START_Z_M,
     z = float(start_z_m)
     while z >= minimum_z_m - 1e-9:
         pose = solve_fixed_pitch_pose(x_m, z, pitch, guess)
+        if (last_pose is not None
+                and z < FINE_APPROACH_BELOW_Z_M - 1e-12):
+            pose = _fine_descent_pose(
+                x_m, z, pitch, pose, last_pose, last_actual_z)
         guess = np.asarray(pose[1:4], dtype=float)
         actual_z = float(arm_fk.tool_position(pose)[2])
-        # Integer servo quantization maps adjacent ideal 2 mm levels to the same
+        # Integer servo quantization can map adjacent requested levels to the same
         # command. Never execute/measure a duplicate: it would create a fake
         # zero-flow "contact" sample without requesting physical descent.
+        minimum_descent = (
+            0.00035 if z < FINE_APPROACH_BELOW_Z_M - 1e-12 else 0.0007)
         if (pose != last_pose
-                and (last_actual_z is None or actual_z < last_actual_z - 0.0007)):
+                and (last_actual_z is None
+                     or actual_z < last_actual_z - minimum_descent)):
             path.append((z, pose))
             last_pose = pose
             last_actual_z = actual_z
-        z -= step_z_m
+        z -= (FINE_STEP_Z_M
+              if z <= FINE_APPROACH_BELOW_Z_M + 1e-12
+              else step_z_m)
     return path
 
 
@@ -128,39 +181,83 @@ def backlash_prepose(target, amount=BACKLASH_DEG):
 def median_table_flow(before, after):
     """Robust median table-feature displacement between two wrist frames."""
     import cv2
+    if (before is None or after is None or before.shape != after.shape
+            or before.ndim != 3 or before.shape[2] != 3):
+        return None, 0
+    if ((np.issubdtype(before.dtype, np.floating)
+         and not np.isfinite(before).all())
+            or (np.issubdtype(after.dtype, np.floating)
+                and not np.isfinite(after).all())):
+        return None, 0
     gray_before = cv2.cvtColor(before, cv2.COLOR_BGR2GRAY)
     gray_after = cv2.cvtColor(after, cv2.COLOR_BGR2GRAY)
     height, width = gray_before.shape
-    mask = np.zeros_like(gray_before)
+
+    def estimate(points):
+        if points is None or len(points) < 12:
+            return None, 0
+        moved, status, _error = cv2.calcOpticalFlowPyrLK(
+            gray_before, gray_after, points, None,
+            winSize=(31, 31), maxLevel=3,
+            criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
+                      30, 0.01))
+        if moved is None or status is None:
+            return None, 0
+        original = points.reshape(-1, 2)
+        moved = moved.reshape(-1, 2)
+        valid = status.reshape(-1).astype(bool)
+        valid &= np.isfinite(original).all(axis=1)
+        valid &= np.isfinite(moved).all(axis=1)
+        displacement = moved[valid] - original[valid]
+        if len(displacement) < 10:
+            return None, len(displacement)
+        # Reject independently moving outliers (cable/lighting edge) with a
+        # median absolute-deviation gate, then report translational flow.
+        centre = np.median(displacement, axis=0)
+        residual = np.linalg.norm(displacement - centre, axis=1)
+        finite_residual = np.isfinite(residual)
+        displacement = displacement[finite_residual]
+        residual = residual[finite_residual]
+        if len(residual) < 10:
+            return None, len(residual)
+        residual_median = float(np.median(residual))
+        mad = float(np.median(np.abs(residual - residual_median)))
+        if not np.isfinite(residual_median) or not np.isfinite(mad):
+            return None, 0
+        keep = residual <= max(
+            1.0, residual_median + 3.0 * max(mad, 0.1))
+        kept = int(np.count_nonzero(keep))
+        if kept < 10:
+            return None, kept
+        vector = np.median(displacement[keep], axis=0)
+        magnitude = float(np.linalg.norm(vector))
+        if not np.isfinite(magnitude):
+            return None, kept
+        return magnitude, kept
+
+    primary_mask = np.zeros_like(gray_before)
     # Table-only middle band: exclude gripper/USB cable at the bottom and room
     # clutter/horizon at the top.  No background reference image is required.
-    mask[int(0.12 * height):int(0.72 * height),
-         int(0.12 * width):int(0.78 * width)] = 255
-    points = cv2.goodFeaturesToTrack(
+    primary_mask[int(0.12 * height):int(0.72 * height),
+                 int(0.12 * width):int(0.78 * width)] = 255
+    primary_points = cv2.goodFeaturesToTrack(
         gray_before, maxCorners=300, qualityLevel=0.01,
-        minDistance=8, mask=mask, blockSize=7)
-    if points is None or len(points) < 12:
-        return None, 0
-    moved, status, _error = cv2.calcOpticalFlowPyrLK(
-        gray_before, gray_after, points, None,
-        winSize=(31, 31), maxLevel=3,
-        criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
-    if moved is None:
-        return None, 0
-    valid = status.reshape(-1).astype(bool)
-    displacement = moved.reshape(-1, 2)[valid] - points.reshape(-1, 2)[valid]
-    if len(displacement) < 10:
-        return None, len(displacement)
-    # Reject independently moving outliers (cable/lighting edge) with a median
-    # absolute-deviation gate, then report translational flow magnitude.
-    centre = np.median(displacement, axis=0)
-    residual = np.linalg.norm(displacement - centre, axis=1)
-    mad = float(np.median(np.abs(residual - np.median(residual))))
-    keep = residual <= max(1.0, np.median(residual) + 3.0 * max(mad, 0.1))
-    if np.count_nonzero(keep) < 10:
-        return None, int(np.count_nonzero(keep))
-    vector = np.median(displacement[keep], axis=0)
-    return float(np.linalg.norm(vector)), int(np.count_nonzero(keep))
+        minDistance=8, mask=primary_mask, blockSize=7)
+    primary = estimate(primary_points)
+    if primary[1] >= 150:
+        return primary
+
+    # Close to the wood the original band yielded only 75–105 tracked points.
+    # Retry with more table area and a lower corner threshold. The bottom 12%
+    # remains excluded so the gripper and cable cannot dominate the estimate.
+    expanded_mask = np.zeros_like(gray_before)
+    expanded_mask[int(0.05 * height):int(0.88 * height),
+                  int(0.04 * width):int(0.96 * width)] = 255
+    expanded_points = cv2.goodFeaturesToTrack(
+        gray_before, maxCorners=600, qualityLevel=0.003,
+        minDistance=5, mask=expanded_mask, blockSize=5)
+    expanded = estimate(expanded_points)
+    return expanded if expanded[1] > primary[1] else primary
 
 
 def gripper_signature(detector, frame):
@@ -296,9 +393,16 @@ def _evidence_confirmed(evidence, confirmation, baseline_flow):
                     for record in confirmation[-MARKER_CONTACT_STEPS:]))
 
 
-def run_touch_trial(client, execute=False, touch_x_m=TOUCH_X_M):
-    path = fixed_pitch_path(x_m=touch_x_m)
-    safety = PlanarSearchSafety()
+def run_touch_trial(client, execute=False, touch_x_m=TOUCH_X_M,
+                    minimum_z_m=MIN_COMMAND_Z_M):
+    minimum_z_m = float(minimum_z_m)
+    if not DEEPEST_TABLE_TOUCH_Z_M <= minimum_z_m < START_Z_M:
+        raise ValueError(
+            "minimum table-touch z must be between "
+            f"{DEEPEST_TABLE_TOUCH_Z_M * 1000:.0f} and "
+            f"{START_Z_M * 1000:.0f} mm")
+    path = fixed_pitch_path(x_m=touch_x_m, minimum_z_m=minimum_z_m)
+    safety = PhysicalArmSafety(table_z_m=minimum_z_m)
     for (_za, a), (_zb, b) in zip(path, path[1:]):
         if not safety.transition_is_safe(a, backlash_prepose(b)):
             raise RuntimeError("planned touch path has an unsafe prepose")
@@ -310,7 +414,9 @@ def run_touch_trial(client, execute=False, touch_x_m=TOUCH_X_M):
         return {"state": "planned", "poses": len(path),
                 "first": path[0], "last": path[-1]}
 
-    mover = FloorServo(client, calib=None)
+    mover = FloorServo(
+        client, calib=None, move_command="table_touch_move",
+        move_options={"table_z_m": minimum_z_m})
     records = []
     evidence_records = []
     baseline_flows = []
@@ -386,8 +492,8 @@ def run_touch_trial(client, execute=False, touch_x_m=TOUCH_X_M):
                 mover, safety, path, current_path_index, settle_s=0.5)
 
     if contact_z is None:
-        raise RuntimeError(
-            "no repeatable table-contact evidence before safety limit")
+        return {"state": "no-contact", "minimum_z_mm": minimum_z_m * 1000.0,
+                "records": [asdict(record) for record in records]}
     return {"state": "contact", "z_table_mm": contact_z,
             "fk_z_table_mm": contact_fk_z,
             "records": [asdict(record) for record in records]}
@@ -398,9 +504,13 @@ def main():
     parser.add_argument("--run", action="store_true")
     parser.add_argument("--x-mm", type=float, default=TOUCH_X_M * 1000.0,
                         help="clear sagittal table-touch distance from base")
+    parser.add_argument(
+        "--min-z-mm", type=float, default=MIN_COMMAND_Z_M * 1000.0,
+        help="deepest commanded FK height; below -4 mm uses 1 mm steps")
     args = parser.parse_args()
     result = run_touch_trial(ArmSessionClient(), execute=args.run,
-                             touch_x_m=args.x_mm / 1000.0)
+                             touch_x_m=args.x_mm / 1000.0,
+                             minimum_z_m=args.min_z_mm / 1000.0)
     if args.run:
         OUTPUT.parent.mkdir(parents=True, exist_ok=True)
         OUTPUT.write_text(json.dumps(result, indent=2), encoding="utf-8")

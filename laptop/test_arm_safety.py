@@ -68,6 +68,40 @@ class PhysicalArmSafetyTests(unittest.TestCase):
         self.assertEqual(arm.moves, [])
         self.assertEqual(arm.pose, HOVER)
 
+    def test_table_touch_command_moves_only_the_bounded_table_plane(self):
+        deep_prepose = [90, 137, 83, 152, 90, 170]
+        deep_target = [90, 142, 88, 157, 90, 170]
+        arm = FakeArm(deep_prepose)
+        server = ArmSessionServer("/tmp/brainToArm-touch-test.sock", arm=arm)
+
+        with self.assertRaisesRegex(RuntimeError, "rejected before serial write"):
+            server.handle({"command": "move", "pose": deep_target})
+        self.assertEqual(arm.moves, [])
+
+        response = server.handle({
+            "command": "table_touch_move",
+            "pose": deep_target,
+            "table_z_m": -0.018,
+        })
+        self.assertEqual(response["pose"], deep_target)
+        self.assertEqual(arm.moves, [deep_target])
+
+        with self.assertRaisesRegex(ValueError, "between -20 and 0 mm"):
+            server.handle({
+                "command": "table_touch_move",
+                "pose": deep_target,
+                "table_z_m": -0.021,
+            })
+
+        # Moving the table plane cannot bypass the independent base envelope.
+        arm.pose = list(HOVER)
+        with self.assertRaisesRegex(RuntimeError, "base-housing"):
+            server.handle({
+                "command": "table_touch_move",
+                "pose": FAILED_PREPOSE,
+                "table_z_m": -0.018,
+            })
+
     def test_check_command_reports_without_moving(self):
         arm = FakeArm(HOVER)
         server = ArmSessionServer("/tmp/brainToArm-check-test.sock", arm=arm)

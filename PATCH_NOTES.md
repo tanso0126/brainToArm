@@ -2159,3 +2159,67 @@ PYTHONPATH=laptop python3 laptop/wrist_publish.py
 - `python3 -m py_compile ...` and `git diff --check`: pass.
 - No serial port or camera device was opened. No `simul/` or training file was
   modified or executed.
+
+## Patch 54 — deep clean-site table-touch probe
+
+### Intent
+
+Apply the corrected physical interpretation from the clean x=330 mm trials.
+The old x=300 mm site contains the arm cable, Uno-box edge, and table edge, so
+its apparent positive-z contact evidence was a snag and must not be used. The
+clean trial was still in free air at the former -2 mm limit; the table is
+expected near FK z=-12..-6 mm.
+
+### Changes
+
+- Changed the default touch site from x=300 to the verified clean wood at
+  x=330 mm. Added `--min-z-mm`, retaining -2 mm as the default while permitting
+  an explicit bounded probe to -20 mm. The requested physical trial uses
+  `--min-z-mm -18`.
+- Below z=-4 mm the nominal IK schedule and integer-pose refinement use 1 mm
+  steps. Duplicate servo poses remain forbidden, while a nearby continuity
+  search selects distinct sub-2 mm physical descents where naïve rounding would
+  otherwise skip a fine level.
+- Added a bounded `table_touch_move` daemon request. It shifts only the assumed
+  table plane down to the requested calibration limit; base, mast, link,
+  camera, self-collision, live-camera, and swept-trajectory checks remain
+  active. Ordinary `move` requests retain the original z=0 table interlock,
+  and the special floor cannot be lower than -20 mm.
+- Flow tracking now retries whenever fewer than 150 robust points survive. The
+  retry widens the wood ROI while still excluding the bottom gripper/cable
+  band, lowers the corner threshold, and raises the feature budget. Invalid
+  shapes, non-finite pixels/displacements, empty tracks, and non-finite robust
+  statistics fail to `(None, 0)` rather than producing NaN contact evidence.
+- Exhausting the path without repeatable evidence now returns/saves explicit
+  `state=no-contact`; this invalid state cannot satisfy `look_reach`'s required
+  confirmed calibration.
+- Replaced the obsolete x=300 expected-positive regression with the x=330
+  hardware interpretation: free descent through -2 is `no-contact`, while
+  marker onset at -10/-11 repeats after a clear-height replay and calibrates
+  the preceding -9 mm command, inside the expected -12..-6 mm band.
+
+### Entry points
+
+```bash
+# Hardware-free deep-plan validation.
+PYTHONPATH=laptop python3 laptop/table_touch_calibrate.py \
+  --x-mm 330 --min-z-mm -18
+
+# Operator-gated clean-site physical retrial.
+PYTHONPATH=laptop python3 laptop/table_touch_calibrate.py \
+  --run --x-mm 330 --min-z-mm -18
+```
+
+The arm-session daemon must be restarted on this patch before the physical
+retrial so it recognizes the bounded `table_touch_move` request.
+
+### Verification
+
+- `PYTHONPATH=laptop python3 laptop/test_pipeline.py`: passes.
+- `PYTHONPATH=laptop python3 laptop/test_table_touch.py`: 8/8 pass.
+- `PYTHONPATH=laptop python3 laptop/test_arm_safety.py`: 7/7 pass.
+- `PYTHONPATH=laptop python3 laptop/test_look_reach.py`: 14/14 pass.
+- `PYTHONPATH=laptop python3 laptop/test_wrist_publish.py`: 3/3 pass.
+- Targeted `py_compile` and `git diff --check`: pass.
+- No serial port or camera device was opened. No `simul/` or training file was
+  modified or executed.

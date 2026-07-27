@@ -12,6 +12,30 @@ from table_touch_calibrate import (
 from wrist_search import PlanarSearchSafety
 
 
+HOVER = [90, 124, 90, 180, 90, 170]
+
+
+class FakeClient:
+    def __init__(self):
+        self.pose = list(HOVER)
+
+    def request(self, payload):
+        if payload != {"command": "status"}:
+            raise AssertionError(f"unexpected arm request: {payload}")
+        return {"pose": list(self.pose)}
+
+
+class FakeMover:
+    def __init__(self, client):
+        self.client = client
+        self.marker_detector = object()
+        self.moves = []
+
+    def slow_move(self, target, final_settle=None):
+        self.moves.append(list(target))
+        self.client.pose = list(target)
+
+
 class TableTouchTests(unittest.TestCase):
     def test_fixed_pitch_path_holds_x_pitch_and_descends(self):
         path = fixed_pitch_path(minimum_z_m=0.010)
@@ -26,6 +50,18 @@ class TableTouchTests(unittest.TestCase):
             self.assertLess(abs(cumulative_tool_angle_deg(pose) - pitch), 1.5)
             heights.append(tool[2])
         self.assertTrue(all(a > b for a, b in zip(heights, heights[1:])))
+
+    def test_deep_path_uses_distinct_fine_steps_below_minus_4(self):
+        path = fixed_pitch_path(x_m=0.330, minimum_z_m=-0.018)
+        fine = [(z, arm_fk.tool_position(pose)[2])
+                for z, pose in path if z < -0.0045]
+        self.assertEqual(
+            [round(z * 1000.0) for z, _actual in fine],
+            list(range(-5, -19, -1)))
+        descents = [(before - after) * 1000.0
+                    for (_za, before), (_zb, after)
+                    in zip(fine, fine[1:])]
+        self.assertTrue(all(0.35 <= amount <= 1.6 for amount in descents))
 
     def test_backlash_prepose_finishes_from_below(self):
         target = [90, 120, 100, 160, 90, 170]
@@ -54,62 +90,42 @@ class TableTouchTests(unittest.TestCase):
         self.assertGreater(points, 50)
         self.assertAlmostEqual(flow, 5.0, delta=0.35)
 
-    def test_physical_marker_sequence_confirms_contact_after_safe_retry(self):
-        """Regression for the 2026-07-27 x=300 mm physical touch log."""
-        path = fixed_pitch_path()
-        hover = [90, 124, 90, 180, 90, 170]
+    def test_sparse_primary_roi_expands_near_wood(self):
+        rng = np.random.default_rng(8)
+        image = np.zeros((720, 1280, 3), dtype=np.uint8)
+        # Features live in the expanded side bands, outside the old x ROI.
+        for low_x, high_x in ((60, 145), (1020, 1215)):
+            for x, y in rng.integers(
+                    [low_x, 80], [high_x, 610], size=(150, 2)):
+                cv2.circle(image, (int(x), int(y)), 2, (180, 180, 180), -1)
+        matrix = np.float32([[1, 0, 2.0], [0, 1, -3.0]])
+        shifted = cv2.warpAffine(image, matrix, (1280, 720))
+        flow, points = median_table_flow(image, shifted)
+        self.assertGreaterEqual(points, 150)
+        self.assertTrue(np.isfinite(flow))
+        self.assertAlmostEqual(flow, np.hypot(2.0, 3.0), delta=0.4)
+        invalid = image.astype(np.float32)
+        invalid[100, 100, 0] = np.nan
+        self.assertEqual(median_table_flow(invalid, invalid), (None, 0))
 
-        class FakeClient:
-            def __init__(self):
-                self.pose = list(hover)
-
-            def request(self, payload):
-                self.assert_status(payload)
-                return {"pose": list(self.pose)}
-
-            @staticmethod
-            def assert_status(payload):
-                if payload != {"command": "status"}:
-                    raise AssertionError(f"unexpected arm request: {payload}")
-
-        class FakeMover:
-            def __init__(self, client):
-                self.client = client
-                self.marker_detector = object()
-                self.moves = []
-
-            def slow_move(self, target, final_settle=None):
-                self.moves.append(list(target))
-                self.client.pose = list(target)
-
+    def _run_mock(self, path, flow_results, signatures, minimum_z_m):
         client = FakeClient()
         mover = FakeMover(client)
-
-        # First descent is the exact reported sequence. The z=4 flow collapse
-        # does not repeat (3.97), after which marker deformation is sustained
-        # at z=0 and z=-2. The final three values repeat the onset boundary.
-        flows = iter([
-            7.71, 2.69, 9.56, 4.04, 9.46, 4.41, 4.17, 24.11,
-            3.99, 0.93,
-            3.97,
-            10.25, 11.17, 14.71,
-            10.25, 11.17, 14.71,
-        ])
-        shifts = iter([
-            0.0,                         # initial trial baseline
-            0.0, 0.0, 0.0, 0.0, 0.0, 1.93, 0.0, 0.0, 0.0, 0.0,
-            0.0, 0.0,                    # flow-confirm baseline + z=4
-            0.0, 4.95, 6.00,             # z=2, z=0, z=-2
-            0.0, 0.0, 4.95, 6.00,        # confirm baseline + onset boundary
-        ])
+        flows = iter(flow_results)
+        signature_values = None if signatures is None else iter(signatures)
 
         def fake_flow(_before, _after):
-            return next(flows), 100
+            return next(flows)
 
         def fake_signature(_detector, _frame):
-            return np.asarray((next(shifts), 0.0, 300.0, 0.0))
+            if signature_values is None:
+                return None
+            shift = next(signature_values)
+            return np.asarray((shift, 0.0, 300.0, 0.0))
 
-        with (patch("table_touch_calibrate.FloorServo",
+        with (patch("table_touch_calibrate.fixed_pitch_path",
+                    return_value=path),
+              patch("table_touch_calibrate.FloorServo",
                     return_value=mover),
               patch("table_touch_calibrate._fresh_frame",
                     side_effect=range(1000)),
@@ -117,21 +133,64 @@ class TableTouchTests(unittest.TestCase):
                     side_effect=fake_flow),
               patch("table_touch_calibrate.gripper_signature",
                     side_effect=fake_signature)):
-            result = run_touch_trial(client, execute=True)
+            result = run_touch_trial(
+                client, execute=True, touch_x_m=0.330,
+                minimum_z_m=minimum_z_m)
+        return result, mover
+
+    def test_x330_free_descent_to_minus_2_reports_no_contact(self):
+        """The clean-wood hardware run stays free through the old safety floor."""
+        path = fixed_pitch_path(x_m=0.330, minimum_z_m=-0.002)
+        count = len(path) - 1
+        points = [262] * count
+        points[-2:] = [75, 105]
+        flows = [(4.0 + 0.2 * (index % 3), points[index])
+                 for index in range(count)]
+
+        result, _mover = self._run_mock(
+            path, flows, signatures=None, minimum_z_m=-0.002)
+
+        self.assertEqual(result["state"], "no-contact")
+        self.assertNotIn("z_table_mm", result)
+        self.assertLess(min(record["flow_points"]
+                            for record in result["records"][-4:]), 150)
+
+    def test_deep_x330_marker_onset_confirms_near_minus_9(self):
+        """Expected table contact is around FK/command z=-12..-6 mm."""
+        path = fixed_pitch_path(x_m=0.330, minimum_z_m=-0.018)
+        onset_index = min(
+            range(len(path)), key=lambda index: abs(path[index][0] + 0.010))
+        confirmation_index = onset_index + 1
+        contact_index = onset_index - 1
+        self.assertAlmostEqual(path[onset_index][0], -0.010, places=6)
+
+        # Primary descent through the second loaded marker sample.
+        primary_shifts = []
+        for path_index in range(1, confirmation_index + 1):
+            if path_index == onset_index:
+                primary_shifts.append(4.95)
+            elif path_index == confirmation_index:
+                primary_shifts.append(6.00)
+            else:
+                primary_shifts.append(0.0)
+        signatures = (
+            [0.0] + primary_shifts
+            + [0.0, 0.0, 4.95, 6.00])  # replay baseline + -9/-10/-11
+        flow_count = confirmation_index + 3
+        flows = [(5.0, 220)] * flow_count
+
+        result, mover = self._run_mock(
+            path, flows, signatures, minimum_z_m=-0.018)
 
         self.assertEqual(result["state"], "contact")
-        self.assertGreaterEqual(result["z_table_mm"], 2.0)
-        self.assertLessEqual(result["z_table_mm"], 6.0)
+        self.assertGreaterEqual(result["z_table_mm"], -12.0)
+        self.assertLessEqual(result["z_table_mm"], -6.0)
+        self.assertAlmostEqual(
+            result["z_table_mm"], path[contact_index][0] * 1000.0,
+            places=5)
 
-        # Reproduce the exact unsafe edge from hardware, then prove the retry
-        # did not attempt it. After the first z=4 target, retreat poses climb
-        # above 30 mm before the next backlash prepose is commanded.
-        safety = PlanarSearchSafety()
-        low = [90, 120, 136, 163, 90, 170]
-        unsafe_prepose = [90, 101, 140, 154, 90, 170]
-        self.assertFalse(safety.transition_is_safe(low, unsafe_prepose))
-
-        first_candidate = mover.moves.index(path[10][1])
+        # Confirmation still retreats above 30 mm before any new prepose.
+        first_candidate = mover.moves.index(path[confirmation_index][1])
         preposes = {tuple(backlash_prepose(pose)) for _z, pose in path}
         next_prepose = next(
             index for index in range(first_candidate + 1, len(mover.moves))
@@ -140,7 +199,6 @@ class TableTouchTests(unittest.TestCase):
         self.assertTrue(retry_lift)
         self.assertGreaterEqual(
             max(arm_fk.tool_position(pose)[2] for pose in retry_lift), 0.030)
-        self.assertNotEqual(mover.moves[first_candidate + 1], unsafe_prepose)
 
 
 if __name__ == "__main__":
