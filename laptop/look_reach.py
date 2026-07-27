@@ -68,6 +68,12 @@ VECTOR_CONTACT_Z_M = 0.008
 VECTOR_CALIBRATION_Z_M = 0.100
 MAX_TABLE_Z_OFFSET_M = 0.015
 VECTOR_LATERAL_OPENING_FRACTION = 0.42
+# Image rows (start view) whose tabletop depth matches the fixed vector reach.
+# Measured: the physically closed-and-held eraser had bbox bottom ~614 px; the
+# known-good grasp corridor spans roughly this band. A base row above it means
+# the object stands beyond the fixed reach (the sagging USB cable crosses the
+# corridor there and was once grabbed instead - hence the hard refusal).
+VECTOR_DEPTH_CORRIDOR_ROWS = (420.0, 660.0)
 
 
 def cumulative_tool_angle_deg(pose):
@@ -332,6 +338,18 @@ def run_constant_x_grasp(client, execute=False, advance_mm=-5.0,
     if abs(horizontal_error) > \
             VECTOR_LATERAL_OPENING_FRACTION * gripper.opening_px:
         raise RuntimeError(f"target is outside open jaws in x ({horizontal_error:.0f}px)")
+    # Depth-corridor gate. The vector grasp closes at one FIXED forward reach
+    # (~335 mm). A tabletop object's bbox bottom row maps monotonically to its
+    # depth in the start view, so a target whose base sits outside the verified
+    # corridor cannot be at the grasp point - closing there has physically
+    # grabbed the arm's own sagging USB cable instead of the object. Refuse.
+    base_row = float(bbox[1] + bbox[3])
+    lo_row, hi_row = VECTOR_DEPTH_CORRIDOR_ROWS
+    if not lo_row <= base_row <= hi_row:
+        raise RuntimeError(
+            f"target base row {base_row:.0f}px is outside the fixed-reach "
+            f"depth corridor [{lo_row:.0f},{hi_row:.0f}]px; move the object "
+            "into the grasp corridor (or the detection is not the object)")
     waypoints = constant_x_descent_waypoints(
         start, contact_z_m=float(table_z_m) + VECTOR_CONTACT_Z_M,
         advance_mm=advance_mm)
