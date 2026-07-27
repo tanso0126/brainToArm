@@ -6,3 +6,7 @@ scikit-learn>=1.3    # ErrP classifier (model backend)
 opencv-python>=4.8   # overhead camera vision + calibration
 Pillow>=10           # OV2640 RGB565 diagnostic frame conversion
 ultralytics>=8.4,<9  # background-independent FastSAM object segmentation
+trimesh>=4.12,<5     # inspect/validate the supplied 3MF/STL robot geometry
+mujoco>=3.3.7,<4     # Apple-Silicon-capable rigid-body simulation + wrist RGB
+gymnasium>=1.2.3,<2  # simulation environment API
+stable-baselines3>=2.9,<3  # PPO fine-tuning after synthetic teacher pretraining

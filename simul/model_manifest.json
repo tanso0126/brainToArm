@@ -1,0 +1,67 @@
+{
+  "format_version": 1,
+  "source": {
+    "archive": "Robotic+Arm+with+Servo+&+Arduino.zip",
+    "archive_sha256": "ea519812653e50e41ccc194abc7957c499cc61b29df0f3b7bd048913aa908998",
+    "model_3mf": "Robotic+Arm+with+Servo+&+Arduino.3mf",
+    "model_3mf_sha256": "08f4fa335f0cae3267a0c654d42c80c11820fb1c6a0c46d3d09edf1e67c843e9",
+    "unit": "millimeter",
+    "mesh_scale_to_meters": 0.001,
+    "title": "Robotic Arm with Servo & Arduino",
+    "designer": "Emre Kalem",
+    "license_from_3mf_metadata": "Standard Digital File License",
+    "assembly_video_from_3mf_metadata": "https://www.youtube.com/watch?v=CHV36hu9z3E"
+  },
+  "physical_control": {
+    "base_locked_for_current_task": true,
+    "home_servo_deg": [90, 70, 90, 140, 170, 170],
+    "servo_min_deg": [0, 0, 0, 130, 90, 0],
+    "servo_max_deg": [180, 150, 180, 180, 180, 180],
+    "locked_base_deg": 90,
+    "gripper_open_deg": 90,
+    "gripper_closed_deg": 180,
+    "level_wrist_roll_deg": 170,
+    "floor_reference": {
+      "hover_pose_deg": [90, 124, 90, 180, 90, 170],
+      "grasp_pose_deg": [90, 142, 90, 180, 90, 170],
+      "elbow_range_deg": [78, 110],
+      "shoulder_per_elbow": -0.5454545454545454
+    }
+  },
+  "camera": {
+    "device": "AVerMedia PW315",
+    "physical_resolution": [1280, 720],
+    "training_resolution": [128, 72],
+    "mount": "eye_in_hand_above_gripper",
+    "policy_visual_inputs": ["rgb"],
+    "policy_nonvisual_inputs": ["commanded_servo_angles", "previous_action"]
+  },
+  "meshes": [
+    {"name": "Alt_Govde.stl", "role": "rotating_base_body", "extents_mm": [120.0, 119.9804, 60.0], "faces": 7288, "volume_mm3": 158111.214},
+    {"name": "Alt_Kapak.stl", "role": "base_cover", "extents_mm": [203.6, 113.6, 44.5], "faces": 10616, "volume_mm3": 104034.369},
+    {"name": "Alt_Kasa.stl", "role": "fixed_base_enclosure", "extents_mm": [209.9902, 120.0, 70.0], "faces": 12278, "volume_mm3": 149532.058},
+    {"name": "Alt_Kol.stl", "role": "upper_arm_frame", "extents_mm": [94.9971, 30.0, 241.767], "faces": 4120, "volume_mm3": 309839.764},
+    {"name": "Bilek.stl", "role": "wrist_body", "extents_mm": [43.0, 40.0, 25.0], "faces": 2018, "volume_mm3": 19315.784},
+    {"name": "Jack_Cover.stl", "role": "base_accessory", "extents_mm": [25.0, 16.62, 12.0], "faces": 978, "volume_mm3": 1983.195},
+    {"name": "Mil_1.stl", "role": "shaft", "extents_mm": [9.8, 9.7807, 39.75], "faces": 560, "volume_mm3": 2805.025},
+    {"name": "Mil_2.stl", "role": "shaft", "extents_mm": [6.8, 6.781, 28.0], "faces": 236, "volume_mm3": 1003.489},
+    {"name": "Mil_3.stl", "role": "shaft", "extents_mm": [17.0, 16.996, 71.8], "faces": 554, "volume_mm3": 14807.126},
+    {"name": "Mil_Disli.stl", "role": "shaft_gear", "extents_mm": [40.2607, 40.1314, 10.0], "faces": 2260, "volume_mm3": 8432.889},
+    {"name": "On_Kol.stl", "role": "forearm", "extents_mm": [172.5, 56.0, 40.0], "faces": 6240, "volume_mm3": 107380.474},
+    {"name": "Servo_Cable_Holder.stl", "role": "cable_holder", "extents_mm": [46.5, 16.0, 33.5], "faces": 596, "volume_mm3": 5561.216},
+    {"name": "Servo_Disli.stl", "role": "servo_gear", "extents_mm": [40.2607, 40.1314, 10.0], "faces": 2692, "volume_mm3": 9014.526},
+    {"name": "Tabla_Alt.stl", "role": "base_plate", "extents_mm": [113.7, 113.7, 10.0], "faces": 3304, "volume_mm3": 19991.533},
+    {"name": "Disli.stl", "role": "gripper_gear", "extents_mm": [14.7262, 16.8633, 5.0], "faces": 1096, "volume_mm3": 700.341},
+    {"name": "El.stl", "role": "gripper_palm_bottom", "extents_mm": [50.0, 48.2843, 3.0], "faces": 1012, "volume_mm3": 6396.662},
+    {"name": "El_Ust.stl", "role": "gripper_palm_top", "extents_mm": [50.0, 48.2843, 15.0], "faces": 1472, "volume_mm3": 8448.175},
+    {"name": "Parmak X 2.stl", "role": "finger_link", "extents_mm": [29.9901, 10.0, 12.0], "faces": 716, "volume_mm3": 2229.512},
+    {"name": "Parmak_2 X 2.stl", "role": "finger_tip", "extents_mm": [59.8602, 26.2132, 5.0], "faces": 440, "volume_mm3": 3006.825},
+    {"name": "Parmak_Disli X 2.stl", "role": "finger_geared_link", "extents_mm": [33.9789, 17.9579, 12.0], "faces": 1616, "volume_mm3": 3322.35}
+  ],
+  "geometry_notes": {
+    "print_orientation_only": true,
+    "assembly_transforms_present": false,
+    "joint_pivots_present": false,
+    "rule": "Use original meshes for visual identity and measured envelope; use explicit calibrated kinematic frames and simple convex collision geometry. Do not infer servo pivots from print-plate transforms."
+  }
+}

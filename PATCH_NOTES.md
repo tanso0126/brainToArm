@@ -1478,6 +1478,30 @@ red at `(657,618,117,102)`. Both correctly touch the bottom image boundary.
   that it is volatile. No credentials or other sensitive conversation data were
   copied into the repository.
 
+## Patch 41 — reproducible source geometry for sim-to-real
+
+- Added the user-supplied 3MF and source ZIP under `simul/` as the immutable
+  robot geometry inputs. The 3MF metadata identifies millimeter units, 22 print
+  objects, the original assembly reference, and embedded build photographs; the
+  ZIP contains 20 named watertight STL parts.
+- Added `model_manifest.json` with SHA-256 hashes, every STL face count and
+  measured bounding extent, semantic assembly role, the final six-servo limits,
+  locked 90-degree base, 90/180 gripper direction, 170-degree level wrist, floor
+  references, and the one-camera deployed-policy observation contract.
+- Added `prepare_assets.py` to reject changed archives, unsafe ZIP members,
+  missing/extra parts, non-watertight meshes, and geometry drift before atomically
+  extracting STL files to an ignored generated directory. It never rewrites the
+  supplied originals.
+- Documented a crucial modeling limit: the 3MF contains print-plate transforms,
+  not assembly transforms or servo pivots. Original meshes will provide visual
+  identity/envelopes while explicit calibrated frames and convex primitives
+  provide dynamics; print placement will not be misrepresented as robot
+  kinematics.
+- Added MuJoCo/Gymnasium/SB3/trimesh simulation dependencies. PyBullet was tested
+  first but its current package had no compatible Apple Silicon wheel and failed
+  to build; MuJoCo 3.3.7 installed successfully and produced a headless RGB
+  render on this Mac without touching the real camera or Uno.
+
 ## Patch 41 — multi-object floor grasp with ErrP-ready reject
 
 ### Intent
