@@ -53,7 +53,7 @@ so a policy cannot accidentally learn a motion that failed motor 1 cannot make.
 The shoulder mapping is intentionally piecewise because the printed linkage is
 not a direct one-degree servo-to-joint mechanism. The near-floor portion is fit
 to both physically reproduced levels and the measured `-6/11` shoulder/elbow
-vector. Across elbow 78..110 degrees, each curve varies by under 2.5 mm in
+vector. Across elbow 78..110 degrees, each curve varies by under 4 mm in
 height while translating the tool by over 15 mm. This is a calibrated local
 model, not a claim that every unmeasured joint pose is already exact.
 
@@ -73,16 +73,16 @@ The smoke sheet is written to ignored
 `simul/generated/mujoco_smoke.png`. Expected tool-center heights are about 41 mm
 at the hover reference and 8 mm at the grasp reference.
 
-## Domain-randomized alignment policy
+## Domain-randomized complete-task policy
 
-`alignment_env.py` exposes a Gymnasium environment whose observation contains
-only wrist RGB, commanded servo angles, and the previous action. It randomizes
-object appearance, camera installation, lighting, exposure, white balance,
-noise, blur, and small image transforms. Privileged world/object positions are
-available only to reset, reward, and the expert teacher.
+`full_task_env.py` trains search, target alignment, descent, close, lift, and
+recovery from 15 features that the real wrist-camera pipeline also provides. It
+randomizes sensor loss/noise and the measured floor Jacobian. `train_full_task.py`
+uses DAgger-style disturbed behavior cloning and exports TorchScript.
 
-`train_alignment.py` performs DAgger-style disturbed behavior cloning, evaluates
-held-out frames and randomized closed-loop episodes, and exports TorchScript.
-The reviewed v1 artifact and metrics are tracked in `models/`; ordinary datasets
-and checkpoints remain ignored. See `TRAINING_REPORT.md` for exact numbers,
-limitations, and the fail-closed Claude integration contract.
+`evaluate_full_task_physics.py` then applies the policy to an independent free
+MuJoCo target body. Symbolic task completion cannot pass: the object must lose
+floor contact and physically follow the jaws upward. The reviewed artifact and
+exact metrics are tracked in `models/`. The earlier RGB local aligner remains
+for reproducibility but is superseded by this complete-task policy. See
+`TRAINING_REPORT.md` for results and the fail-closed real integration contract.

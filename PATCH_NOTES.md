@@ -1759,3 +1759,41 @@ contact claims.
 - `python3 -m unittest simul.test_mujoco_robot -v`: 7/7 pass.
 - Dynamic MuJoCo stepping holds the commanded arm pose instead of collapsing;
   a closed jaw can now pinch and lift a free target body through contact physics.
+## Patch 46 — train and verify the complete floor-pick policy
+
+### Intent
+
+Replace the narrow one-target alignment demonstration with a policy that learns
+and validates the complete useful task: search, align, descend, close, lift,
+verify, recover, and retry, while preserving the real controller's fail-closed
+boundaries.
+
+### Changes
+
+- Added `full_task_env.py` with eight macro actions and a 15-value observation
+  made only from real-available camera features, commanded servo angles, and
+  previous action. Simulator target pose/contact stays private to teacher and
+  reward code.
+- Added `train_full_task.py`: 240,000 DAgger-style expert/disturbed samples,
+  class-balanced MLP training, disjoint deterministic/randomized evaluation,
+  and TorchScript export.
+- Added `full_task_policy.py`: hardware-free inference, measured-Jacobian safety
+  shield, and two-frame voting before descent, close, or lift.
+- Added `evaluate_full_task_physics.py`: bounded servo trajectories, randomized
+  shape/size/position, real MuJoCo floor and jaw contacts, physical lift/follow
+  criteria, and camera-style failed-lift reacquisition retries.
+- Promoted `models/full_task_policy_v1.ts` plus exact hash/metrics. The previous
+  local RGB alignment artifact remains reproducible but is superseded.
+- Added `test_full_task.py` and rewrote `TRAINING_REPORT.md` around the complete
+  task and its explicit simulation-to-reality contract.
+
+### Verification
+
+- Training: 98.3715% held-out action accuracy; raw randomized closed-loop
+  95.15%; shielded 99.65%.
+- Two-frame guarded disjoint randomized evaluation: 9,997/10,000 (99.97%);
+  deterministic evaluation: 1,000/1,000.
+- Independent contact physics, 2,000 seeds: 1,960/2,000 (98.0%) over randomized
+  28--44 mm objects; 1,488/1,488 (100%) within the <=40 mm normal simulated jaw
+  envelope; 472/512 (92.1875%) in the 40--44 mm edge-size stress set.
+- `python3 -m unittest simul.test_mujoco_robot simul.test_full_task -v`: 11/11.
