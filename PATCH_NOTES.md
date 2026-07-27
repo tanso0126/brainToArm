@@ -1827,3 +1827,10 @@ allowing a model score to bypass the physical execution gate.
 - `PYTHONPATH=laptop python3 laptop/test_pipeline.py`: all existing EEG, camera,
   arm, contact, floor-motion, search, and pick/place checks pass.
 - No camera device or Uno serial port was opened during this patch.
+## Patch 48 — retain the complete physical rollout evidence
+
+The contact evaluator's debug sheet previously kept only the first eight frames,
+which could omit close/lift when search took longer. It now samples eight frames
+uniformly from the complete rollout, so the ignored reproducibility sheet shows
+both search/alignment and the terminal physical outcome. This changes no policy,
+physics, metric, or hardware behavior.

@@ -265,7 +265,11 @@ class PhysicsTaskEvaluator:
 
     @staticmethod
     def _write_sheet(frames, seed):
-        selected = frames[:8]
+        if len(frames) > 8:
+            indices = np.linspace(0, len(frames) - 1, 8, dtype=int)
+            selected = [frames[index] for index in indices]
+        else:
+            selected = list(frames)
         while len(selected) < 8:
             selected.append(np.zeros_like(selected[0]))
         sheet = np.vstack((np.hstack(selected[:4]), np.hstack(selected[4:8])))
