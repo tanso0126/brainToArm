@@ -1797,3 +1797,33 @@ boundaries.
   28--44 mm objects; 1,488/1,488 (100%) within the <=40 mm normal simulated jaw
   envelope; 472/512 (92.1875%) in the 40--44 mm edge-size stress set.
 - `python3 -m unittest simul.test_mujoco_robot simul.test_full_task -v`: 11/11.
+## Patch 47 — real-camera shadow adapter and handoff
+
+### Intent
+
+Make the trained policy directly consumable by the existing PW315/FastSAM/
+marker pipeline without opening hardware, changing the persistent Uno owner, or
+allowing a model score to bypass the physical execution gate.
+
+### Changes
+
+- Added `laptop/full_task_adapter.py` to convert `WristScene`,
+  `WristObservation`, selected-target continuity, visual jaw opening, coherent
+  lift motion, commanded pose, and previous action into the exact 15-feature
+  training schema.
+- Added a stateful shadow controller that applies the deterministic shield and
+  two-frame guard, returns a macro plus a bounded `floor_pose`, and never opens
+  the camera or serial port. Search remains owned by the existing
+  collision-checked planner.
+- Updated README and HANDOFF section 22 to supersede the local-only integration
+  instructions with the complete-task artifact, exact metrics, hash, shadow
+  sequence, and unchanged real execution gate.
+
+### Verification
+
+- Adapter schema, two-frame descent vote, and bounded next pose are covered in
+  `simul.test_full_task`.
+- `python3 -m unittest simul.test_mujoco_robot simul.test_full_task -v`: 11/11.
+- `PYTHONPATH=laptop python3 laptop/test_pipeline.py`: all existing EEG, camera,
+  arm, contact, floor-motion, search, and pick/place checks pass.
+- No camera device or Uno serial port was opened during this patch.

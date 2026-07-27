@@ -763,3 +763,64 @@ Claude가 `floor_grasp.py`에 연결할 때:
 테스트는 `python3 simul/test_mujoco_robot.py`의 8개와
 `python3 laptop/test_pipeline.py` 전체가 통과했다. 모델 SHA-256은
 `becbb150a282299707b0b4f7c122ad4091cf259bc60d8ea4b8f29fc36fc1d7d6`다.
+
+## 22. 2026-07-27 complete-task 시뮬레이션 전달 (21절 대체)
+
+21절의 local alignment v1은 재현용으로 남겼지만 통합 대상은 아니다. 현재 통합 대상은
+`simul/models/full_task_policy_v1.ts`이며 다음 전체 macro를 학습했다.
+
+```text
+SEARCH_NEXT -> ALIGN_ELBOW_DOWN/UP -> DESCEND -> CLOSE -> LIFT
+                                              \-> RECOVER -> 재탐색
+```
+
+중요 파일:
+
+- `simul/full_task_env.py`: 실제 입력만 쓰는 15-feature complete-task 환경.
+- `simul/train_full_task.py`: 24만 DAgger-style state 훈련/평가/내보내기.
+- `simul/full_task_policy.py`: TorchScript runner + camera/pose safety shield +
+  descend/close/lift 2-frame vote.
+- `simul/evaluate_full_task_physics.py`: symbolic state가 아니라 free body의
+  floor-contact 해제와 gripper 추종으로 성공을 판정.
+- `simul/models/full_task_policy_v1.ts`: 배포 artifact. SHA-256
+  `e4451c8bc64399a8b7382d50874a262a0c205eddccc263fe33c9c379abf40323`.
+- `laptop/full_task_adapter.py`: `WristScene`/`WristObservation`/commanded pose를
+  학습 때와 동일한 15-value로 변환하는 hardware-free shadow adapter.
+
+정확한 결과:
+
+- raw randomized full task: 95.15%.
+- deterministic shield 적용: 99.65%.
+- 두 프레임 vote 포함 별도 10,000 seed: 9,997/10,000 (99.97%).
+- MuJoCo 실제 contact/free-body 2,000 seed: 1,960/2,000 (98.0%).
+- simulated object 폭 <=40 mm: 1,488/1,488 (100%).
+- 폭 40--44 mm edge stress: 472/512 (92.1875%).
+
+마지막 40건 실패는 전부 큰 직육면체가 접촉면 끝에서 밀려난 경우다. 정책 실패와 집게
+물리 용량을 분리하기 위해 성공 조건을 낮추지 않았다. 따라서 현재 simulated 정상 규격은
+폭 40 mm 이하이며 실제 규격은 실물 손가락을 재서 확정해야 한다.
+
+Claude 통합 순서:
+
+1. `FullTaskShadowController`를 한 번 만들고 task 시작/종료 때 `reset()`한다.
+2. 매 새 frame의 `scene`, `wrist_observation`, 현재 commanded 6-servo pose, 선택된
+   `target`을 `decide()`에 넣는다. 이 호출은 camera/Uno를 열지 않는다.
+3. 먼저 returned macro/next_pose를 기존 deterministic controller 옆에 log만 한다.
+4. `WAIT`는 반드시 새 frame을 받는다. `SEARCH_NEXT`는 기존 collision-checked search
+   planner가 처리한다. 나머지 `next_pose`도 기존 단일 `ArmSessionClient`에서만 실행한다.
+5. model confidence만으로 실행하지 않는다. adapter 내부 shield, marker/quality,
+   visual-contact baseline, coherent-lift 검증을 유지한다.
+6. `FLOOR_GRASP_EXECUTE_VERIFIED=False`는 shadow 결과와 cleared-workspace 실물 검증 전까지
+   그대로 둔다. 이 gate를 시뮬레이션 숫자만으로 자동 변경하면 안 된다.
+
+재현:
+
+```bash
+python3 -m unittest simul.test_mujoco_robot simul.test_full_task -v
+python3 simul/evaluate_full_task_physics.py \
+  --policy simul/models/full_task_policy_v1.ts --episodes 2000 --seed 20260729
+PYTHONPATH=laptop python3 laptop/test_pipeline.py
+```
+
+현재 결과는 local alignment 데모가 아니라 탐색부터 물리적 lift/recovery까지의 전체
+시뮬레이션 전달물이다. 다만 실제 성공률 주장은 실물 shadow/접촉/상승 검증 뒤에만 한다.

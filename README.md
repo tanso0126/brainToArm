@@ -96,7 +96,7 @@ precise steps to bring it up. No other context is required.
 > `Q`/Escape exits. `READY / ALIGNED` is impossible unless both tapes, a target,
 > and an exposure/contrast quality gate all pass.
 
-> ### 🧪 Constrained MuJoCo simulation and trained local aligner
+> ### 🧪 Complete MuJoCo floor-pick policy
 >
 > The user-supplied 3MF/STL arm is now assembled in a hardware-isolated MuJoCo
 > model under `simul/`. For the current wrist-camera floor task it deliberately
@@ -104,12 +104,18 @@ precise steps to bring it up. No other context is required.
 > direction, reproduces the measured hover/grasp floor curve, and renders a
 > blue-left/red-right eye-in-hand view.
 >
-> A tracked TorchScript v1 policy was trained on 20,000 randomized frames using
-> only RGB, commanded angles, and previous action. It aligned in 499/500 later
-> randomized simulation episodes, but this is **not real-hardware validation**.
-> It covers only one visible candidate and local elbow 78°–110° alignment;
-> search, candidate selection, descent, grasp, lift, and recovery remain the
-> deterministic fail-closed controller. See
+> The promoted TorchScript policy now covers search, selected-target alignment,
+> descent, close, lift, and recovery. It was trained on 240,000 disturbed states
+> using only real-available wrist-camera features, commanded angles, and the
+> previous action; simulator pose/depth/contact never enters inference. A
+> deterministic shield and two-frame vote guard every irreversible transition.
+>
+> Independent MuJoCo contact evaluation physically lifted 1,960/2,000 randomized
+> 28–44 mm box/cylinder/sphere targets, including 1,488/1,488 at the current
+> <=40 mm normal simulated jaw envelope. These are **simulation results, not a
+> claim of real-hardware success**. The hardware-free adapter in
+> `laptop/full_task_adapter.py` is ready for shadow comparison while the physical
+> execution gate remains off. See
 > [`simul/TRAINING_REPORT.md`](simul/TRAINING_REPORT.md) before integration.
 
 ---
