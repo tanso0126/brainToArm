@@ -11,16 +11,24 @@ import numpy as np
 import arm_fk
 import config
 from look_reach import (TargetLock, cumulative_tool_angle_deg,
+                        LookReachTargetSelector,
+                        choose_with_rejections,
                         constant_x_descent_waypoints,
                         load_table_z_m,
                         match_locked_target, optical_axis_xz,
                         plan_aim_step, plan_resolved_step,
-                        select_initial_target, task_delta)
+                        run_controller, select_initial_target, task_delta)
 
 
 def candidate(center, bbox, area, confidence):
     return SimpleNamespace(center=center, bbox=bbox, area=area,
                            confidence=confidence)
+
+
+def multi_object_scene(candidates):
+    gripper = SimpleNamespace(center=(640.0, 650.0), opening_px=300.0)
+    return SimpleNamespace(ranked=list(candidates), gripper=gripper,
+                           frame_shape=(720, 1280, 3))
 
 
 class LookReachTests(unittest.TestCase):
@@ -110,6 +118,99 @@ class LookReachTests(unittest.TestCase):
         lock = TargetLock.from_candidate(original)
         scene = SimpleNamespace(ranked=[bottom_false, moved])
         self.assertIs(match_locked_target(scene, lock), moved)
+
+    def test_two_candidates_choose_nearest_ranked_reachable_object(self):
+        near = candidate((630, 450), (600, 410, 60, 80), 4800, 0.92)
+        other = candidate((675, 350), (645, 310, 60, 80), 4800, 0.90)
+        selection = LookReachTargetSelector(logger=None)
+        selected = selection.choose(multi_object_scene([near, other]))
+        self.assertIs(selected, near)
+        np.testing.assert_allclose(selection.lock.center, near.center)
+
+    def test_reject_one_selects_other_and_lock_follows_it(self):
+        near = candidate((630, 450), (600, 410, 60, 80), 4800, 0.92)
+        other = candidate((675, 350), (645, 310, 60, 80), 4800, 0.90)
+        selection = LookReachTargetSelector(logger=None)
+        scene = multi_object_scene([near, other])
+        selected = choose_with_rejections(
+            scene, selection, reject_count=1)
+        self.assertIs(selected, other)
+        np.testing.assert_allclose(selection.lock.center, other.center)
+
+        # The eye-in-hand camera moved: both objects shifted by roughly +108 px
+        # vertically. The selected target must still match, and its displacement
+        # must carry the old veto into the new image coordinates.
+        moved_other = candidate(
+            (681, 458), (651, 418, 60, 80), 4800, 0.88)
+        moved_near = candidate(
+            (635, 555), (605, 515, 60, 80), 4800, 0.91)
+        matched = selection.match(
+            multi_object_scene([moved_near, moved_other]))
+        self.assertIs(matched, moved_other)
+        np.testing.assert_allclose(selection.lock.center, moved_other.center)
+        self.assertIs(
+            selection.selector.choose([moved_near, moved_other]),
+            moved_other)
+
+    def test_reject_all_returns_safe_stop_without_motion(self):
+        near = candidate((630, 450), (600, 410, 60, 80), 4800, 0.92)
+        other = candidate((675, 350), (645, 310, 60, 80), 4800, 0.90)
+        scene = multi_object_scene([near, other])
+        frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+
+        class StaticDetector:
+            @staticmethod
+            def scene(_frame):
+                return scene, SimpleNamespace(gripper=scene.gripper)
+
+        class NoMotionClient:
+            def __init__(self):
+                self.requests = []
+
+            def request(self, payload):
+                self.requests.append(payload)
+                if payload == {"command": "status"}:
+                    return {"pose": [90, 124, 90, 180, 90, 170]}
+                raise AssertionError("safe no-target stop must not request motion")
+
+        client = NoMotionClient()
+        result = run_controller(
+            client, detector=StaticDetector(),
+            frame_source=lambda discard=1: frame,
+            target_selector=LookReachTargetSelector(logger=None),
+            reject_count=2)
+        self.assertEqual(result, {"state": "no-target", "moved": False})
+        self.assertEqual(client.requests, [{"command": "status"}])
+
+    def test_position_veto_survives_candidate_list_reshuffle(self):
+        near = candidate((630, 450), (600, 410, 60, 80), 4800, 0.92)
+        other = candidate((675, 350), (645, 310, 60, 80), 4800, 0.90)
+        selection = LookReachTargetSelector(logger=None)
+        first_scene = multi_object_scene([near, other])
+        self.assertIs(selection.choose(first_scene), near)
+        selection.reject_current()
+
+        renumbered_near = candidate(
+            (636, 455), (606, 415, 60, 80), 4800, 0.95)
+        renumbered_other = candidate(
+            (680, 355), (650, 315, 60, 80), 4800, 0.87)
+        reshuffled = multi_object_scene([renumbered_near, renumbered_other])
+        self.assertIs(selection.choose(reshuffled), renumbered_other)
+
+    def test_unreachable_candidate_is_logged_and_not_vetoed(self):
+        unreachable = candidate(
+            (900, 430), (870, 390, 60, 80), 4800, 0.96)
+        reachable = candidate(
+            (630, 450), (600, 410, 60, 80), 4800, 0.90)
+        messages = []
+        selection = LookReachTargetSelector(logger=messages.append)
+        selected = selection.choose(
+            multi_object_scene([unreachable, reachable]))
+        self.assertIs(selected, reachable)
+        self.assertEqual(selection.selector.rejected_points, [])
+        self.assertTrue(any("SKIP candidate #0" in item
+                            and "base-yaw window" in item
+                            for item in messages))
 
 
 if __name__ == "__main__":

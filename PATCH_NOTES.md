@@ -2031,3 +2031,73 @@ PYTHONPATH=laptop python3 laptop/look_reach.py --run --vector-grasp
   (`CGLError: invalid CoreGraphics connection`). This is an execution-environment
   limitation, not a changed assertion. No simulation or training pipeline was
   run beyond these regression tests.
+
+## Patch 52 — multi-object look/reach selection and persistent reject
+
+### Intent
+
+Make the collision-interlocked `look_reach.py` path the authoritative executor
+for physical goals 2/3. Reuse the existing `CandidateSelector` rather than
+creating another selection policy, preserve explicit image-position vetoes
+across fresh FastSAM lists and eye-in-hand motion, and stop before any arm
+command when all reachable objects are rejected.
+
+### Changes
+
+- Replaced vector mode's one-off blue-color target extractor with the complete
+  `WristSceneDetector` FastSAM candidate list. The existing filter/consolidate/
+  rank pipeline still removes the floor, arm, tape markers, border spill, and
+  nested part masks before selection.
+- Added `LookReachTargetSelector`, which owns one `CandidateSelector` and
+  `TargetLock` for the entire rollout. `choose()` preserves the detector's
+  nearest-jaw rank order; `reject_current(scene, pose)` is the programmatic
+  human/ErrP hook that vetoes the current image position, chooses the next
+  candidate, and creates a new lock.
+- Added a per-candidate pre-lock reachability gate for confidence, portable
+  object scale, bounded image view, near-jaw exclusion, the verified lateral
+  jaw/base-yaw window, configured base-yaw range, and the physical collision
+  interlock. Unreachable candidates emit `SKIP ... <reason>` and are not added
+  to the human-veto set.
+- Lock reacquisition remains identity/appearance/position bounded and never
+  falls through to another candidate. Because the camera moves with the arm,
+  the selected target's observed frame-to-frame displacement translates all
+  stored veto pixels, keeping rejected scene locations aligned during approach.
+- Added `--reject-count N` to both normal and `--vector-grasp` modes. Selection
+  and all requested rejects occur at the observation pose before motion. If
+  no reachable non-vetoed object remains, the command reports `no-target` with
+  `moved=False` and makes no arm-motion request.
+- Vector execution reacquires the exact selected lock after moving to its start
+  pose and again after same-run empty-close calibration. All existing bounded
+  motion, identity/growth, collision, contact-UNKNOWN, and retention gates
+  remain in place.
+
+### Entry points
+
+```bash
+# Dry selection/first-step plan for the nearest reachable object.
+PYTHONPATH=laptop python3 laptop/look_reach.py
+
+# Veto the nearest reachable object and plan/approach the next.
+PYTHONPATH=laptop python3 laptop/look_reach.py --reject-count 1
+PYTHONPATH=laptop python3 laptop/look_reach.py --run --reject-count 1
+
+# Full calibrated goal-2/3 executor; requires table_touch.json when --run.
+PYTHONPATH=laptop python3 laptop/look_reach.py --vector-grasp
+PYTHONPATH=laptop python3 laptop/look_reach.py --run --vector-grasp
+PYTHONPATH=laptop python3 laptop/look_reach.py \
+  --run --vector-grasp --reject-count 1
+```
+
+### Verification
+
+- `python3 laptop/test_look_reach.py`: 14/14 pass, including two-object nearest
+  selection, reject-next relocking, all-rejected no-motion stop, shuffled-list
+  spatial veto persistence, veto translation under camera motion, and
+  unreachable-without-veto behavior.
+- `python3 laptop/test_arm_safety.py`: 6/6 pass.
+- `python3 laptop/test_table_touch.py`: 4/4 pass.
+- `PYTHONPATH=laptop python3 laptop/test_pipeline.py`: passes.
+- `python3 -m py_compile laptop/look_reach.py laptop/test_look_reach.py` and
+  `git diff --check`: pass.
+- No serial port or camera device was opened. No `simul/` or training file was
+  read, modified, or executed for this patch.

@@ -8,6 +8,11 @@ keeps the selected object on the camera optical axis with motor 4 while motors
 an object must stay the same instance and grow in the image before approach is
 allowed to continue.
 
+FastSAM supplies a ranked portable-object list. ``CandidateSelector`` chooses
+the nearest reachable item, while ``--reject-count N`` applies N explicit
+image-position vetoes and locks the next item. The same selector object exposes
+``reject_current(scene, pose)`` for a later ErrP callback.
+
 Nothing moves unless ``--run`` is supplied.  ``--grasp`` additionally permits
 the final close; without it the controller stops at a conservative height.
 """
@@ -24,8 +29,9 @@ import numpy as np
 import arm_fk
 import config
 from arm_session import ArmSessionClient
-from floor_grasp import WristSceneDetector
-from floor_servo import (CONTACT_SAMPLE_COUNT, FloorServo, _fresh_frame)
+from floor_grasp import CandidateSelector, WristSceneDetector
+from floor_servo import (
+    BASE_CENTER_RANGE_DEG, CONTACT_SAMPLE_COUNT, FloorServo, _fresh_frame)
 from wrist_search import PlanarSearchSafety
 
 
@@ -61,6 +67,7 @@ VECTOR_START_POSE = [90, 110, 87, 150, 90, 170]
 VECTOR_CONTACT_Z_M = 0.008
 VECTOR_CALIBRATION_Z_M = 0.100
 MAX_TABLE_Z_OFFSET_M = 0.015
+VECTOR_LATERAL_OPENING_FRACTION = 0.42
 
 
 def cumulative_tool_angle_deg(pose):
@@ -203,22 +210,6 @@ def pose_at_height(template, height_m):
     return result
 
 
-def _blue_target(frame):
-    """Competition target-color mode; replaceable by UI click/Hue prototype."""
-    import cv2
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    mask = cv2.inRange(hsv, (95, 80, 35), (135, 255, 255))
-    count, _labels, stats, centers = cv2.connectedComponentsWithStats(mask)
-    candidates = []
-    for index in range(1, count):
-        x, y, width, height, area = stats[index]
-        cx, cy = centers[index]
-        if (area >= 300 and 0.38 * frame.shape[1] <= cx <= 0.62 * frame.shape[1]
-                and y < frame.shape[0] - 45):
-            candidates.append((area, (x, y, width, height), (cx, cy)))
-    return max(candidates, key=lambda item: item[0]) if candidates else None
-
-
 def _calibrate_empty_close(mover, high_pose):
     """Same-run empty endpoint at the final 3/4 orientation."""
     high_open = list(high_pose)
@@ -252,24 +243,48 @@ def _calibrate_empty_close(mover, high_pose):
 
 
 def run_constant_x_grasp(client, execute=False, advance_mm=-5.0,
-                         table_z_m=0.0):
+                         table_z_m=0.0, target_selector=None,
+                         reject_count=0, detector=None,
+                         frame_source=_fresh_frame):
     """Aim at the floor object, descend at fixed tool x, close, lift, verify."""
+    detector = detector or WristSceneDetector()
+    target_selector = target_selector or LookReachTargetSelector()
     mover = FloorServo(client, calib=None)
     safety = PlanarSearchSafety()
     start = list(VECTOR_START_POSE)
     current = list(client.request({"command": "status"})["pose"])
+
+    # Select/reject at the current observation pose before any arm command. If
+    # every reachable candidate is vetoed, this returns a safe no-motion stop.
+    initial_frame, initial_scene, target = acquire_initial_target(
+        detector, target_selector=target_selector,
+        reject_count=reject_count, pose=current,
+        frame_source=frame_source)
+    if target is None:
+        print("[look-reach] no reachable non-vetoed target; no motion")
+        return {"state": "no-target", "moved": False}
+
     if not safety.transition_is_safe(current, start):
         raise RuntimeError("transition to vector start failed collision model")
     if execute:
         mover.slow_move(start, final_settle=1.0)
-    frame = _fresh_frame(discard=2)
-    target = _blue_target(frame)
-    observation, _ = mover.marker_detector.detect(frame)
-    if target is None or observation.gripper is None:
-        raise RuntimeError("target or open finger markers are not visible at vector start")
-    _area, bbox, center = target
-    horizontal_error = float(center[0] - observation.gripper.center[0])
-    if abs(horizontal_error) > 0.42 * observation.gripper.opening_px:
+
+        frame = frame_source(discard=2)
+        scene, observation = detector.scene(frame)
+        target = target_selector.match(scene)
+        if target is None:
+            raise RuntimeError(
+                "selected target was not reacquired at vector start")
+    else:
+        scene, observation = initial_scene, None
+
+    gripper = scene.gripper
+    if gripper is None:
+        raise RuntimeError("open finger markers are not visible at vector start")
+    bbox, center = target.bbox, target.center
+    horizontal_error = float(center[0] - gripper.center[0])
+    if abs(horizontal_error) > \
+            VECTOR_LATERAL_OPENING_FRACTION * gripper.opening_px:
         raise RuntimeError(f"target is outside open jaws in x ({horizontal_error:.0f}px)")
     waypoints = constant_x_descent_waypoints(
         start, contact_z_m=float(table_z_m) + VECTOR_CONTACT_Z_M,
@@ -289,10 +304,17 @@ def run_constant_x_grasp(client, execute=False, advance_mm=-5.0,
         print(f"[look-reach] FK pose234={pose[1:4]} "
               f"tool=({tool[0]*1000:.1f},{tool[2]*1000:.1f})mm")
     if not execute:
-        return {"state": "planned", "endpoint": endpoint, "high": high}
+        return {"state": "planned", "endpoint": endpoint, "high": high,
+                "target_center": tuple(float(value) for value in center)}
 
     _calibrate_empty_close(mover, high)
     mover.slow_move(start)
+    reacquired_frame = frame_source(discard=2)
+    reacquired_scene, _ = detector.scene(reacquired_frame)
+    target = target_selector.match(reacquired_scene)
+    if target is None:
+        raise RuntimeError(
+            "selected target was not reacquired after empty-close calibration")
     for pose in waypoints:
         mover.slow_move(pose, final_settle=0.35)
     closed_pose = list(endpoint)
@@ -461,27 +483,171 @@ class TargetLock:
         self.confidence = float(getattr(candidate, "confidence", 1.0))
 
 
-def select_initial_target(scene):
-    """Select a central, non-gripper object without a color/location template."""
+def candidate_reachability(scene, candidate, pose=None, safety=None):
+    """Return ``(reachable, reason)`` before a candidate may be locked.
+
+    ``WristSceneDetector`` has already removed floor/arm/tape masks and ranked
+    surviving objects by jaw proximity. This final gate keeps the established
+    look/reach image envelope, the vector jaw/base-yaw window, and the physical
+    pose interlock. A failed gate is not a human veto.
+    """
     height, width = scene.frame_shape[:2]
-    eligible = []
-    for candidate in scene.ranked:
-        confidence = float(getattr(candidate, "confidence", 1.0))
-        cx, cy = candidate.center
-        x, y, box_width, box_height = candidate.bbox
-        ratio = float(candidate.area) / float(width * height)
-        if (confidence < MIN_TRACK_CONFIDENCE or not 0.001 <= ratio <= 0.12
-                or not 0.20 * width <= cx <= 0.80 * width
-                or cy >= 0.82 * height):
-            continue
-        centre_cost = abs(cx / width - AIM_X_RATIO)
-        aim_cost = 0.22 * abs(cy / height - AIM_Y_RATIO)
-        size_bonus = 0.025 * math.log1p(max(1.0, candidate.area))
-        eligible.append((centre_cost + aim_cost - size_bonus, candidate))
-    return min(eligible, key=lambda item: item[0])[1] if eligible else None
+    confidence = float(getattr(candidate, "confidence", 1.0))
+    cx, cy = (float(value) for value in candidate.center)
+    _x, _y, box_width, box_height = candidate.bbox
+    ratio = float(candidate.area) / float(width * height)
+    if confidence < MIN_TRACK_CONFIDENCE:
+        return False, f"confidence {confidence:.2f} below {MIN_TRACK_CONFIDENCE:.2f}"
+    if not 0.001 <= ratio <= 0.12:
+        return False, f"area ratio {ratio:.4f} outside portable-object envelope"
+    if not 0.20 * width <= cx <= 0.80 * width:
+        return False, f"x={cx:.0f}px outside bounded base-yaw search view"
+    if cy >= 0.82 * height:
+        return False, f"y={cy:.0f}px overlaps the near jaw/cable region"
+
+    gripper = getattr(scene, "gripper", None)
+    if gripper is None:
+        diagonal = math.hypot(width, height)
+        centre = np.asarray(
+            config.WRIST_GRIPPER_OPEN_PROFILE["center"], dtype=float)
+        centre *= np.asarray([width, height], dtype=float)
+        opening_px = (config.WRIST_GRIPPER_OPEN_PROFILE["opening_ratio"]
+                      * diagonal)
+    else:
+        centre = np.asarray(gripper.center, dtype=float)
+        opening_px = float(gripper.opening_px)
+    lateral_error = cx - float(centre[0])
+    lateral_limit = VECTOR_LATERAL_OPENING_FRACTION * opening_px
+    if abs(lateral_error) > lateral_limit:
+        return False, (
+            f"lateral error {lateral_error:.0f}px exceeds the verified "
+            f"jaw/base-yaw window {lateral_limit:.0f}px")
+
+    if pose is not None:
+        values = [float(value) for value in pose]
+        base_delta = abs(values[config.J_BASE] - config.FLOOR_BASE_ANGLE)
+        if base_delta > BASE_CENTER_RANGE_DEG:
+            return False, (
+                f"base yaw is {base_delta:.0f}deg outside the verified "
+                f"±{BASE_CENTER_RANGE_DEG}deg centring range")
+        safety = safety or PlanarSearchSafety()
+        if not safety.pose_is_safe(values):
+            return False, "current pose fails the physical collision interlock"
+    return True, "reachable"
 
 
-def match_locked_target(scene, lock):
+class LookReachTargetSelector:
+    """Persistent multi-object selector and ErrP-ready reject hook.
+
+    Explicit rejection is delegated to :class:`CandidateSelector`, so vetoes
+    are image-position based and survive FastSAM instance/list reshuffles.
+    Reachability failures are merely skipped and never added to the veto set.
+    """
+
+    def __init__(self, selector=None, reachability=candidate_reachability,
+                 logger=print):
+        self.selector = selector
+        self.reachability = reachability
+        self.logger = logger
+        self.lock = None
+        self.current = None
+        self._safety = PlanarSearchSafety()
+
+    def _ensure_selector(self, scene):
+        if self.selector is None:
+            height, width = scene.frame_shape[:2]
+            radius = (config.FLOOR_REJECT_RADIUS_RATIO
+                      * math.hypot(width, height))
+            self.selector = CandidateSelector(reject_radius_px=radius)
+        return self.selector
+
+    def choose(self, scene, pose=None):
+        """Choose the nearest ranked, reachable, non-vetoed candidate."""
+        selector = self._ensure_selector(scene)
+        reachable = []
+        for index, candidate in enumerate(scene.ranked):
+            allowed, reason = self.reachability(
+                scene, candidate, pose=pose, safety=self._safety)
+            if allowed:
+                reachable.append(candidate)
+            elif self.logger is not None:
+                self.logger(
+                    f"[look-reach] SKIP candidate #{index} "
+                    f"center={tuple(round(v, 1) for v in candidate.center)}: "
+                    f"{reason}")
+        selected = selector.choose(reachable)
+        if selected is None:
+            self.current = None
+            self.lock = None
+            return None
+        self.current = selected
+        self.lock = TargetLock.from_candidate(selected)
+        if self.logger is not None:
+            self.logger(
+                "[look-reach] SELECT "
+                f"center={tuple(round(v, 1) for v in selected.center)} "
+                f"vetoes={len(selector.rejected_points)}")
+        return selected
+
+    def reject_current(self, scene=None, pose=None):
+        """Programmatic human/ErrP hook: veto current image position and rechoose."""
+        if self.current is None:
+            return self.choose(scene, pose=pose) if scene is not None else None
+        selector = self._ensure_selector(scene) if scene is not None else self.selector
+        if selector is None:
+            raise RuntimeError("cannot reject before a scene has initialized selection")
+        rejected = self.current
+        selector.reject(rejected)
+        if self.logger is not None:
+            self.logger(
+                "[look-reach] REJECT "
+                f"center={tuple(round(v, 1) for v in rejected.center)}")
+        self.current = None
+        self.lock = None
+        return self.choose(scene, pose=pose) if scene is not None else None
+
+    def match(self, scene):
+        """Reacquire only the lock and carry veto pixels with camera motion.
+
+        Eye-in-hand motion translates the whole local scene. The locked target
+        supplies that observed translation, which is applied to rejected image
+        positions before the next selection. An explicit reject clears the lock,
+        so this translation can never resurrect the just-vetoed target.
+        """
+        if self.lock is None:
+            return None
+        candidate = match_locked_target(scene, self.lock)
+        if candidate is None:
+            return None
+        old_center = self.lock.center.copy()
+        displacement = np.asarray(candidate.center, dtype=float) - old_center
+        selector = self._ensure_selector(scene)
+        selector.rejected_points = [
+            (float(x + displacement[0]), float(y + displacement[1]))
+            for x, y in selector.rejected_points]
+        self.lock.update(candidate)
+        self.current = candidate
+        return candidate
+
+
+def choose_with_rejections(scene, target_selector, reject_count=0, pose=None):
+    """Apply N explicit vetoes before returning the target to prosecute."""
+    if reject_count < 0:
+        raise ValueError("reject count must be non-negative")
+    selected = target_selector.choose(scene, pose=pose)
+    for _ in range(int(reject_count)):
+        if selected is None:
+            break
+        selected = target_selector.reject_current(scene, pose=pose)
+    return selected
+
+
+def select_initial_target(scene):
+    """Compatibility wrapper: choose the nearest reachable scene candidate."""
+    return LookReachTargetSelector(logger=None).choose(scene)
+
+
+def match_locked_target(scene, lock, selector=None):
     """Track the same appearance/position; never jump to a bottom cable/jaw."""
     eligible = []
     old_w, old_h = lock.bbox[2], lock.bbox[3]
@@ -489,6 +655,8 @@ def match_locked_target(scene, lock):
     for candidate in scene.ranked:
         confidence = float(getattr(candidate, "confidence", 1.0))
         if confidence < MIN_TRACK_CONFIDENCE:
+            continue
+        if selector is not None and selector.choose([candidate]) is None:
             continue
         distance = float(np.linalg.norm(np.asarray(candidate.center) - lock.center))
         if distance > MAX_TRACK_JUMP_PX:
@@ -505,34 +673,31 @@ def match_locked_target(scene, lock):
     return min(eligible, key=lambda item: item[0])[1] if eligible else None
 
 
-def acquire_initial_target(detector, samples=3):
-    """Use several fresh segmentations so a transient object part cannot lock."""
-    choices = []
+def acquire_initial_target(detector, samples=3, target_selector=None,
+                           reject_count=0, pose=None,
+                           frame_source=_fresh_frame):
+    """Choose once, then follow that lock across several fresh segmentations."""
+    target_selector = target_selector or LookReachTargetSelector()
     latest_frame = None
     latest_scene = None
+    selected = None
+    remaining_rejects = int(reject_count)
+    if remaining_rejects < 0:
+        raise ValueError("reject count must be non-negative")
     for _ in range(samples):
-        latest_frame = _fresh_frame(discard=1)
+        latest_frame = frame_source(discard=1)
         latest_scene, _ = detector.scene(latest_frame)
-        selected = select_initial_target(latest_scene)
-        if selected is not None:
-            choices.append(selected)
-    if not choices:
-        return latest_frame, latest_scene, None
-    # Across frames FastSAM may alternate between a complete object and a nested
-    # cap/label.  Same horizontal column plus bbox overlap identifies the group;
-    # its largest mask is the stable physical-object lock.
-    seed = min(choices, key=lambda item: abs(item.center[0]
-                                             - AIM_X_RATIO * latest_frame.shape[1]))
-    related = []
-    sx, sy, sw, sh = seed.bbox
-    for candidate in choices:
-        x, y, width, height = candidate.bbox
-        horizontal_overlap = max(0, min(sx + sw, x + width) - max(sx, x))
-        if (abs(candidate.center[0] - seed.center[0]) <= 90
-                and horizontal_overlap > 0.35 * min(sw, width)):
-            related.append(candidate)
-    return latest_frame, latest_scene, max(
-        related or choices, key=lambda item: item.area)
+        if selected is None:
+            selected = target_selector.choose(latest_scene, pose=pose)
+            while selected is not None and remaining_rejects:
+                selected = target_selector.reject_current(
+                    latest_scene, pose=pose)
+                remaining_rejects -= 1
+        elif selected is not None:
+            matched = target_selector.match(latest_scene)
+            if matched is not None:
+                selected = matched
+    return latest_frame, latest_scene, selected
 
 
 def _draw_preview(frame, lock, step, pose, aim_y, plan=None):
@@ -556,14 +721,22 @@ def _draw_preview(frame, lock, step, pose, aim_y, plan=None):
     cv2.imwrite(str(PREVIEW), image)
 
 
-def run_controller(client, max_steps=24, execute=False, allow_grasp=False):
-    detector = WristSceneDetector()
+def run_controller(client, max_steps=24, execute=False, allow_grasp=False,
+                   target_selector=None, reject_count=0, detector=None,
+                   frame_source=_fresh_frame):
+    detector = detector or WristSceneDetector()
+    target_selector = target_selector or LookReachTargetSelector()
     safety = PlanarSearchSafety()
     mover = FloorServo(client, calib=None)
-    frame, scene, selected = acquire_initial_target(detector)
+    observation_pose = list(client.request({"command": "status"})["pose"])
+    frame, scene, selected = acquire_initial_target(
+        detector, target_selector=target_selector,
+        reject_count=reject_count, pose=observation_pose,
+        frame_source=frame_source)
     if selected is None:
-        raise RuntimeError("no central portable target found")
-    lock = TargetLock.from_candidate(selected)
+        print("[look-reach] no reachable non-vetoed target; no motion")
+        return {"state": "no-target", "moved": False}
+    lock = target_selector.lock
     initial_area = lock.area
     previous_area = lock.area
     # This is the hand-eye offset in image coordinates for the present mount.
@@ -576,12 +749,12 @@ def run_controller(client, max_steps=24, execute=False, allow_grasp=False):
 
     for step in range(max_steps):
         pose = list(client.request({"command": "status"})["pose"])
-        frame = _fresh_frame(discard=2)
+        frame = frame_source(discard=2)
         scene, _ = detector.scene(frame)
-        candidate = match_locked_target(scene, lock)
+        candidate = target_selector.match(scene)
         if candidate is None:
             raise RuntimeError("locked target lost; refusing blind motion")
-        lock.update(candidate)
+        lock = target_selector.lock
         vertical_error = float(lock.center[1] - aim_y)
         minimum_z = (GRASP_MIN_TOOL_Z_M if allow_grasp
                      else APPROACH_MIN_TOOL_Z_M)
@@ -670,18 +843,26 @@ def main():
                         help="fixed-tool-x coordinated 2/3/4 grasp and lift")
     parser.add_argument("--vector-inset-mm", type=float, default=-5.0,
                         help="signed endpoint-x correction for vector grasp")
+    parser.add_argument("--reject-count", type=int, default=0,
+                        help="veto this many ranked reachable targets before run")
     args = parser.parse_args()
     if args.grasp and not args.run:
         parser.error("--grasp requires --run")
+    if args.reject_count < 0:
+        parser.error("--reject-count must be non-negative")
     client = ArmSessionClient()
+    target_selector = LookReachTargetSelector()
     table_z_m = (load_table_z_m()
                  if args.vector_grasp and args.run else 0.0)
     result = (run_constant_x_grasp(
                   client, execute=args.run, advance_mm=args.vector_inset_mm,
-                  table_z_m=table_z_m)
+                  table_z_m=table_z_m, target_selector=target_selector,
+                  reject_count=args.reject_count)
               if args.vector_grasp else
               run_controller(client, args.max_steps,
-                             execute=args.run, allow_grasp=args.grasp))
+                             execute=args.run, allow_grasp=args.grasp,
+                             target_selector=target_selector,
+                             reject_count=args.reject_count))
     print(f"[look-reach] RESULT {result}")
 
 
