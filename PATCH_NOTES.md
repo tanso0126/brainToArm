@@ -2101,3 +2101,61 @@ PYTHONPATH=laptop python3 laptop/look_reach.py \
   `git diff --check`: pass.
 - No serial port or camera device was opened. No `simul/` or training file was
   read, modified, or executed for this patch.
+
+## Patch 53 — repeatable compliant table touch and camera stall recovery
+
+### Intent
+
+Fix the two table-touch failures observed in the first post-move physical
+calibration: a legitimate collision-interlock rejection when a confirmation
+approach formed its backlash prepose directly from the near-table pose, and a
+missed contact after compliant finger flex let background flow resume. Prevent
+the headless wrist publisher from blocking forever on a frozen ffmpeg pipe.
+
+### Changes
+
+- Table-touch confirmation and final cleanup now retrace the already-validated
+  touch path upward to its clear first pose before any new increasing-direction
+  backlash approach. Reverse retreat edges are collision-checked during the dry
+  plan and again immediately before motion. The reported unsafe
+  `[90,120,136,163,90,170] -> [90,101,140,154,90,170]` edge is never formed.
+- Added sustained marker deformation as contact evidence co-equal with the
+  existing flow-collapse signal. Marker shift must be greater than 3 px on two
+  consecutive descent steps after a preceding at-or-below-threshold step; the
+  calibrated height is that step immediately before the onset. A candidate
+  still has to reproduce the same boundary after a safe-height retreat and
+  replay before calibration is accepted.
+- The saved calibration includes the nominal fixed-pitch contact estimate in
+  `z_table_mm` and the integer-servo FK value in `fk_z_table_mm`. The physical
+  log now resolves to nominal z=2 mm (integer-command FK z=1.62 mm).
+- `NamedAVFoundationCamera.read(timeout_s=...)` can bound a raw ffmpeg pipe
+  frame read using only Python standard-library polling. `wrist_publish.py`
+  applies a 3 s deadline to every warmup/live frame, terminates a stalled
+  child, starts and warms a replacement, and raises out of `main` if the
+  replacement cannot publish so its supervisor receives a nonzero exit.
+- Added the exact physical flow/marker sequence as a hardware-free regression,
+  including the false z=4 flow confirmation, z=0/-2 marker onset, confirmed
+  z=2 contact, and a safe-height waypoint before retry preposes. Added fake-pipe
+  and fake-child publisher timeout/respawn tests.
+
+### Entry points
+
+```bash
+# Hardware-free collision-checked plan; only the operator adds --run.
+PYTHONPATH=laptop python3 laptop/table_touch_calibrate.py
+PYTHONPATH=laptop python3 laptop/table_touch_calibrate.py --run --x-mm 300
+
+# Existing headless publisher service entry point, now self-restarting ffmpeg.
+PYTHONPATH=laptop python3 laptop/wrist_publish.py
+```
+
+### Verification
+
+- `PYTHONPATH=laptop python3 laptop/test_pipeline.py`: passes.
+- `PYTHONPATH=laptop python3 laptop/test_arm_safety.py`: 6/6 pass.
+- `PYTHONPATH=laptop python3 laptop/test_look_reach.py`: 14/14 pass.
+- `PYTHONPATH=laptop python3 laptop/test_table_touch.py`: 5/5 pass.
+- `PYTHONPATH=laptop python3 laptop/test_wrist_publish.py`: 3/3 pass.
+- `python3 -m py_compile ...` and `git diff --check`: pass.
+- No serial port or camera device was opened. No `simul/` or training file was
+  modified or executed.

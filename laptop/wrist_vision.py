@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Optional, Tuple
 import argparse
 import math
+import os
+import select
 import shutil
 import subprocess
 import sys
@@ -465,18 +467,34 @@ class NamedAVFoundationCamera:
     def isOpened(self):
         return self.process.poll() is None and self.process.stdout is not None
 
-    def read(self):
+    def read(self, timeout_s=None):
         if not self.isOpened():
             return False, None
         needed = self.width * self.height * 3
         data = bytearray(needed)
         view = memoryview(data)
         offset = 0
+        deadline = (None if timeout_s is None
+                    else time.monotonic() + float(timeout_s))
         while offset < needed:
-            count = self.process.stdout.readinto(view[offset:])
-            if not count:
+            if deadline is None:
+                count = self.process.stdout.readinto(view[offset:])
+                if not count:
+                    return False, None
+                offset += count
+                continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 return False, None
-            offset += count
+            ready, _writable, _errors = select.select(
+                [self.process.stdout], [], [], remaining)
+            if not ready:
+                return False, None
+            chunk = os.read(self.process.stdout.fileno(), needed - offset)
+            if not chunk:
+                return False, None
+            view[offset:offset + len(chunk)] = chunk
+            offset += len(chunk)
         frame = np.frombuffer(data, dtype=np.uint8).reshape(
             self.height, self.width, 3)
         return True, frame
