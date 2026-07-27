@@ -1464,3 +1464,16 @@ red at `(657,618,117,102)`. Both correctly touch the bottom image boundary.
   level, continuous Jacobian cancellation, rounded bounded waypoints, rejection
   outside the calibrated extent, and multi-command execution by one persistent
   arm owner.
+
+## Patch 40 — comprehensive project handoff
+
+- Added `handoff.md` for transfer to another coding agent without access to the
+  original conversation. It distinguishes physically verified results, code-only
+  capabilities, calibration gates, and unfinished wrist-camera grasp work.
+- Consolidated the final six-servo wiring, HOME/ranges, 170° level wrist roll,
+  persistent Uno ownership, floor-plane vector, jaw-contact baseline, camera
+  runtime, PolyG-I HID protocol, EEG/TAR/ErrP definitions, test commands, known
+  failures, safety rules, and recommended next state-machine implementation.
+- Recorded a time-stamped hardware/process snapshot while explicitly warning
+  that it is volatile. No credentials or other sensitive conversation data were
+  copied into the repository.
