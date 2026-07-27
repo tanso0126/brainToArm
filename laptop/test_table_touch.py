@@ -1,4 +1,7 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import cv2
@@ -7,12 +10,56 @@ import numpy as np
 import arm_fk
 from look_reach import cumulative_tool_angle_deg
 from table_touch_calibrate import (
-    TOUCH_X_M, backlash_prepose, fixed_pitch_path, median_table_flow,
+    ContactEvidence, MarkerEvidenceTracker, TOUCH_X_M, TouchStep,
+    _evidence_confirmed, backlash_prepose, fixed_pitch_path,
+    median_table_flow, replay_contact_records, replay_touch_file,
     run_touch_trial)
 from wrist_search import PlanarSearchSafety
 
 
 HOVER = [90, 124, 90, 180, 90, 170]
+
+# Exact records saved by the 2026-07-27 x=330, min-z=-18 physical run.
+PACKET4_X330_ROWS = [
+    (38.0, 36.636915370546305, [111, 100, 153], 40.40512466430664, 458, 2.3356169766979504),
+    (33.99999999999999, 35.92900067662397, [111, 101, 154], 36.65341567993164, 224, 5.206452819227016),
+    (31.999999999999993, 31.1897606582386, [112, 100, 154], 15.464066505432129, 537, 4.969906081554333),
+    (27.99999999999999, 26.997932383194506, [113, 98, 154], 44.999961853027344, 491, 0.48204046673691037),
+    (25.99999999999999, 26.099924562651033, [114, 97, 154], 12.92220401763916, 494, 0.7507349358341595),
+    (23.999999999999986, 24.659011945118422, [115, 97, 154], 69.48113250732422, 433, 6.949400995441196),
+    (21.999999999999986, 22.317046852888073, [117, 96, 154], 52.54043960571289, 515, 7.299422925289587),
+    (19.999999999999982, 19.64234431551097, [118, 98, 155], 75.08283996582031, 464, 4.307094507382382),
+    (17.999999999999982, 17.825367023556527, [120, 96, 155], 52.43257522583008, 479, 7.053155310299574),
+    (15.999999999999979, 16.384435302845667, [121, 96, 155], 10.70329761505127, 479, 7.852008897776173),
+    (13.999999999999979, 14.031804815667876, [123, 95, 155], 49.70773696899414, 484, 0.41763313051481116),
+    (11.999999999999979, 12.197393645513921, [125, 93, 155], 34.26490020751953, 531, 0.24696731861602955),
+    (9.999999999999979, 10.756543317881533, [126, 93, 155], 52.40773010253906, 511, 0.5584385427730162),
+    (7.99999999999998, 8.395714745833589, [128, 92, 155], 7.680413246154785, 558, 0.5926678392348571),
+    (5.99999999999998, 6.272785013541865, [129, 93, 156], 53.51464080810547, 450, 0.7119244015280883),
+    (3.999999999999979, 3.9041166821312254, [131, 92, 156], 17.195125579833984, 548, 1.1367490357078707),
+    (1.9999999999999791, 1.5336829321843382, [133, 91, 156], 8.602005958557129, 538, 1.6146616452386897),
+    (-2.0816681711721685e-14, 0.601568542215436, [134, 90, 156], 0.7869609594345093, 172, 1.907897668061771),
+    (-2.000000000000021, -1.7737149848140732, [136, 89, 156], 44.73220443725586, 176, 4.020087652268031),
+    (-4.000000000000021, -4.150369504515639, [138, 88, 156], 43.73705291748047, 183, 7.130199538487831),
+    (-5.000000000000021, -5.089822065826935, [139, 87, 156], 12.851743698120117, 217, 7.839674515699842),
+    (-6.000000000000021, -6.030183784420426, [140, 86, 156], 19.033138275146484, 265, 8.418150060649706),
+    (-7.000000000000021, -7.470738482252493, [141, 86, 156], 27.07853889465332, 228, 9.715869176713129),
+    (-8.000000000000021, -8.414111435660399, [142, 85, 156], 23.565011978149414, 206, 11.123920323215588),
+    (-9.000000000000021, -9.358334813844793, [143, 84, 156], 24.306453704833984, 230, 13.27746953374287),
+    (-10.000000000000023, -9.852629350992432, [143, 85, 156], 9.281723022460938, 266, 13.205111196833734),
+    (-11.000000000000023, -11.015049012634337, [143, 87, 157], 12.144193649291992, 291, 15.111783038250156),
+    (-12.000000000000025, -11.960783369214688, [144, 86, 157], 17.04318618774414, 257, 16.09099128703909),
+    (-13.000000000000025, -13.400035913769232, [145, 86, 157], 11.640069961547852, 223, 17.223508843347798),
+    (-14.000000000000027, -14.348630615748023, [146, 85, 157], 11.001470565795898, 519, 17.53520855467083),
+    (-15.000000000000027, -15.29799601922162, [147, 84, 157], 1.7141190767288208, 448, 17.535343626450683),
+    (-16.00000000000003, -16.248112554524948, [148, 83, 157], 17.715232849121094, 554, 17.336119970712637),
+    (-17.00000000000003, -17.689148421238894, [149, 83, 157], 9.121460914611816, 513, 18.917603518281858),
+    (-18.00000000000003, -18.641968746862165, [150, 82, 157], 21.939687728881836, 573, None),
+]
+PACKET4_X330_RECORDS = [
+    TouchStep(z, fk, pose, flow, points, marker)
+    for z, fk, pose, flow, points, marker in PACKET4_X330_ROWS
+]
 
 
 class FakeClient:
@@ -62,6 +109,105 @@ class TableTouchTests(unittest.TestCase):
                     for (_za, before), (_zb, after)
                     in zip(fine, fine[1:])]
         self.assertTrue(all(0.35 <= amount <= 1.6 for amount in descents))
+
+    def test_packet4_exact_replay_detects_contact_and_strain_stop(self):
+        result = replay_contact_records(PACKET4_X330_RECORDS)
+        self.assertEqual(result["state"], "contact")
+        self.assertEqual(result["evidence_kind"], "marker-safety")
+        self.assertGreaterEqual(result["onset_z_mm"], -10.0)
+        self.assertLessEqual(result["onset_z_mm"], -6.0)
+        self.assertGreaterEqual(result["would_stop_z_mm"], -13.0)
+        self.assertEqual(result["would_stop_z_mm"], -9.0)
+        self.assertEqual(result["z_table_mm"], -7.0)
+        self.assertEqual(len(result["records"]), len(PACKET4_X330_ROWS))
+
+    def test_replay_file_writes_confirmed_calibration(self):
+        payload = {
+            "state": "no-contact",
+            "minimum_z_mm": -18.0,
+            "records": [
+                {
+                    "command_z_mm": row.command_z_mm,
+                    "fk_z_mm": row.fk_z_mm,
+                    "pose234": row.pose234,
+                    "flow_px": row.flow_px,
+                    "flow_points": row.flow_points,
+                    "marker_shift_px": row.marker_shift_px,
+                }
+                for row in PACKET4_X330_RECORDS
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "physical.json"
+            output = Path(directory) / "table_touch.json"
+            source.write_text(json.dumps(payload), encoding="utf-8")
+            result = replay_touch_file(source, output)
+            saved = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(result["state"], "contact")
+        self.assertEqual(saved["state"], "contact")
+        self.assertEqual(saved["onset_z_mm"], -8.0)
+
+    def test_missing_marker_samples_do_not_disarm_sustained_onset(self):
+        tracker = MarkerEvidenceTracker()
+        records = [
+            TouchStep(-6.0, -6.0, [1, 2, 3], 5.0, 200, 1.0),
+            TouchStep(-7.0, -7.0, [1, 2, 3], 5.0, 200, None),
+            TouchStep(-8.0, -8.0, [1, 2, 3], 5.0, 200, 5.0),
+            TouchStep(-9.0, -9.0, [1, 2, 3], 5.0, 200, None),
+            TouchStep(-10.0, -10.0, [1, 2, 3], 5.0, 200, 4.8),
+        ]
+        evidence = None
+        for index, record in enumerate(records):
+            evidence = tracker.observe(record, index) or evidence
+        self.assertIsNotNone(evidence)
+        self.assertEqual(evidence.kind, "marker-sustained")
+        self.assertEqual(evidence.onset_path_index, 2)
+        self.assertEqual(evidence.confirmation_path_index, 4)
+
+    def test_missing_second_strain_sample_stops_at_onset_plus_4(self):
+        tracker = MarkerEvidenceTracker()
+        records = [
+            TouchStep(-8.0, -8.0, [1, 2, 3], 5.0, 200, 11.0),
+            TouchStep(-9.0, -9.0, [1, 2, 3], 5.0, 200, None),
+            TouchStep(-10.0, -10.0, [1, 2, 3], 5.0, 200, None),
+            TouchStep(-11.0, -11.0, [1, 2, 3], 5.0, 200, None),
+            TouchStep(-12.0, -12.0, [1, 2, 3], 5.0, 200, None),
+        ]
+        guard = None
+        for index, record in enumerate(records):
+            tracker.observe(record, index)
+            guard = tracker.press_depth_guard(record, index) or guard
+        self.assertIsNotNone(guard)
+        self.assertEqual(guard.kind, "marker-guard")
+        self.assertEqual(records[guard.confirmation_path_index].command_z_mm,
+                         -12.0)
+
+    def test_confirmation_cannot_switch_evidence_family(self):
+        marker_trigger = ContactEvidence(
+            "marker-sustained", 0, 2, 1)
+        flow_only_replay = [
+            TouchStep(-7.0, -7.0, [1, 2, 3], 0.5, 200, 0.0),
+            TouchStep(-8.0, -8.0, [1, 2, 3], 0.5, 200, 1.0),
+            TouchStep(-9.0, -9.0, [1, 2, 3], 0.5, 200, 1.0),
+        ]
+        self.assertFalse(
+            _evidence_confirmed(marker_trigger, flow_only_replay, 10.0))
+
+        flow_trigger = ContactEvidence("flow-collapse", 0, 0, 0)
+        marker_only_replay = [
+            TouchStep(-7.0, -7.0, [1, 2, 3], 9.0, 200, 0.0),
+            TouchStep(-8.0, -8.0, [1, 2, 3], 9.0, 200, 11.0),
+            TouchStep(-9.0, -9.0, [1, 2, 3], 9.0, 200, 13.0),
+        ]
+        self.assertFalse(
+            _evidence_confirmed(flow_trigger, marker_only_replay, 10.0))
+
+    def test_confirm_only_window_is_z_plus_10_through_z_minus_2(self):
+        path = fixed_pitch_path(
+            x_m=0.330, start_z_m=0.003, minimum_z_m=-0.009,
+            step_z_m=0.001)
+        commands = [round(z * 1000.0) for z, _pose in path]
+        self.assertEqual(commands, list(range(3, -10, -1)))
 
     def test_backlash_prepose_finishes_from_below(self):
         target = [90, 120, 100, 160, 90, 170]

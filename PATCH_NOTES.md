@@ -2223,3 +2223,63 @@ retrial so it recognizes the bounded `table_touch_move` request.
 - Targeted `py_compile` and `git diff --check`: pass.
 - No serial port or camera device was opened. No `simul/` or training file was
   modified or executed.
+
+## Patch 55 — missing-marker contact replay and strain-bounded confirmation
+
+### Intent
+
+Correctly interpret the complete x=330/min-z=-18 physical record. It contains
+real sustained finger deformation beginning near z=-8/-9, but Packet 4's
+three-adjacent-record detector was disarmed by missing marker observations and
+later treated a high-marker replay as flow evidence. Prevent any future pass
+from pressing several millimetres past unmistakable high strain.
+
+### Changes
+
+- Replaced the stateless three-row marker check with
+  `MarkerEvidenceTracker`. Its baseline is the last finite marker sample;
+  missing samples carry that baseline and any pending onset forward. An onset
+  arms when the first valid shift exceeds `max(3 px, baseline + 3 px)` and the
+  next valid sample remains above the same threshold.
+- Contact evidence now retains its family. Marker-sustained, marker-safety,
+  marker-depth-guard, and flow-collapse triggers replay only their own
+  confirmation criterion; marker evidence can no longer be accepted or
+  rejected as flow because flow happened to be available.
+- Added a hard strain stop: two valid samples above 10 px immediately end
+  descent and enter marker-safety confirmation. A missing second sample cannot
+  permit more than 4 mm of additional descent from either an armed marker
+  onset or the first >10 px sample.
+- Added offline `--replay <json>`. It validates and reprocesses saved records
+  without opening the daemon/camera, writes `table_touch.json` only when the
+  high-strain marker family confirms, and records contact/onset/would-stop
+  heights. The exact Packet 4 JSON resolves to contact z=-7, onset z=-8, and
+  would-stop z=-9 instead of continuing through -18.
+- Added `--confirm-only-around-mm Z`. This constructs a 1 mm short path from
+  `Z+10` through at most `Z-2`, retaining the same safe retreat/replay,
+  collision interlock, evidence-family confirmation, and no-contact behavior.
+- Embedded all 34 Packet 4 physical records as a regression fixture. Tests
+  cover its offline reinterpretation, JSON rewrite, missing-sample carry,
+  4 mm strain cap, family-stable confirmation, and the exact short path.
+
+### Entry points
+
+```bash
+# Offline: rewrites the saved no-contact record as contact at -7 mm.
+PYTHONPATH=laptop python3 laptop/table_touch_calibrate.py \
+  --replay data/calibration/table_touch.json
+
+# Operator-gated: 1 mm physical pass from +3 through at most -9 mm.
+PYTHONPATH=laptop python3 laptop/table_touch_calibrate.py \
+  --run --x-mm 330 --confirm-only-around-mm -7
+```
+
+### Verification
+
+- `PYTHONPATH=laptop python3 laptop/test_pipeline.py`: passes.
+- `PYTHONPATH=laptop python3 laptop/test_arm_safety.py`: 7/7 pass.
+- `PYTHONPATH=laptop python3 laptop/test_look_reach.py`: 14/14 pass.
+- `PYTHONPATH=laptop python3 laptop/test_table_touch.py`: 14/14 pass.
+- `PYTHONPATH=laptop python3 laptop/test_wrist_publish.py`: 3/3 pass.
+- Targeted `py_compile` and `git diff --check`: pass.
+- No serial port or camera device was opened. No `simul/` or training file was
+  modified or executed.
