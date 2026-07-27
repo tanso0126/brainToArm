@@ -814,6 +814,131 @@ def test_floor_motion_and_persistent_session():
           "one persistent owner executes compensated waypoints without reopening Uno")
 
 
+def test_floor_grasp_selection_and_reject():
+    print("[floor-grasp] multi-object rank, marker/floor exclusion, reject cycle")
+    from types import SimpleNamespace
+    from vision_segment import ObjectDetection
+    from floor_grasp import (
+        CandidateSelector, FloorGraspController, filter_wrist_candidates,
+        rank_wrist_candidates)
+
+    frame_shape = (720, 1280, 3)
+    near = ObjectDetection((900, 420), (870, 400, 70, 60), 4200, 0.9)
+    mid = ObjectDetection((640, 300), (610, 280, 50, 45), 2250, 0.9)
+    far = ObjectDetection((300, 400), (280, 380, 60, 50), 3000, 0.9)
+    tape = ObjectDetection((615, 690), (590, 667, 50, 52), 2600, 0.8)
+    floor = ObjectDetection((640, 360), (0, 0, 1280, 720), 921600, 0.99)
+    marker_boxes = [(590, 667, 50, 52), (705, 667, 50, 52)]
+
+    valid = filter_wrist_candidates(
+        [floor, near, tape, mid, far], frame_shape, marker_boxes)
+    check(floor not in valid and tape not in valid and len(valid) == 3,
+          "finger tapes and full-frame floor are excluded from candidates")
+    ranked = rank_wrist_candidates(valid, frame_shape, gripper_center=(640, 690))
+    check(ranked[0] is near,
+          "several objects are recognized and the nearest jaw candidate ranks first")
+
+    diagonal = math.hypot(1280, 720)
+    selector = CandidateSelector(
+        reject_radius_px=config.FLOOR_REJECT_RADIUS_RATIO * diagonal)
+    check(selector.choose(ranked) is near, "step 1/2: one object is selected")
+    selector.reject(near)
+    check(selector.choose(ranked) is mid,
+          "step 3: reject switches to the next object automatically")
+    selector.reject(mid)
+    check(selector.choose(ranked) is far, "successive rejects keep advancing")
+    selector.reject(far)
+    check(selector.choose(ranked) is None, "all-rejected leaves no live target")
+    selector.confirm()
+    check(selector.choose(ranked) is near,
+          "confirm/deliver clears vetoes for the next goal (ErrP-ready hook)")
+
+    # id-independent rejection: a renumbered frame with a shifted-but-same object.
+    moved_near = ObjectDetection((905, 424), (875, 404, 70, 60), 4200, 0.9)
+    selector = CandidateSelector(reject_radius_px=40.0)
+    selector.reject(near)
+    check(selector.choose([moved_near, mid]) is mid,
+          "veto follows image position, not a per-frame segment id")
+
+    # ---- fail-closed state machine (gated + executed paths) ----
+    class FakeArm:
+        def __init__(self):
+            self.calls = []
+
+        def status(self):
+            return list(config.HOME_POSE)
+
+        def move(self, pose, settle_s=0.0, timeout=15.0):
+            self.calls.append(("move", list(pose)))
+            return list(pose)
+
+        def floor(self, level, elbow, settle_s=0.0, timeout=15.0):
+            self.calls.append(("floor", level, int(elbow)))
+            return list(config.HOME_POSE)
+
+    def make_perceive(opening_px, target, keep_after_lift=True):
+        # Jaw centered on the target so alignment converges immediately.
+        def perceive():
+            gripper = SimpleNamespace(center=(target.center[0], 693.0))
+            ranked = [target] if keep_after_lift else []
+            scene = SimpleNamespace(
+                ranked=ranked, gripper=gripper, marker_boxes=[],
+                frame_shape=frame_shape)
+            observation = SimpleNamespace(
+                gripper=SimpleNamespace(opening_px=opening_px))
+            return scene, observation
+        return perceive
+
+    target = ObjectDetection((640, 400), (610, 375, 60, 50), 3000, 0.9)
+
+    gated = FloorGraspController(
+        FakeArm(), make_perceive(126.0, target), baseline=None, execute=False)
+    gated_result = gated.grasp(target)
+    check(gated_result.ok and not gated_result.executed
+          and gated_result.planned_elbow is not None,
+          "gate off: recognize/align/plan succeeds without physical motion")
+
+    samples = [
+        JawSample(90, 282.0, 1.2, 618.0, 701.0, 15),
+        JawSample(130, 251.0, 1.5, 618.0, 688.0, 15),
+        JawSample(150, 202.0, 1.8, 618.0, 681.0, 15),
+        JawSample(170, 126.0, 1.4, 618.0, 675.0, 15),
+        JawSample(180, 84.0, 1.5, 618.0, 672.0, 15),
+    ]
+    baseline = JawBaseline(samples, camera_name="test")
+
+    arm = FakeArm()
+    contact = FloorGraspController(
+        arm, make_perceive(154.0, target), baseline=baseline, execute=True)
+    contact_result = contact.grasp(target)
+    check(contact_result.ok and contact_result.executed
+          and contact_result.state == "HOLD" and contact_result.contact == "CONTACT",
+          "gate on + wide jaw + object still seen => verified lift")
+    check(any(call[0] == "floor" and call[1] == "grasp" for call in arm.calls)
+          and ("move", floor_pose_closed(contact_result.planned_elbow)) in arm.calls,
+          "executed path descends to the floor and closes the gripper")
+
+    no_baseline = FloorGraspController(
+        FakeArm(), make_perceive(126.0, target), baseline=None, execute=True)
+    nb_result = no_baseline.grasp(target)
+    check(not nb_result.ok and nb_result.state == "STOP",
+          "no jaw baseline fails closed instead of blindly lifting")
+
+    free_arm = FakeArm()
+    free = FloorGraspController(
+        free_arm, make_perceive(84.0, target), baseline=baseline, execute=True)
+    free_result = free.grasp(target)
+    check(not free_result.ok and free_result.state == "STOP",
+          "empty-baseline jaw (no contact) fails closed with OPEN/HOVER recovery")
+    check(free_arm.calls[-1][0] == "move",
+          "recovery issues an open-hover move before stopping")
+
+
+def floor_pose_closed(elbow):
+    from floor_motion import floor_pose
+    return floor_pose(elbow, "grasp", gripper=config.GRIP_CLOSED)
+
+
 def test_pick_place():
     print("[pickplace] visual correction is preserved through grasp + delivery")
     import random
@@ -884,6 +1009,7 @@ if __name__ == "__main__":
     test_wrist_full_frame_search()
     test_visual_gripper_contact()
     test_floor_motion_and_persistent_session()
+    test_floor_grasp_selection_and_reject()
     test_pick_place()
     test_servo_visibility_failure()
     print("\nALL TESTS PASSED")

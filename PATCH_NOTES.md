@@ -1477,3 +1477,63 @@ red at `(657,618,117,102)`. Both correctly touch the bottom image boundary.
 - Recorded a time-stamped hardware/process snapshot while explicitly warning
   that it is volatile. No credentials or other sensitive conversation data were
   copied into the repository.
+
+## Patch 41 — multi-object floor grasp with ErrP-ready reject
+
+### Intent
+
+Deliver the first three shared-autonomy milestones on the wrist camera without
+overfitting to one object, color, or background:
+
+1. recognize an object and grasp it on request;
+2. recognize several objects at once, rank them, and grasp the chosen one;
+3. on a human "not that one" signal, drop the current object and advance to the
+   next candidate inside the same live loop.
+
+The reject signal is a keyboard key today and becomes an ErrP decision tomorrow;
+the robot-side `CandidateSelector.reject` call is identical either way, so wiring
+the brain signal will not touch the arm logic.
+
+### Changes
+
+- Added `laptop/floor_grasp.py`:
+  - `WristSceneDetector` proposes every instance with FastSAM and drops the two
+    blue/red finger tapes (marker-box IoU) and the floor/arm (frame-border and
+    full-frame area) before ranking portable objects. No background image, color
+    preset, or absolute pixel size is used.
+  - `CandidateSelector` selects one object and cycles to the next on `reject`.
+    Vetoes are stored by IMAGE POSITION with a radius, never by a FastSAM segment
+    id, because the segmenter renumbers instances every frame. `confirm` clears
+    vetoes for the next goal. This is the shared-autonomy hook ErrP will call.
+  - `FloorGraspController`: fail-closed state machine over the persistent
+    `ArmSessionClient` (never opens the Uno directly). Horizontal alignment is a
+    bounded visual servo along the reproduced `floor_motion` curve (only the sign
+    of the response is used). Grasp is gated by contact against the empty-jaw
+    `JawBaseline` and a coherent-lift check; every failure runs OPEN -> HOVER ->
+    STOP with a clear reason.
+  - `run_live` reads the raw frames already published by `wrist_vision.py --live`
+    instead of opening a second camera (avoids AVFoundation contention). Keys:
+    `n` reject/next, `y` confirm/grasp, `q` quit.
+- Added `config.FLOOR_*` candidate/alignment/reject constants and the master
+  `FLOOR_GRASP_EXECUTE_VERIFIED=False` gate. While the gate is False the full
+  recognize/select/reject/plan loop runs and reports the *planned* motion, but no
+  physical descent/close/lift is commanded. The wrist-camera alignment sign,
+  descend, close, contact, and lift are still unverified on the real arm
+  (handoff section 13), so real motion stays locked until confirmed together.
+
+### Verification
+
+- `python3 -m py_compile laptop/*.py`.
+- `python3 laptop/test_pipeline.py` (new `test_floor_grasp_selection_and_reject`
+  plus the full existing suite): multi-object ranking; finger-tape/floor
+  exclusion; reject cycling to the next object and clearing on confirm;
+  position-based (id-independent) veto; and the state machine in gated-plan,
+  executed-CONTACT->HOLD, missing-baseline->STOP, and no-contact->recover->STOP
+  paths.
+- Real-frame check: `WristSceneDetector().scene()` on the currently published
+  `wrist_camera_latest_raw.jpg` recognized multiple instances and located the
+  finger markers end to end (FastSAM-s on CPU, ~2.4 s including one-time model
+  load). The camera was aimed at the room, which is exactly why a color/background
+  assumption would have been wrong; the class-agnostic path handled it.
+- Physically NOT yet verified: wrist-camera floor grasp (alignment sign, descend,
+  close, contact, lift). This remains gated behind `FLOOR_GRASP_EXECUTE_VERIFIED`.

@@ -395,3 +395,35 @@ WRIST_SEARCH_SELF_CLEARANCE_CM = 1.2
 WRIST_SEARCH_SLEW_STEP_DEG = 1.5
 WRIST_CAMERA_MOUNT_ANGLE_DEG = 0.0
 WRIST_SEARCH_KINEMATICS_VERIFIED = False
+
+# ---- Multi-object floor grasp (steps: recognize many -> select -> grasp,
+# with an ErrP-ready reject that switches to the next object) --------------
+# The wrist camera proposes several instances with FastSAM. Deterministic
+# selectors then reject the two finger tapes and background/floor so only
+# portable tabletop objects remain. No color, background image, or absolute
+# pixel size is assumed; the same code runs whatever the venue objects are.
+FLOOR_CAND_MIN_AREA_RATIO = 0.0008   # ignore specks / segmentation dust
+FLOOR_CAND_MAX_AREA_RATIO = 0.35     # near-field objects may fill much of the view
+FLOOR_CAND_MAX_ASPECT = 6.0          # reject long thin edges/shadows
+FLOOR_CAND_MARKER_IOU = 0.12         # drop a candidate overlapping a finger tape
+FLOOR_CAND_BORDER_MARGIN_PX = 2      # frame-touching blobs are usually floor/arm
+# Rejection is by IMAGE POSITION, not by a per-frame segment id: FastSAM
+# renumbers instances every frame, so a transient id cannot name "the object
+# the human vetoed". A vetoed image location stays vetoed as ids reshuffle.
+FLOOR_REJECT_RADIUS_RATIO = 0.06     # fraction of the frame diagonal
+# Horizontal floor alignment drives the target under the jaws by nudging elbow
+# along the calibrated floor curve and re-measuring (visual servo, so only the
+# SIGN of the response matters, not an exact px/deg gain). The wrist-camera
+# sign is not yet physically confirmed, so real descent stays gated below.
+FLOOR_X_ALIGN_TOL_PX = 40.0
+FLOOR_X_ALIGN_ELBOW_STEP = 2         # bounded elbow nudge per correction
+FLOOR_X_ALIGN_MAX_ITERS = 8
+FLOOR_X_ALIGN_ELBOW_SIGN = -1        # elbow+ moves target left in the wrist view (assumed; confirm on hardware)
+FLOOR_SETTLE_S = 1.9                 # DONE is a software slew; wait real linkage settle
+FLOOR_SETTLE_DISCARD_FRAMES = 3      # then drop stale camera frames before measuring
+# Master execution gate. While False, the controller performs the full
+# recognize/select/reject/plan loop and reports the planned motion, but never
+# commands physical descent/close/lift. Flip True only after the wrist-camera
+# floor grasp (align sign, descend, close, contact, lift) is verified on the
+# real arm with the workspace clear -- see handoff section 13.
+FLOOR_GRASP_EXECUTE_VERIFIED = False
