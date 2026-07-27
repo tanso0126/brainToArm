@@ -96,6 +96,22 @@ precise steps to bring it up. No other context is required.
 > `Q`/Escape exits. `READY / ALIGNED` is impossible unless both tapes, a target,
 > and an exposure/contrast quality gate all pass.
 
+> ### 🧪 Constrained MuJoCo simulation and trained local aligner
+>
+> The user-supplied 3MF/STL arm is now assembled in a hardware-isolated MuJoCo
+> model under `simul/`. For the current wrist-camera floor task it deliberately
+> has no base-yaw joint, uses the real six-command limits and 90°/180° gripper
+> direction, reproduces the measured hover/grasp floor curve, and renders a
+> blue-left/red-right eye-in-hand view.
+>
+> A tracked TorchScript v1 policy was trained on 20,000 randomized frames using
+> only RGB, commanded angles, and previous action. It aligned in 499/500 later
+> randomized simulation episodes, but this is **not real-hardware validation**.
+> It covers only one visible candidate and local elbow 78°–110° alignment;
+> search, candidate selection, descent, grasp, lift, and recovery remain the
+> deterministic fail-closed controller. See
+> [`simul/TRAINING_REPORT.md`](simul/TRAINING_REPORT.md) before integration.
+
 ---
 
 ## Table of contents

@@ -725,3 +725,41 @@ visual_contact 및 lift verification의 fail-closed 물리 증거
 ```
 
 그리고 반드시 한 `ArmSessionClient` lifecycle 안에서 실행해야 한다.
+
+## 21. 2026-07-27 시뮬레이션 전달 — Claude가 바로 사용할 내용
+
+실물 Uno/PW315를 전혀 열지 않고 `simul/`에 MuJoCo 경로를 추가했다. 공급된 3MF/ZIP은
+조립 좌표가 아니라 출력판 배치이므로 STL은 visual identity로만 사용하고, collision과
+joint frame은 측정값 기반 명시적 모델로 만들었다. 현재 과제 조건대로 base motor는
+90도로 고정되어 simulated joint 자체가 없다.
+
+핵심 파일:
+
+- `simul/mujoco_robot.py`: 실제 6값 servo convention, limit, floor curve, wrist RGB.
+- `simul/alignment_env.py`: RGB + commanded angles + previous action만 actor에게 주는 환경.
+- `simul/alignment_policy.py`: 하드웨어를 열지 않는 TorchScript runner.
+- `simul/models/alignment_policy_v1.ts`: 학습된 2.1 MB 모델.
+- `simul/models/alignment_policy_v1.metrics.json`: hash와 정확한 지표.
+- `simul/TRAINING_REPORT.md`: 제한, 재현법, Claude 통합 계약.
+
+v1은 20,000 randomized frame으로 학습했고, 별도 500-seed simulation에서 499회 정렬
+성공했다. 실제 성공률이라고 주장하면 안 된다. scope는 한 visible candidate가 있는
+상태의 `ALIGN`, elbow 78..110 local floor path뿐이다.
+
+Claude가 `floor_grasp.py`에 연결할 때:
+
+1. `WristSceneDetector`가 portable candidate를 하나만 선택한 경우에만 v1을 호출한다.
+2. 입력 frame은 RGB이고 현재 complete 6-servo command와 previous action을 같이 준다.
+3. 추천 elbow delta는 반드시 `floor_pose()`로 clamp/compensate한다.
+4. learned `aligned_probability` 단독으로 정지/descend하지 않는다. 기존 marker/candidate
+   geometry도 aligned일 때만 두 신호의 AND로 정렬 완료 처리한다.
+5. learned action이 deadband라 0인데 geometry가 안 맞으면 기존 centroid-sign bounded
+   step을 fallback으로 쓴다. 0을 grasp permission으로 해석하지 않는다.
+6. 여러 candidate가 동시에 보이면 goal-conditioned input이 없는 v1 대신 기존 선택된
+   candidate centroid controller를 계속 쓴다.
+7. `FLOOR_GRASP_EXECUTE_VERIFIED=False`를 유지하고 먼저 real frame shadow log로 기존
+   direction과 비교한다. 새 serial owner를 만들지 말고 기존 `ArmSessionClient`만 쓴다.
+
+테스트는 `python3 simul/test_mujoco_robot.py`의 8개와
+`python3 laptop/test_pipeline.py` 전체가 통과했다. 모델 SHA-256은
+`becbb150a282299707b0b4f7c122ad4091cf259bc60d8ea4b8f29fc36fc1d7d6`다.

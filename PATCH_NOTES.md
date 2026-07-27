@@ -1616,6 +1616,17 @@ the brain signal will not touch the arm logic.
   execution gate remain deterministic and fail closed. Real use must begin in
   shadow mode with `FLOOR_GRASP_EXECUTE_VERIFIED=False`.
 
+## Patch 44 — root documentation and Claude handoff sync
+
+- Added a prominent root README status block for the constrained MuJoCo model,
+  tracked trained policy, 499/500 later simulated evaluation, and the explicit
+  warning that this is not real-hardware validation or a complete grasp policy.
+- Updated `handoff.md` with the exact simulation files, artifact hash, one-target
+  and elbow-range scope, `floor_grasp.py` integration order, two-vote stop rule,
+  centroid fallback, persistent-session requirement, and unchanged physical
+  execution gate so Claude can integrate without reconstructing this work from
+  conversation history.
+
 ## Patch 42 — hardware-measured floor Jacobian and corrected depth alignment
 
 ### Intent
