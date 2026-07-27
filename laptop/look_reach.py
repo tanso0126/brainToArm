@@ -129,6 +129,140 @@ def task_delta(start, target):
     return task_state(target) - task_state(start)
 
 
+REACH_SOLVE_MIN_M = 0.285
+REACH_SOLVE_MAX_M = 0.375
+REACH_PROBE_MM = 8.0
+REACH_TOL_PX = 14.0
+REACH_MAX_ITERS = 7
+REACH_MAX_STEP_MM = 18.0
+
+
+def pose_at_reach(template, x_m, z_m):
+    """Solve joints 2/3/4 for a tool at (x_m, z_m), preserving tool pitch.
+
+    This is the adaptive counterpart of :func:`pose_at_height`: the arm must
+    travel to wherever the object actually is, so forward reach is an argument
+    rather than a constant baked into the start pose.
+    """
+    from scipy.optimize import least_squares
+
+    start = [int(round(value)) for value in template]
+    target_angle = cumulative_tool_angle_deg(start)
+    lower = np.asarray((config.SERVO_MIN[config.J_SHOULDER],
+                        config.SERVO_MIN[config.J_ELBOW],
+                        config.SERVO_MIN[config.J_WRIST]), dtype=float)
+    upper = np.asarray((config.SERVO_MAX[config.J_SHOULDER],
+                        config.SERVO_MAX[config.J_ELBOW],
+                        config.SERVO_MAX[config.J_WRIST]), dtype=float)
+    guess = np.asarray((float(start[config.J_SHOULDER]),
+                        float(start[config.J_ELBOW]),
+                        float(start[config.J_WRIST])))
+
+    def residual(values):
+        pose = list(start)
+        pose[config.J_SHOULDER], pose[config.J_ELBOW], pose[config.J_WRIST] = values
+        tool = arm_fk.tool_position(pose)
+        return np.asarray(((tool[0] - x_m) * 1000.0,
+                           (tool[2] - z_m) * 1000.0,
+                           cumulative_tool_angle_deg(pose) - target_angle))
+
+    result = least_squares(residual, np.clip(guess, lower, upper),
+                           bounds=(lower, upper), xtol=1e-12, ftol=1e-12,
+                           gtol=1e-12, max_nfev=500)
+    if not result.success or np.linalg.norm(residual(result.x)) > 2.0:
+        raise RuntimeError(
+            f"reach solve failed for x={x_m*1000:.0f}mm z={z_m*1000:.0f}mm")
+    pose = list(start)
+    for joint, value in zip((config.J_SHOULDER, config.J_ELBOW, config.J_WRIST),
+                            result.x):
+        pose[joint] = int(round(value))
+    return pose
+
+
+def _depth_error_px(scene, target):
+    """Object base row minus fingertip marker row at the current view.
+
+    Both lie on the same table plane, so equal rows means the fingertips have
+    reached the object's depth. Negative means the object is still farther out.
+    """
+    gripper = getattr(scene, "gripper", None)
+    if gripper is None or target is None:
+        return None
+    base_row = float(target.bbox[1] + target.bbox[3])
+    return base_row - float(gripper.center[1])
+
+
+def solve_object_reach(mover, detector, target_selector, start_pose,
+                       frame_source=_fresh_frame, logger=print):
+    """Extend/retract forward reach until the fingertips reach the object.
+
+    Measures d(depth error)/d(reach) on the real hardware with one bounded
+    probe, then takes clamped Newton steps, re-observing every time. Returns
+    ``(pose, tool_x_m)`` at convergence, or ``(None, None)`` when the object
+    cannot be reached inside the verified band.
+    """
+    pose = list(start_pose)
+    tool = arm_fk.tool_position(pose)
+    x_m, z_m = float(tool[0]), float(tool[2])
+    gain = None
+    previous = None
+    for iteration in range(REACH_MAX_ITERS):
+        scene, _ = detector.scene(frame_source(discard=1))
+        target = target_selector.match(scene)
+        if target is None:
+            logger("[look-reach] reach solve: target lost")
+            return None, None
+        error = _depth_error_px(scene, target)
+        if error is None:
+            logger("[look-reach] reach solve: finger markers not visible")
+            return None, None
+        logger(f"[look-reach] reach x={x_m*1000:.0f}mm depth_err={error:+.0f}px")
+        if abs(error) <= REACH_TOL_PX:
+            return pose, x_m
+        if gain is None:
+            # One bounded probe measures px per mm of reach in this geometry.
+            probe_x = float(np.clip(x_m + REACH_PROBE_MM / 1000.0,
+                                    REACH_SOLVE_MIN_M, REACH_SOLVE_MAX_M))
+            if abs(probe_x - x_m) < 1e-6:
+                probe_x = float(np.clip(x_m - REACH_PROBE_MM / 1000.0,
+                                        REACH_SOLVE_MIN_M, REACH_SOLVE_MAX_M))
+            probe_pose = pose_at_reach(start_pose, probe_x, z_m)
+            mover.slow_move(probe_pose, final_settle=0.6)
+            probe_scene, _ = detector.scene(frame_source(discard=1))
+            probe_target = target_selector.match(probe_scene)
+            probe_error = _depth_error_px(probe_scene, probe_target)
+            if probe_error is None:
+                logger("[look-reach] reach solve: lost target during probe")
+                return None, None
+            delta_mm = (probe_x - x_m) * 1000.0
+            gain = (probe_error - error) / delta_mm
+            logger(f"[look-reach] measured reach gain {gain:+.2f}px/mm")
+            if not np.isfinite(gain) or abs(gain) < 0.15:
+                logger("[look-reach] reach response too weak; refusing descent")
+                return None, None
+            pose, x_m, error = probe_pose, probe_x, probe_error
+            if abs(error) <= REACH_TOL_PX:
+                return pose, x_m
+        step_mm = float(np.clip(-error / gain,
+                                -REACH_MAX_STEP_MM, REACH_MAX_STEP_MM))
+        new_x = float(np.clip(x_m + step_mm / 1000.0,
+                              REACH_SOLVE_MIN_M, REACH_SOLVE_MAX_M))
+        if abs(new_x - x_m) < 5e-4:
+            logger(f"[look-reach] reach bound reached at x={x_m*1000:.0f}mm "
+                   f"with depth_err={error:+.0f}px; object is outside the "
+                   "verified reach band")
+            return None, None
+        if previous is not None and abs(error) > abs(previous) + 6.0:
+            logger("[look-reach] depth error diverging; refusing descent")
+            return None, None
+        previous = error
+        pose = pose_at_reach(start_pose, new_x, z_m)
+        mover.slow_move(pose, final_settle=0.6)
+        x_m = new_x
+    logger("[look-reach] reach did not converge within iteration budget")
+    return None, None
+
+
 def constant_x_descent_waypoints(start_pose, contact_z_m=VECTOR_CONTACT_Z_M,
                                  steps=10, advance_mm=-5.0):
     """Solve a coordinated 2/3/4 descent with a small inward advance.
@@ -338,18 +472,33 @@ def run_constant_x_grasp(client, execute=False, advance_mm=-5.0,
     if abs(horizontal_error) > \
             VECTOR_LATERAL_OPENING_FRACTION * gripper.opening_px:
         raise RuntimeError(f"target is outside open jaws in x ({horizontal_error:.0f}px)")
-    # Depth-corridor gate. The vector grasp closes at one FIXED forward reach
-    # (~335 mm). A tabletop object's bbox bottom row maps monotonically to its
-    # depth in the start view, so a target whose base sits outside the verified
-    # corridor cannot be at the grasp point - closing there has physically
-    # grabbed the arm's own sagging USB cable instead of the object. Refuse.
-    base_row = float(bbox[1] + bbox[3])
-    lo_row, hi_row = VECTOR_DEPTH_CORRIDOR_ROWS
-    if not lo_row <= base_row <= hi_row:
-        raise RuntimeError(
-            f"target base row {base_row:.0f}px is outside the fixed-reach "
-            f"depth corridor [{lo_row:.0f},{hi_row:.0f}]px; move the object "
-            "into the grasp corridor (or the detection is not the object)")
+    # Adaptive forward reach: the arm travels to wherever the object actually
+    # is. A fixed reach only ever grasped whatever happened to sit at that one
+    # spot. The fingertips and the object share the table plane, so equal image
+    # rows mean equal depth; the loop below measures px-per-mm on the hardware
+    # and drives the reach until the fingertips are at the object.
+    if execute:
+        solved, solved_x = solve_object_reach(
+            mover, detector, target_selector, start,
+            frame_source=frame_source)
+        if solved is None:
+            raise RuntimeError(
+                "could not reach the selected object's depth; no descent")
+        start = solved
+        print(f"[look-reach] reach solved: tool x={solved_x*1000:.0f}mm")
+        scene, _ = detector.scene(frame_source(discard=1))
+        target = target_selector.match(scene)
+        if target is None:
+            raise RuntimeError("target lost after reach solve")
+        gripper = scene.gripper
+        if gripper is None:
+            raise RuntimeError("finger markers not visible after reach solve")
+        bbox, center = target.bbox, target.center
+        horizontal_error = float(center[0] - gripper.center[0])
+        if abs(horizontal_error) > \
+                VECTOR_LATERAL_OPENING_FRACTION * gripper.opening_px:
+            raise RuntimeError(
+                f"target left the jaw corridor in x ({horizontal_error:.0f}px)")
     waypoints = constant_x_descent_waypoints(
         start, contact_z_m=float(table_z_m) + VECTOR_CONTACT_Z_M,
         advance_mm=advance_mm)
