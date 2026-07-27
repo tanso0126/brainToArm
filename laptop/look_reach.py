@@ -78,6 +78,9 @@ VECTOR_LATERAL_OPENING_FRACTION = 0.42
 # the object stands beyond the fixed reach (the sagging USB cable crosses the
 # corridor there and was once grabbed instead - hence the hard refusal).
 VECTOR_DEPTH_CORRIDOR_ROWS = (420.0, 700.0)
+# Everything graspable rests on the near table and therefore projects
+# into the lower part of this near-horizontal camera view.
+TABLE_HORIZON_ROW_RATIO = 0.54
 
 
 def cumulative_tool_angle_deg(pose):
@@ -142,6 +145,8 @@ REACH_PROBE_MM = 8.0
 REACH_TOL_PX = 25.0
 REACH_MAX_ITERS = 10
 REACH_MAX_STEP_MM = 18.0
+# Camera viewing slices across the verified reach band, far to near.
+SEARCH_REACH_SEQUENCE_M = (0.375, 0.350, 0.325, 0.300, 0.288)
 
 
 def pose_at_reach(template, x_m, z_m):
@@ -440,6 +445,33 @@ def run_constant_x_grasp(client, execute=False, advance_mm=-5.0,
         detector, target_selector=target_selector,
         reject_count=reject_count, pose=current,
         frame_source=frame_source)
+    # Search. One fixed viewing pose only sees one slice of the table, so an
+    # object nearer or farther than that slice is simply invisible - which is
+    # what "no target" meant every time so far. Sweep the reach band (which
+    # sweeps the camera along the table) and stop at the first pose that shows a
+    # reachable, background-distinct object. Bounded, collision-checked, gentle.
+    if target is None and execute:
+        start_tool = arm_fk.tool_position(start)
+        for scan_x in SEARCH_REACH_SEQUENCE_M:
+            try:
+                scan_pose = pose_at_reach(start, scan_x, float(start_tool[2]))
+            except RuntimeError:
+                continue
+            if not safety.transition_is_safe(
+                    client.request({"command": "status"})["pose"], scan_pose):
+                continue
+            print(f"[look-reach] SEARCH at reach {scan_x*1000:.0f}mm")
+            mover.slow_move(scan_pose, final_settle=0.7)
+            current = list(client.request({"command": "status"})["pose"])
+            initial_frame, initial_scene, target = acquire_initial_target(
+                detector, target_selector=target_selector,
+                reject_count=reject_count, pose=current,
+                frame_source=frame_source)
+            if target is not None:
+                start = scan_pose
+                print(f"[look-reach] SEARCH found target at reach "
+                      f"{scan_x*1000:.0f}mm")
+                break
     if target is None and initial_scene is not None:
         # A candidate that failed ONLY the lateral jaw window may still be
         # reachable through the verified bounded base-yaw centring already
@@ -760,6 +792,15 @@ def candidate_reachability(scene, candidate, pose=None, safety=None):
     # reject detections sitting essentially on top of the finger markers.
     if cy >= 0.95 * height:
         return False, f"y={cy:.0f}px sits on the finger markers"
+    # Table horizon. This camera is nearly horizontal at the working poses, so
+    # the near tabletop projects into the LOWER frame while the room behind it
+    # (other desks, cups, monitors) projects high. Without this the search
+    # happily locked a coffee cup on a far desk. The object must rest on the
+    # near table, so its base row has to be below the horizon.
+    base_row = float(candidate.bbox[1] + candidate.bbox[3])
+    if base_row < TABLE_HORIZON_ROW_RATIO * height:
+        return False, (f"base row {base_row:.0f}px is above the table horizon "
+                       f"({TABLE_HORIZON_ROW_RATIO * height:.0f}px)")
 
     gripper = getattr(scene, "gripper", None)
     if gripper is None:
@@ -1002,6 +1043,40 @@ def _laterally_fixable_candidate(scene, target_selector, pose=None,
     return fixable
 
 
+SELECTION_EVIDENCE = ROOT / "data" / "vision" / "selection_evidence.jpg"
+
+
+def _save_selection_evidence(frame, scene):
+    """Write what the controller actually sees at the moment it chooses.
+
+    Every earlier mis-grasp argument was guesswork because nothing recorded the
+    decision frame. This makes the selection auditable after the fact.
+    """
+    import cv2
+
+    image = frame.copy()
+    for index, candidate in enumerate(scene.ranked[:8]):
+        x, y, width, height = candidate.bbox
+        score = sum(background_distinctness(frame, candidate))
+        ok, reason = candidate_reachability(scene, candidate)
+        colour = (0, 0, 255) if index == 0 and ok else (
+            (0, 220, 0) if ok else (150, 150, 150))
+        cv2.rectangle(image, (x, y), (x + width, y + height), colour,
+                      3 if index == 0 else 2)
+        cv2.putText(image, f"{index}:{score:.0f}{'' if ok else ' X'}",
+                    (x, max(18, y - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                    colour, 2)
+        if not ok:
+            cv2.putText(image, reason[:38], (x, min(image.shape[0] - 6,
+                                                    y + height + 18)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, colour, 1)
+    gripper = getattr(scene, "gripper", None)
+    if gripper is not None:
+        cv2.drawMarker(image, tuple(int(round(v)) for v in gripper.center),
+                       (0, 255, 255), cv2.MARKER_CROSS, 40, 3)
+    cv2.imwrite(str(SELECTION_EVIDENCE), image)
+
+
 def acquire_initial_target(detector, samples=3, target_selector=None,
                            reject_count=0, pose=None,
                            frame_source=_fresh_frame):
@@ -1028,6 +1103,7 @@ def acquire_initial_target(detector, samples=3, target_selector=None,
         latest_scene.ranked.sort(
             key=lambda item: sum(background_distinctness(latest_frame, item)),
             reverse=True)
+        _save_selection_evidence(latest_frame, latest_scene)
         if selected is None:
             selected = target_selector.choose(latest_scene, pose=pose)
             while selected is not None and remaining_rejects:

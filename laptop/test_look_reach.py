@@ -212,25 +212,17 @@ class LookReachTests(unittest.TestCase):
                             and "base-yaw window" in item
                             for item in messages))
 
-    def test_lateral_only_failure_is_base_centering_candidate(self):
-        from look_reach import _laterally_fixable_candidate
-
-        class _AlwaysSafe:
-            @staticmethod
-            def pose_is_safe(_pose):
-                return True
-
-        off_center = candidate((470, 253), (440, 213, 60, 80), 4800, 0.9)
-        reachable = candidate((640, 450), (610, 410, 60, 80), 4800, 0.9)
-        selection = LookReachTargetSelector(logger=lambda *_: None)
-        found = _laterally_fixable_candidate(
-            multi_object_scene([off_center]), selection,
-            pose=[90, 124, 90, 180, 90, 170], safety=_AlwaysSafe())
-        self.assertIs(found, off_center)
-        # A reachable candidate suppresses centring entirely.
-        self.assertIsNone(_laterally_fixable_candidate(
-            multi_object_scene([off_center, reachable]), selection,
-            pose=None, safety=_AlwaysSafe()))
+    def test_laterally_offset_candidate_is_skipped_not_centered(self):
+        # Motor 1 (base yaw) is dead on this build and is never commanded, so a
+        # laterally offset object is simply unreachable: it must be skipped with
+        # a reason, never "fixed" by rotating the base.
+        off_center = candidate((470, 553), (440, 513, 60, 80), 4800, 0.9)
+        messages = []
+        selection = LookReachTargetSelector(logger=messages.append)
+        self.assertIsNone(selection.choose(multi_object_scene([off_center])))
+        self.assertTrue(any("lateral error" in item for item in messages))
+        self.assertEqual(selection.selector.rejected_points
+                         if selection.selector else [], [])
 
     def test_vetoed_position_is_never_base_centered(self):
         from look_reach import _laterally_fixable_candidate
