@@ -446,8 +446,11 @@ def run_constant_x_grasp(client, execute=False, advance_mm=-5.0,
         # exercised by FloorServo (measured Jacobian, ±BASE_CENTER_RANGE_DEG,
         # <=3 deg steps, re-observed). Rejected (vetoed) locations are never
         # centred on; reachability skips are not vetoes.
-        fixable = _laterally_fixable_candidate(
-            initial_scene, target_selector, pose=current)
+        # Motor 1 (base yaw) is intentionally unused on this build and does not
+        # physically respond, so lateral centring cannot help: it only desyncs
+        # the commanded base from reality. Objects must be placed on the arm's
+        # sagittal line, which the placement guide shows live.
+        fixable = None
         if fixable is not None and not execute:
             print("[look-reach] DRY RUN: candidate at "
                   f"{tuple(round(v) for v in fixable.center)} needs base "
@@ -1018,6 +1021,13 @@ def acquire_initial_target(detector, samples=3, target_selector=None,
         # real object. Only figures distinct from their own background survive.
         latest_scene.ranked = [item for item in latest_scene.ranked
                                if is_graspable_figure(latest_frame, item)]
+        # Rank by figure/ground distinctness, not jaw proximity. The workspace
+        # sheet lies directly in front of the fingers, so proximity ranking put
+        # paper first every time; the real object is the one that stands out
+        # most from its own background.
+        latest_scene.ranked.sort(
+            key=lambda item: sum(background_distinctness(latest_frame, item)),
+            reverse=True)
         if selected is None:
             selected = target_selector.choose(latest_scene, pose=pose)
             while selected is not None and remaining_rejects:

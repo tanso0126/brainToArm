@@ -332,7 +332,10 @@ WRIST_MARKER_MAX_AREA_RATIO = 0.018
 WRIST_MARKER_MIN_SEPARATION_RATIO = 0.05
 WRIST_MARKER_MAX_SEPARATION_RATIO = 0.24
 WRIST_MARKER_MIN_FILL_RATIO = 0.38
-WRIST_MARKER_MAX_ASPECT = 3.0
+# At full jaw opening the finger tapes are seen at a shallow angle and read
+# ~3.0 wide/tall, exactly at the old limit, which intermittently dropped the
+# blue marker and blocked every jaw gate. 4.0 keeps unrelated blobs out.
+WRIST_MARKER_MAX_ASPECT = 4.0
 WRIST_MARKER_MAX_PAIR_AREA_RATIO = 4.0
 WRIST_MARKER_MIN_WIDTH_RATIO = 0.012
 WRIST_MARKER_MAX_WIDTH_RATIO = 0.16
