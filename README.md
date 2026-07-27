@@ -119,16 +119,21 @@ precise steps to bring it up. No other context is required.
 > [`simul/TRAINING_REPORT.md`](simul/TRAINING_REPORT.md) and
 > [`docs/PHYSICAL_GRASP_VALIDATION.md`](docs/PHYSICAL_GRASP_VALIDATION.md).
 
-> ### ✅ Real fixed-reach floor pinch verified
+> ### ⚠️ Real fixed-reach floor pinch under autonomous re-validation
 >
 > The runtime FK now exactly matches the current calibrated MuJoCo joint map.
 > At hover the controller aligns the selected object's approach-side edge, locks
 > forward reach, and lowers through shoulder height compensation from 35 mm to
 > 6 mm. Close and lift require fresh-frame guarded policy votes plus calibrated
-> jaw-obstruction checks. On 2026-07-27 the real arm retained a toy car through
-> lift and safely placed it back. `floor_grasp.py --live --arm` now routes its
+> jaw-obstruction checks. A fixed-position trial retained a toy car through its
+> original 35 mm lift, but a later autonomous trial exposed a slipped-object
+> false positive. Success now requires an 80 mm lift retaining at least half of
+> the initial obstruction. `floor_grasp.py --live --arm` routes its
 > selected/rejected candidate into this controller; `floor_servo.py
-> --candidate-index N` and `--reject-count N` provide headless operation.
+> --candidate-index N` and `--reject-count N` provide headless operation. The
+> stricter from-HOME path is documented in
+> [`docs/AUTONOMOUS_GRASP_VALIDATION.md`](docs/AUTONOMOUS_GRASP_VALIDATION.md);
+> general physical success is not claimed yet.
 
 ---
 

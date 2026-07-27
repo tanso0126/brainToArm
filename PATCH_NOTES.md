@@ -1902,3 +1902,50 @@ forward chase that previously bulldozed the target.
   1,000/1,000.
 - Independent MuJoCo free-body contact: 1,959/2,000 (97.95%); objects <=40 mm:
   1,488/1,488 (100%). These percentages remain simulation-only.
+
+## Patch 50 — autonomous-from-HOME search and strict retention
+
+### Intent
+
+Test whether the previous grasp was a memorized location. Start at the literal
+firmware HOME pose and require one command to search, select, align, close, and
+prove a real lift without a supplied reach or target coordinate.
+
+### Changes
+
+- Added `floor_servo.py --autonomous-from-home`: HOME, open ready, a bounded
+  reach sweep on the verified floor-hover manifold, two-frame candidate
+  confirmation, strict alignment, and the existing guarded grasp sequence.
+- Added a pure jaw-corridor selector so segmented background objects do not
+  become targets merely because FastSAM ranked them.
+- Raised alignment hover from 35 to 55 mm and moved the pinch target 35% inside
+  the object bbox. The old trailing-edge pinch was too weak for long objects.
+- Removed the `best |dv| <= 160px` fallback. Non-convergence now forbids descent.
+- Added stable bottom-clipped geometry as an explicit two-frame convergence
+  state and gave the deterministic policy shield the same semantic alignment.
+- Allowed expected target/tape occlusion to authorize only CLOSE after a locked
+  fixed-reach descent. Marker loss after close stays UNKNOWN and blocks LIFT.
+- Added same-run empty-close calibration at the selected wrist pitch. It runs at
+  100 mm height, not over the object at alignment height.
+- Raised verification lift to 80 mm and require its obstruction residual to keep
+  at least 50% of the initial close residual. This catches a pinched object that
+  slips out while the arm rises.
+
+### Physical findings
+
+- Autonomous discovery did not reuse reach 37: trials found candidates at reach
+  0 or 12 and aligned to different reaches (including 9 and 17).
+- The first autonomous apparent success was a real failure: close residual was
+  209.8 px, but after lift only 15.9 px remained; at 70 mm the car was visibly on
+  the table and the empty jaw itself produced ~16.8 px residual.
+- Later trials stopped safely on strict non-convergence, policy disagreement,
+  missing final tape markers, or UNKNOWN contact. One descent exposed lateral
+  drift from `du=-42` to `du=-129`; no lift was allowed.
+- Therefore general unassisted grasp success is not claimed. The full sequence
+  and each failure are recorded in `docs/AUTONOMOUS_GRASP_VALIDATION.md`.
+
+### Verification
+
+- `python3 -m unittest simul.test_full_task simul.test_mujoco_robot -v` passes.
+- `PYTHONPATH=laptop python3 laptop/test_pipeline.py` passes, including
+  jaw-corridor selection and slipped-object retention rejection.

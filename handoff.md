@@ -858,6 +858,7 @@ headless 실행은 `floor_servo.py --candidate-index N` 또는 `--reject-count N
 - MuJoCo free-body contact: 1,959/2,000 (97.95%).
 - <=40mm nominal objects: 1,488/1,488 (100%).
 
-목표 1은 실물 성공이다. 목표 2/3은 동일한 실물 controller까지 연결됐지만, 각각의
-실물 완료 판정에는 카메라에 별도 도달 가능한 물체가 두 개 놓인 시험 장면이 필요하다.
-그 전에는 테스트 성공을 실물 성공이라고 부르지 않는다.
+후속 HOME-start 무개입 시험에서 slipped-object false positive를 발견했으므로 목표 1도
+엄격한 80mm retention 기준으로 재검증 중이다. 목표 2/3은 동일한 실물 controller까지
+연결됐지만, 각각의 실물 완료 판정에는 카메라에 별도 도달 가능한 물체가 두 개 놓인
+시험 장면이 필요하다. 그 전에는 테스트 성공을 실물 성공이라고 부르지 않는다.

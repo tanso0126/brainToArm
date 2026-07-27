@@ -96,6 +96,19 @@ class FullTaskTests(unittest.TestCase):
             scene, wrist, pose, target=None, target_locked=False)
         self.assertNotEqual(blocked.action, TaskAction.CLOSE)
 
+        # At the final open grasp pose the object can cover one tape as well as
+        # its own mask. The pre-descent lock permits close, but only contact
+        # verification (which requires both markers) may subsequently lift.
+        markerless_scene = SimpleNamespace(
+            gripper=None, frame_shape=(720, 1280, 3), ranked=[])
+        controller.reset()
+        first = controller.decide(
+            markerless_scene, wrist, pose, target=None, target_locked=True)
+        second = controller.decide(
+            markerless_scene, wrist, pose, target=None, target_locked=True)
+        self.assertEqual(first.action, TaskAction.WAIT)
+        self.assertEqual(second.action, TaskAction.CLOSE)
+
     def test_contact_physics_not_symbolic_state_decides_success(self):
         evaluator = PhysicsTaskEvaluator(DEFAULT_FULL_TASK_MODEL, seed=20260729)
         try:

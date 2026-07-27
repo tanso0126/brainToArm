@@ -1,5 +1,12 @@
 # Physical floor-grasp validation — 2026-07-27
 
+> Subsequent autonomous-from-HOME testing found that a 35 mm lift and the old
+> absolute jaw threshold were not sufficient proof of general retention: one
+> object slipped while still producing a small CONTACT residual. The original
+> fixed-position trial below remains useful evidence for its exact condition,
+> but it is no longer treated as general autonomous completion. See
+> `docs/AUTONOMOUS_GRASP_VALIDATION.md`.
+
 This record separates the real-arm result from simulation and mock tests.
 
 ## Verified setup
@@ -31,11 +38,10 @@ This record separates the real-arm result from simulation and mock tests.
 7. The object was then lowered closed to the same fixed-reach floor point,
    released, and the arm returned to open hover.
 
-Result: **goal 1 has a real close-and-lift success**. Goals 2 and 3 have the same
-physical controller connected to candidate selection and reject/next, but still
-require a live scene containing at least two reachable objects for separate
-physical demonstrations. Software-only results are not counted as those two
-physical validations.
+Result: this exact fixed-position trial produced persistent obstruction through
+its 35 mm lift. General goal 1 now requires the stricter autonomous 80 mm
+retention test; it is not marked complete yet. Goals 2 and 3 likewise require
+separate physical demonstrations. Software-only results are not counted.
 
 ## Root cause fixed
 

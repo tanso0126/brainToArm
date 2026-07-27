@@ -880,6 +880,31 @@ def test_floor_grasp_selection_and_reject():
     check(near_valid == [near_field],
           "only a bottom-clipped object fully between the jaws survives")
 
+    # Autonomous search must ignore segmented background objects until a
+    # candidate enters the fixed-base jaw corridor. No remembered target pose is
+    # involved in this choice.
+    from floor_servo import FloorServo
+    search_gripper = SimpleNamespace(center=(640.0, 700.0))
+    background = ObjectDetection((665, 100), (620, 60, 90, 80), 7200, 0.9)
+    off_axis = ObjectDetection((820, 600), (780, 560, 80, 80), 6400, 0.9)
+    reachable = ObjectDetection((630, 560), (590, 520, 80, 90), 7200, 0.9)
+    search_scene = SimpleNamespace(
+        gripper=search_gripper,
+        ranked=[background, off_axis, reachable])
+    check(FloorServo.search_choice(search_scene) is reachable,
+          "autonomous search selects only a candidate entering the jaw corridor")
+    search_scene.ranked = [background, off_axis]
+    check(FloorServo.search_choice(search_scene) is None,
+          "autonomous search ignores distant and laterally unreachable clutter")
+
+    retained_close = SimpleNamespace(contact=True, residual_px=80.0)
+    retained_lift = SimpleNamespace(contact=True, residual_px=52.0)
+    slipped_lift = SimpleNamespace(contact=True, residual_px=12.0)
+    check(FloorServo.contact_retained(retained_close, retained_lift),
+          "post-lift obstruction retains enough of the initial close residual")
+    check(not FloorServo.contact_retained(retained_close, slipped_lift),
+          "small residual after lift is rejected as a slipped object")
+
     # ---- fail-closed state machine (gated + executed paths) ----
     class FakeArm:
         def __init__(self):

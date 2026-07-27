@@ -144,19 +144,24 @@ def shield_action(observation, proposed: TaskAction | int) -> TaskAction:
 
     if coherent_lift:
         return TaskAction.WAIT
-    if not quality or not markers:
+    if not quality:
         return TaskAction.WAIT
     if at_grasp:
         if gripper_command_open:
             # The real eye-in-hand camera loses the object as the fingers
-            # straddle it. A selection locked before the verified fixed-reach
-            # descent is stronger evidence than switching to a new close-range
-            # blob; continuity may therefore authorize CLOSE without a current
-            # target mask.
+            # straddle it and can also briefly lose a tape marker. A selection
+            # locked before the verified fixed-reach descent plus the known open
+            # grasp pose may authorize CLOSE without those current masks. The
+            # next physical jaw assessment still requires both markers and
+            # fails open if they do not reappear after close.
             return TaskAction.CLOSE if continuity else TaskAction.RECOVER
+        if not markers:
+            return TaskAction.WAIT
         if jaw_opening > 0.12:
             return TaskAction.LIFT
         return TaskAction.RECOVER
+    if not markers:
+        return TaskAction.WAIT
     if not target:
         return TaskAction.SEARCH_NEXT
     if not at_grasp:
