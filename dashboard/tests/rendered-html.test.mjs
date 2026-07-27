@@ -13,14 +13,15 @@ async function render() {
   );
 }
 
-test("server-renders the PolyG-I dashboard shell", async () => {
+test("server-renders the shared-autonomy simulation studio", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
-  assert.match(html, /<title>brainToArm · PolyG-I EEG Monitor<\/title>/i);
-  assert.match(html, /PolyG-I Live Monitor/);
-  assert.match(html, /실시간 EEG 파형/);
+  assert.match(html, /<title>brainToArm · Shared Autonomy Studio<\/title>/i);
+  assert.match(html, /Simulation Studio/);
+  assert.match(html, /시뮬레이션 작업실/);
+  assert.match(html, /물체를 놓고, 로봇의 선택을 지켜보세요/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
 
@@ -35,6 +36,7 @@ test("starter preview is removed and localhost API is explicit", async () => {
   assert.doesNotMatch(page, /채널별 자동/);
   assert.match(page, /requestAnimationFrame/);
   assert.match(page, /부드럽게 · 0\.45초/);
+  assert.match(page, /SimulationLab/);
   assert.match(packageJson, /braintoarm-eeg-dashboard/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));

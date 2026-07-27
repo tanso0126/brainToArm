@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "brainToArm · PolyG-I EEG Monitor",
-  description: "PolyG-I 8채널 뇌파를 실시간으로 확인하고 기록하는 로컬 계측 대시보드",
+  title: "brainToArm · Shared Autonomy Studio",
+  description: "카메라 기반 다중 물체 로봇 시뮬레이션과 PolyG-I ErrP를 연결하는 로컬 공유자율 작업실",
 };
 
 export default function RootLayout({

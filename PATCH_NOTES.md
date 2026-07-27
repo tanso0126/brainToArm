@@ -2306,3 +2306,53 @@ PYTHONPATH=laptop python3 laptop/table_touch_calibrate.py \
   is complete and green (16/16 look_reach tests).
 - Resolution requires one of: reseating/repairing the motor-1 servo lead,
   or placing target objects on the arm's centerline corridor (±4 mm).
+
+## Patch 58 — human-facing multi-object simulation and PolyG-I ErrP bridge
+
+### Intent
+
+Provide a complete shared-autonomy demonstration while physical-arm work is
+paused: let a person arrange multiple objects, observe eye-in-hand perception,
+send a rejection at any point including after basket delivery, and swap the
+manual signal for the already recovered PolyG-I acquisition path tomorrow.
+
+### Changes
+
+- Added `dashboard/app/SimulationLab.tsx`, a direct-manipulation table with
+  draggable objects/basket, editable object names/colors/sizes, animated robot
+  links, a wrist-camera panel, action trace, cycle status, and persistent
+  rejection-memory display.
+- The simulated wrist view is rendered to canvas and then re-read as RGB pixels.
+  Color connected components produce the detection IDs/bounds/confidence used
+  by the three-heading selection sweep; the controller does not select directly
+  from the editable world list.
+- Added a reversible asynchronous task state machine: scan, present, reach,
+  grasp, transport, basket evaluation, and completion. A rejection before grasp
+  abandons the reach; a rejection while held returns the object; a late rejection
+  after basket/completion retrieves it first. Origins are preserved exactly.
+- Rejected IDs cannot be selected again. Once all table objects are rejected,
+  the rejection set clears and a new numbered cycle begins.
+- Added manual, mock-ErrP, and PolyG-I sources. `eeg_dashboard.py` now supports
+  recent-rest ErrP baseline calibration and serialized onset-locked decision
+  epochs at target presentation and basket drop. Epochs require at least 80% of
+  expected samples and optionally write their marker into an active CSV.
+- Restyled the shared shell using the orange/neutral/state-color language from
+  `docs/DESIGN.md`, kept the established EEG monitor as a second tab, updated
+  metadata/tests, and documented the whole handoff in `QHAND.md`.
+
+### Scope boundary
+
+The browser studio is a kinematic/interaction simulator with pixel-derived
+camera detections. It does not claim MuJoCo rigid-body contact. Existing
+`simul/` remains the separate physics/policy layer. This patch opened no arm
+serial port and issued no physical motion.
+
+### Verification
+
+- `cd dashboard && npm test`: build + 2/2 rendered-shell tests pass.
+- `cd dashboard && npm run lint`: passes after warning cleanup.
+- `PYTHONPATH=laptop python3 -m py_compile laptop/eeg_dashboard.py laptop/errp.py`:
+  passes.
+- Synthetic 8-second dashboard baseline: 2,046 samples accepted and ErrP status
+  reports ready.
+- `PYTHONPATH=laptop python3 laptop/test_pipeline.py`: all checks pass.

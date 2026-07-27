@@ -17,6 +17,7 @@ import {
   Usb,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import SimulationLab from "./SimulationLab";
 
 const API_BASE = "http://127.0.0.1:8765";
 const CHANNEL_COLORS = [
@@ -469,6 +470,7 @@ function SpectrumCanvas({ bins }: { bins: { hz: number; db: number }[] }) {
 }
 
 export default function Home() {
+  const [activeWorkspace, setActiveWorkspace] = useState<"simulation" | "eeg">("simulation");
   const [status, setStatus] = useState<DashboardStatus | null>(null);
   const [rows, setRows] = useState<SampleRow[]>([]);
   const [recordings, setRecordings] = useState<Recording[]>([]);
@@ -613,8 +615,8 @@ export default function Home() {
         <div className="brand-block">
           <div className="brand-mark"><Activity size={18} strokeWidth={2.2} /></div>
           <div>
-            <p className="eyebrow">brainToArm / acquisition</p>
-            <h1>PolyG-I Live Monitor</h1>
+            <p className="eyebrow">brainToArm / shared autonomy</p>
+            <h1>{activeWorkspace === "simulation" ? "Simulation Studio" : "PolyG-I Live Monitor"}</h1>
           </div>
         </div>
         <div className="header-actions">
@@ -622,7 +624,7 @@ export default function Home() {
             <span className="status-dot" />
             {!apiOnline ? "로컬 API 오프라인" : deviceReady ? "PolyG-I 연결됨" : "장치 미감지"}
           </div>
-          {!isRunning ? (
+          {activeWorkspace === "eeg" && (!isRunning ? (
             <button className="primary-button" disabled={busy || !apiOnline || !deviceReady} onClick={() => perform("/api/acquisition/start", { gainIndex })}>
               <Play size={16} fill="currentColor" /> 측정 시작
             </button>
@@ -630,12 +632,22 @@ export default function Home() {
             <button className="danger-button" disabled={busy} onClick={() => perform("/api/acquisition/stop")}>
               <CircleStop size={16} /> 측정 정지
             </button>
-          )}
+          ))}
         </div>
       </header>
 
+      <nav className="workspace-tabs" aria-label="작업 화면">
+        <button className={activeWorkspace === "simulation" ? "active" : ""} onClick={() => setActiveWorkspace("simulation")}>
+          <Sparkles size={16} />시뮬레이션 작업실
+        </button>
+        <button className={activeWorkspace === "eeg" ? "active" : ""} onClick={() => setActiveWorkspace("eeg")}>
+          <Activity size={16} />EEG 실시간 모니터
+        </button>
+        <span>물체 배치 → 카메라 탐색 → 파지 → ErrP 거부 → 원위치 복귀</span>
+      </nav>
+
       {message && <div className="toast" role="alert"><AlertTriangle size={16} />{message}</div>}
-      {!apiOnline && (
+      {!apiOnline && activeWorkspace === "eeg" && (
         <div className="offline-banner">
           <AlertTriangle size={18} />
           <div><strong>수집 서비스에 연결할 수 없습니다.</strong><span><code>python3 laptop/eeg_dashboard.py</code>로 로컬 서비스를 시작하세요.</span></div>
@@ -643,6 +655,10 @@ export default function Home() {
         </div>
       )}
 
+      {activeWorkspace === "simulation" ? (
+        <SimulationLab eegRunning={isRunning} apiOnline={apiOnline} />
+      ) : (
+      <>
       <section className="metric-grid" aria-label="측정 요약">
         <article className="metric-card">
           <div className="metric-icon"><Radio size={17} /></div>
@@ -792,8 +808,10 @@ export default function Home() {
           <p className="fine-print">ADC 입력 전압까지는 TeleScan D1WD10 DLL과 공식 문서에 맞춰 환산합니다. 전극 입력 µV는 장치의 고정 전치증폭 이득이 공개·교정되지 않아 표시하지 않습니다.</p>
         </article>
       </section>
+      </>
+      )}
 
-      <footer><span>localhost 전용 · 데이터는 이 Mac 밖으로 전송되지 않습니다.</span><span>PolyG-I / D1WD10 / 256 Hz / 8 EEG / ADC mV</span></footer>
+      <footer><span>localhost 전용 · 데이터는 이 Mac 밖으로 전송되지 않습니다.</span><span>{activeWorkspace === "simulation" ? "CAMERA-ONLY SIM / ERRP-READY / REVERSIBLE TASK" : "PolyG-I / D1WD10 / 256 Hz / 8 EEG / ADC mV"}</span></footer>
     </main>
   );
 }

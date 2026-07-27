@@ -44,6 +44,7 @@ from polyg_hid import (
     PolyGIHID,
     enumerate_devices,
 )
+from errp import ErrPDetector
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -157,6 +158,10 @@ class EEGDashboardService:
         self._processor = None
         self._gain_index = config.EEG_HID_GAIN_INDEX
         self._sample_selector = config.EEG_HID_SAMPLE_SELECTOR
+        self._errp_detector = ErrPDetector(backend=config.ERRP_BACKEND)
+        self._errp_lock = threading.Lock()
+        self._errp_baseline_ready = False
+        self._errp_last = None
 
     def device_available(self):
         with self._lock:
@@ -357,6 +362,71 @@ class EEGDashboardService:
             self._pending_marker = label
         return {"marker": label, "accepted": True}
 
+    def calibrate_errp(self, seconds=None):
+        """Learn session noise from recent resting EEG without moving the arm."""
+        seconds = float(config.COG_REST_S if seconds is None else seconds)
+        seconds = max(2.0, min(seconds, 30.0))
+        with self._lock:
+            if not self._running:
+                raise RuntimeError("ErrP 휴식 보정 전에 EEG 측정을 시작하세요")
+            now = time.monotonic()
+            window = [item[4] for item in self._rows if item[1] >= now - seconds]
+        required = int(seconds * config.EEG_FS * config.EEG_MIN_EPOCH_FRACTION)
+        if len(window) < required:
+            raise RuntimeError(
+                f"휴식 데이터가 부족합니다 ({len(window)}/{required} samples). "
+                f"눈을 편하게 두고 {seconds:.0f}초 후 다시 누르세요")
+        self._errp_detector.update_baseline(window)
+        with self._lock:
+            self._errp_baseline_ready = True
+        return {"ready": True, "samples": len(window), "seconds": seconds}
+
+    def check_errp(self, marker="SIM_DECISION"):
+        """Open one onset-locked decision window for the simulator.
+
+        The request itself is the visual action onset.  It blocks for the
+        configured post-onset interval, then evaluates exactly that timestamped
+        epoch. Concurrent browser requests are serialized so epochs cannot
+        silently overlap.
+        """
+        if not self._errp_lock.acquire(blocking=False):
+            raise RuntimeError("다른 ErrP 판정 창이 이미 진행 중입니다")
+        try:
+            with self._lock:
+                if not self._running:
+                    raise RuntimeError("PolyG-I 측정이 실행 중이 아닙니다")
+                if not self._errp_baseline_ready:
+                    raise RuntimeError("먼저 ErrP 휴식 보정을 완료하세요")
+                onset = time.monotonic()
+                if self._record_file is not None:
+                    self._pending_marker = str(marker or "SIM_DECISION")[:80]
+            deadline = onset + config.ERRP_WINDOW_S
+            while time.monotonic() < deadline:
+                if self._stop_event.wait(min(0.01, deadline - time.monotonic())):
+                    raise RuntimeError("EEG 측정이 판정 도중 중지되었습니다")
+            with self._lock:
+                lo = onset - config.ERRP_BASELINE_S
+                epoch = [item[4] for item in self._rows if lo <= item[1] <= deadline]
+            expected = int(
+                (config.ERRP_BASELINE_S + config.ERRP_WINDOW_S) * config.EEG_FS)
+            required = int(expected * config.EEG_MIN_EPOCH_FRACTION)
+            if len(epoch) < required:
+                raise RuntimeError(
+                    f"ErrP epoch samples 부족 ({len(epoch)}/{required}); 판정을 적용하지 않습니다")
+            probability = float(self._errp_detector.p_error(epoch))
+            result = {
+                "isError": probability >= config.ERRP_THRESHOLD,
+                "probability": round(probability, 4),
+                "threshold": config.ERRP_THRESHOLD,
+                "samples": len(epoch),
+                "marker": str(marker or "SIM_DECISION"),
+            }
+            with self._lock:
+                self._errp_last = result
+            return result
+        finally:
+            self._errp_lock.release()
+
     def _write_record_row_locked(self, sample_t, counts, raw_adc_mv, filtered_mv):
         if self._record_writer is None or self._started_mono is None:
             return
@@ -456,6 +526,13 @@ class EEGDashboardService:
                     "electrodeUvCalibrated": False,
                 },
                 "recording": recording,
+                "errp": {
+                    "baselineReady": self._errp_baseline_ready,
+                    "backend": self._errp_detector.backend,
+                    "threshold": config.ERRP_THRESHOLD,
+                    "windowSeconds": config.ERRP_WINDOW_S,
+                    "lastDecision": self._errp_last,
+                },
                 "quality": qualities,
             }
 
@@ -601,6 +678,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 payload = self.service.stop_recording()
             elif parsed.path == "/api/marker":
                 payload = self.service.add_marker(body.get("label", ""))
+            elif parsed.path == "/api/errp/calibrate":
+                payload = self.service.calibrate_errp(body.get("seconds"))
+            elif parsed.path == "/api/errp/check":
+                payload = self.service.check_errp(body.get("marker", "SIM_DECISION"))
             else:
                 self._json({"error": "API 경로를 찾을 수 없습니다"}, HTTPStatus.NOT_FOUND)
                 return

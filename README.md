@@ -135,6 +135,23 @@ precise steps to bring it up. No other context is required.
 > [`docs/AUTONOMOUS_GRASP_VALIDATION.md`](docs/AUTONOMOUS_GRASP_VALIDATION.md);
 > general physical success is not claimed yet.
 
+> ### ✅ Human-facing multi-object simulation + ErrP handoff
+>
+> The local dashboard now opens on a direct-manipulation simulation studio.
+> Several objects and the destination basket can be dragged around the table;
+> the simulated wrist view is rendered, re-read as RGB pixels, segmented, and
+> used to choose a candidate. A rejection may arrive before grasp, while
+> carrying, after basket drop, or after completion. The robot returns that
+> object to its saved origin, remembers the veto, and tries another; rejecting
+> every object clears the veto set and begins a new cycle.
+>
+> Manual and mock ErrP modes work without hardware. The PolyG-I mode uses the
+> existing native HID acquisition plus new onset-locked calibration/decision
+> endpoints, so tomorrow's device session only requires starting acquisition,
+> recording eight seconds of rest, and selecting `PolyG-I` in the simulator.
+> Run `python3 laptop/eeg_dashboard.py`; detailed operating notes and the honest
+> simulation/physics boundary are in [`QHAND.md`](QHAND.md).
+
 ---
 
 ## Table of contents
