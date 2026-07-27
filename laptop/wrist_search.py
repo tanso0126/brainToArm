@@ -17,7 +17,9 @@ import math
 
 import numpy as np
 
+import arm_fk
 import config
+from arm_safety import PhysicalArmSafety
 from arm_serial import ArmSerial
 from wrist_vision import WristDetector, open_wrist_camera, observation_summary
 
@@ -85,6 +87,13 @@ class PlanarSearchSafety:
                  base_height=None, table_clearance=None,
                  base_clearance=None, self_clearance=None,
                  camera_mount_angle=None, slew_step=None):
+        # Supplying synthetic geometry is retained only for isolated unit tests.
+        # Every production/default instance delegates to the calibrated real-arm
+        # model; the former config.L_* rough guesses must never gate hardware.
+        custom_geometry = any(value is not None for value in (
+            offsets, directions, lengths, base_height, table_clearance,
+            base_clearance, self_clearance, camera_mount_angle, slew_step))
+        self._physical = None if custom_geometry else PhysicalArmSafety()
         self.offsets = tuple(config.SERVO_OFFSET if offsets is None else offsets)
         self.directions = tuple(
             config.SERVO_DIRECTION if directions is None else directions)
@@ -120,6 +129,18 @@ class PlanarSearchSafety:
             (float(pose[joint]) - self.offsets[joint]) / self.directions[joint])
 
     def forward(self, pose):
+        if self._physical is not None:
+            chain = arm_fk.geometry(pose)
+            direction = chain.wrist_rotation[:, 0]
+            angle = math.degrees(math.atan2(-direction[2], math.hypot(
+                direction[0], direction[1])))
+            return PlanarGeometry(
+                (0.0, 0.0),
+                (float(np.linalg.norm(chain.shoulder[:2])), float(chain.shoulder[2])),
+                (float(np.linalg.norm(chain.elbow[:2])), float(chain.elbow[2])),
+                (float(np.linalg.norm(chain.wrist_pitch[:2])), float(chain.wrist_pitch[2])),
+                (float(np.linalg.norm(chain.camera[:2])), float(chain.camera[2])),
+                angle)
         if len(pose) != config.N_JOINTS:
             raise ValueError("search pose must contain all six joints")
         shoulder_angle = self._joint_angle(pose, config.J_SHOULDER)
@@ -143,6 +164,8 @@ class PlanarSearchSafety:
             math.degrees(angles[-1]) + self.camera_mount_angle)
 
     def pose_is_safe(self, pose):
+        if self._physical is not None:
+            return self._physical.pose_is_safe(pose)
         for joint in config.WRIST_SEARCH_JOINTS:
             if not config.SERVO_MIN[joint] <= pose[joint] <= config.SERVO_MAX[joint]:
                 return False
@@ -167,6 +190,9 @@ class PlanarSearchSafety:
 
     def slew_states(self, start, target):
         """Match firmware: every moving servo advances equal degrees per tick."""
+        if self._physical is not None:
+            yield from self._physical.slew_states(start, target)
+            return
         start = [float(value) for value in start]
         target = [float(value) for value in target]
         ticks = int(math.ceil(max(
@@ -182,8 +208,21 @@ class PlanarSearchSafety:
             yield pose
 
     def transition_is_safe(self, start, target):
+        if self._physical is not None:
+            return self._physical.transition_is_safe(start, target)
         return self.pose_is_safe(start) and all(
             self.pose_is_safe(pose) for pose in self.slew_states(start, target))
+
+    def transition_report(self, start, target):
+        """Detailed production report; synthetic test models return a summary."""
+        if self._physical is not None:
+            return self._physical.transition_report(start, target)
+        safe = self.transition_is_safe(start, target)
+        return type("PlanarSafetyReport", (), {
+            "safe": safe,
+            "minimum_clearance_mm": math.inf if safe else -math.inf,
+            "explain": lambda _self: "synthetic planar safety model",
+        })()
 
     def view_feature(self, pose):
         geometry = self.forward(pose)

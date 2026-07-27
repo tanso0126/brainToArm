@@ -99,6 +99,7 @@ def _slow_move(client, target, final_settle=None):
                     for c, t in zip(current, target)]
         last = (i == steps)
         client.request({"command": "move", "pose": waypoint,
+                        "require_camera": True,
                         "settle_s": final_settle if last else STEP_SETTLE_S})
 
 

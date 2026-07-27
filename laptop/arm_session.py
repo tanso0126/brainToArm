@@ -10,6 +10,7 @@ Examples::
 
     python3 laptop/arm_session.py serve --floor hover
     python3 laptop/arm_session.py status
+    python3 laptop/arm_session.py check 90 124 90 180 90 170
     python3 laptop/arm_session.py floor grasp 90
     python3 laptop/arm_session.py move 90 124 90 180 90 170
     python3 laptop/arm_session.py shutdown
@@ -25,11 +26,13 @@ import sys
 import time
 
 import config
+from arm_safety import PhysicalArmSafety
 from arm_serial import ArmSerial
 from floor_motion import floor_pose, floor_waypoints
 
 
 ROOT = Path(__file__).resolve().parents[1]
+WRIST_RAW_FRAME = ROOT / "data" / "vision" / "wrist_camera_latest_raw.jpg"
 
 
 def session_socket_path(value=None):
@@ -42,10 +45,11 @@ def _json_line(payload):
 
 
 class ArmSessionServer:
-    def __init__(self, path=None, arm=None):
+    def __init__(self, path=None, arm=None, safety=None):
         self.path = session_socket_path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.arm = arm or ArmSerial()
+        self.safety = safety or PhysicalArmSafety()
         self.running = True
         self.listener = None
 
@@ -70,13 +74,33 @@ class ArmSessionServer:
             raise ValueError("move sequence cannot be empty")
         return checked
 
-    def _move_sequence(self, poses, timeout=15.0, settle_s=0.0):
+    @staticmethod
+    def _assert_camera_live(path=WRIST_RAW_FRAME):
+        try:
+            age = time.time() - path.stat().st_mtime
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "autonomous motion requires the wrist-camera publisher") from exc
+        if age < -1.0 or age > config.WRIST_CAMERA_MAX_FRAME_AGE_S:
+            raise RuntimeError(
+                f"autonomous motion rejected: wrist frame is stale ({age:.1f}s old)")
+
+    def _move_sequence(self, poses, timeout=15.0, settle_s=0.0,
+                       require_camera=False):
         poses = self._validated_sequence(poses)
+        current = self.arm.status()
         for pose in poses:
+            if require_camera:
+                self._assert_camera_live()
+            report = self.safety.transition_report(current, pose)
+            if not report.safe:
+                raise RuntimeError(
+                    "motion rejected before serial write: " + report.explain())
             self.arm.send_angles(pose)
             self.arm.wait_done(timeout=float(timeout))
             if settle_s:
                 time.sleep(float(settle_s))
+            current = pose
         return self.arm.status()
 
     def handle(self, request):
@@ -85,17 +109,31 @@ class ArmSessionServer:
             return {"ok": bool(self.arm.ping()), "pid": os.getpid()}
         if command == "status":
             return {"ok": True, "pose": self.arm.status(), "pid": os.getpid()}
+        if command == "check":
+            target = self._validated_sequence([request.get("pose")])[0]
+            current = self.arm.status()
+            report = self.safety.transition_report(current, target)
+            return {
+                "ok": True,
+                "safe": report.safe,
+                "current": current,
+                "target": target,
+                "minimum_clearance_mm": report.minimum_clearance_mm,
+                "explanation": report.explain(),
+            }
         if command == "move":
             pose = self._move_sequence(
                 [request.get("pose")],
                 timeout=request.get("timeout", 15.0),
-                settle_s=request.get("settle_s", 0.0))
+                settle_s=request.get("settle_s", 0.0),
+                require_camera=bool(request.get("require_camera", False)))
             return {"ok": True, "pose": pose}
         if command == "sequence":
             pose = self._move_sequence(
                 request.get("poses"),
                 timeout=request.get("timeout", 15.0),
-                settle_s=request.get("settle_s", 0.0))
+                settle_s=request.get("settle_s", 0.0),
+                require_camera=bool(request.get("require_camera", False)))
             return {"ok": True, "pose": pose}
         if command == "floor":
             level = request.get("level", "hover")
@@ -112,7 +150,8 @@ class ArmSessionServer:
                     request.get("step"), request.get("gripper"))
             pose = self._move_sequence(
                 poses, timeout=request.get("timeout", 15.0),
-                settle_s=request.get("settle_s", 0.0))
+                settle_s=request.get("settle_s", 0.0),
+                require_camera=bool(request.get("require_camera", False)))
             return {"ok": True, "pose": pose, "level": level}
         if command == "shutdown":
             self.running = False
@@ -213,6 +252,8 @@ def main():
     serve.add_argument("--floor", choices=("hover", "grasp"))
     serve.add_argument("--elbow", type=int, default=config.FLOOR_REFERENCE_ELBOW)
     subparsers.add_parser("status")
+    check = subparsers.add_parser("check")
+    check.add_argument("angles", type=int, nargs=config.N_JOINTS)
     move = subparsers.add_parser("move")
     move.add_argument("angles", type=int, nargs=config.N_JOINTS)
     floor = subparsers.add_parser("floor")
@@ -247,6 +288,8 @@ def main():
     client = ArmSessionClient(args.socket)
     if args.action == "status":
         response = client.request({"command": "status"})
+    elif args.action == "check":
+        response = client.request({"command": "check", "pose": args.angles})
     elif args.action == "move":
         response = client.request({"command": "move", "pose": args.angles})
     elif args.action == "floor":

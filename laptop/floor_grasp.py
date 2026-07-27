@@ -90,6 +90,21 @@ def filter_wrist_candidates(candidates, frame_shape, marker_boxes=(),
             and x >= ordered_markers[0][0] + ordered_markers[0][2]
             and x + box_width <= ordered_markers[-1][0]
         )
+        if not ordered_markers:
+            # The eye-in-hand mount and commanded open jaw are rigid. Under
+            # severe low light both tapes can vanish while an object enters
+            # the bottom edge. Preserve only a blob fully inside the measured
+            # open-jaw *inner* corridor; all other border blobs remain invalid.
+            diagonal = math.hypot(width, height)
+            center_x = config.WRIST_GRIPPER_OPEN_PROFILE["center"][0] * width
+            half_opening = (0.5
+                            * config.WRIST_GRIPPER_OPEN_PROFILE["opening_ratio"]
+                            * diagonal)
+            estimated_half_tape_width = 0.035 * width
+            inner_left = center_x - half_opening + estimated_half_tape_width
+            inner_right = center_x + half_opening - estimated_half_tape_width
+            between_jaws = (x >= inner_left
+                            and x + box_width <= inner_right)
         # During the final vertical pinch the selected object is intentionally
         # clipped by the bottom image edge, but remains fully between the two
         # known finger markers. Preserve that one near-field case; other border
@@ -262,11 +277,13 @@ class SessionArmClient:
     def move(self, pose, settle_s=0.0, timeout=15.0):
         return self.client.request({
             "command": "move", "pose": [int(v) for v in pose],
+            "require_camera": True,
             "settle_s": settle_s, "timeout": timeout})["pose"]
 
     def floor(self, level, elbow, settle_s=0.0, timeout=15.0):
         return self.client.request({
             "command": "floor", "level": level, "elbow": int(elbow),
+            "require_camera": True,
             "settle_s": settle_s, "timeout": timeout})["pose"]
 
 

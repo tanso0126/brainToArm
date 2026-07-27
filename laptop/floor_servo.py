@@ -38,20 +38,35 @@ OBJ_JUMP_REJECT_PX = 160  # reject a frame whose object pixel jumps this far
 # eligible merely because FastSAM segmented them.
 SEARCH_REACHES = (0, 12, 24, 36, 48, 60)
 SEARCH_MAX_DU_PX = 55.0
-SEARCH_DV_WINDOW_PX = (-220.0, 45.0)
+SEARCH_DV_WINDOW_PX = (-360.0, 45.0)
 SEARCH_CONFIRM_RADIUS_PX = 80.0
+SEARCH_MIN_CONFIDENCE = 0.65
+TRACK_MIN_CONFIDENCE = 0.50
 GRASP_INSET_RATIO = 0.35   # grasp inside the object, not on its trailing edge
-DYNAMIC_CONTACT_MARGIN_PX = 10.0
+DYNAMIC_CONTACT_MIN_MARGIN_PX = 1.5
+DYNAMIC_CONTACT_MAD_MULTIPLIER = 5.0
 CONTACT_RETENTION_RATIO = 0.50
 CLIPPED_GRASP_DV_WINDOW_PX = (-52.0, -24.0)
 CLIPPED_GRASP_VOTES = 2
 EMPTY_CALIBRATION_Z = 0.100
+HOVER_GRASP_DV_TARGET_PX = 20.0
+HOVER_GRASP_DV_TOL_PX = 12.0
+BASE_JACOBIAN_STEP_DEG = 2
+BASE_CENTER_TOL_PX = 55.0
+BASE_CENTER_MAX_STEP_DEG = 3
+BASE_CENTER_RANGE_DEG = 10
+CONTACT_SAMPLE_COUNT = 5
+MIN_SEARCH_TO_PINCH_ADVANCE = 6
+CONTACT_PROBE_Z = EMPTY_CALIBRATION_Z
 
 
 def _fresh_frame(discard=None, timeout=8.0):
     import cv2
     discard = (config.FLOOR_SETTLE_DISCARD_FRAMES + 1) if discard is None else discard
-    prev = None
+    try:
+        prev = RAW.stat().st_mtime_ns
+    except FileNotFoundError:
+        prev = None
     seen = 0
     deadline = time.monotonic() + timeout
     while seen < discard and time.monotonic() < deadline:
@@ -59,12 +74,27 @@ def _fresh_frame(discard=None, timeout=8.0):
             m = RAW.stat().st_mtime_ns
         except FileNotFoundError:
             time.sleep(0.05); continue
-        if m != prev:
+        if prev is None or m != prev:
             prev = m; seen += 1
         time.sleep(0.05)
+    if seen < discard:
+        age = (time.time() - RAW.stat().st_mtime
+               if RAW.exists() else math.inf)
+        raise RuntimeError(
+            f"wrist camera did not publish {discard} new frame(s) within "
+            f"{timeout:.1f}s (last frame age={age:.1f}s)")
     frame = cv2.imread(str(RAW))
     if frame is None:
         raise RuntimeError("no wrist frame; is the camera publisher running?")
+    # The PW315 auto exposure can remain dark after the arm briefly fills the
+    # frame. Preserve RAW on disk for evidence, but normalize only genuinely
+    # low-light perception frames. A single *linear* B/G/R gain preserves HSV
+    # hue/saturation; nonlinear gamma shifted red tape into the yellow target
+    # range and is therefore deliberately not used here.
+    gray_mean = float(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).mean())
+    if 1.0 < gray_mean < 70.0:
+        gain = float(np.clip(95.0 / gray_mean, 1.0, 6.0))
+        frame = cv2.convertScaleAbs(frame, alpha=gain, beta=0)
     return frame
 
 
@@ -79,8 +109,13 @@ class FloorServo:
         self.locked_target_center = None
         self.shadow = None
         self.empty_closed_opening_px = None
+        self.empty_closed_opening_mad_px = None
+        self.empty_closed_red_x_px = None
+        self.empty_closed_red_x_mad_px = None
         self.last_target_clipped = False
         self.locked_target_clipped = False
+        self.base_angle = int(config.FLOOR_BASE_ANGLE)
+        self.base_du_per_deg = None
 
     # -- gentle stepped motion -------------------------------------------------
     def slow_move(self, target, final_settle=None):
@@ -94,6 +129,7 @@ class FloorServo:
             wp = [int(round(c + (t - c) * frac)) for c, t in zip(current, target)]
             self.client.request({
                 "command": "move", "pose": wp,
+                "require_camera": True,
                 "settle_s": final_settle if i == steps else STEP_SETTLE_S})
 
     # -- observation -----------------------------------------------------------
@@ -131,7 +167,8 @@ class FloorServo:
         lo, hi = float(config.SERVO_MIN[J_SHOULDER]), float(config.SERVO_MAX[J_SHOULDER])
         for _ in range(40):
             mid = (lo + hi) / 2
-            z = arm_fk.tool_position([90, mid, elbow, wrist_pitch, 90, 170])[2]
+            z = arm_fk.tool_position([
+                self.base_angle, mid, elbow, wrist_pitch, 90, 170])[2]
             if z > z_m:
                 lo = mid
             else:
@@ -139,7 +176,8 @@ class FloorServo:
         shoulder = int(round((lo + hi) / 2))
         shoulder = max(config.SERVO_MIN[J_SHOULDER],
                        min(config.SERVO_MAX[J_SHOULDER], shoulder))
-        return [90, shoulder, elbow, int(wrist_pitch), int(gripper), 170]
+        return [self.base_angle, shoulder, elbow, int(wrist_pitch),
+                int(gripper), 170]
 
     def _reach_pose(self, reach, z_m, gripper=None):
         """Single forward-reach scalar -> (elbow, wrist_pitch). Lower wrist_pitch
@@ -164,7 +202,7 @@ class FloorServo:
     # physically impossible for this envelope.
     HOVER_Z = 0.055
     GRASP_Z = 0.006
-    VERIFY_Z = 0.080
+    VERIFY_Z = EMPTY_CALIBRATION_Z
 
     @staticmethod
     def candidate_grasp_point(candidate):
@@ -172,6 +210,36 @@ class FloorServo:
         _x, y, _width, height = candidate.bbox
         return np.array((candidate.center[0],
                          y + (1.0 - GRASP_INSET_RATIO) * height), dtype=float)
+
+    @staticmethod
+    def _red_marker_x(frame):
+        """Return the mounted right/red finger x, even if blue is occluded."""
+        import cv2
+        from wrist_vision import _combine_hsv_ranges, _valid_blobs
+
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        height, width = frame.shape[:2]
+        area = height * width
+        red_mask = _combine_hsv_ranges(hsv, config.WRIST_RED_HSV)
+        blobs = _valid_blobs(
+            red_mask, hsv,
+            area * config.WRIST_MARKER_MIN_AREA_RATIO,
+            area * config.WRIST_MARKER_MAX_AREA_RATIO,
+            config.WRIST_MARKER_MIN_FILL_RATIO,
+            config.WRIST_MARKER_MAX_ASPECT,
+            allow_bottom=True)
+        expected_x = width * (
+            config.WRIST_GRIPPER_CLOSED_PROFILE["center"][0]
+            + 0.5 * config.WRIST_GRIPPER_CLOSED_PROFILE["opening_ratio"])
+        plausible = [
+            blob for blob in blobs
+            if blob.center[1] >= 0.75 * height
+            and 0.45 * width <= blob.center[0] <= 0.72 * width]
+        if not plausible:
+            return None
+        return float(min(
+            plausible, key=lambda blob: abs(blob.center[0] - expected_x)
+        ).center[0])
 
     @classmethod
     def search_choice(cls, scene):
@@ -182,10 +250,16 @@ class FloorServo:
         jaws and approach their row from above during the reach sweep.
         """
         if scene.gripper is None:
-            return None
-        midpoint = np.asarray(scene.gripper.center, dtype=float)
+            height, width = scene.frame_shape[:2]
+            midpoint = np.asarray(
+                config.WRIST_GRIPPER_OPEN_PROFILE["center"], dtype=float)
+            midpoint *= np.asarray([width, height], dtype=float)
+        else:
+            midpoint = np.asarray(scene.gripper.center, dtype=float)
         eligible = []
         for candidate in scene.ranked:
+            if float(getattr(candidate, "confidence", 1.0)) < SEARCH_MIN_CONFIDENCE:
+                continue
             edge = cls.candidate_grasp_point(candidate)
             du, dv = float(edge[0] - midpoint[0]), float(edge[1] - midpoint[1])
             if (abs(du) <= SEARCH_MAX_DU_PX
@@ -205,6 +279,8 @@ class FloorServo:
         home = list(config.HOME_POSE)
         print(f"[servo] AUTONOMOUS HOME {home}")
         self.slow_move(home)
+        self.base_angle = int(home[config.J_BASE])
+        self.base_du_per_deg = None
 
         # This exact HOME->ready->floor transition is the same one used by the
         # persistent session startup. Open before approaching the floor.
@@ -220,7 +296,12 @@ class FloorServo:
                                     gripper=config.GRIP_OPEN)[0]
             self.slow_move(pose)
             visited.append(pose)
-            scene, _ = self.scene_detector.scene(_fresh_frame())
+            search_frame = _fresh_frame()
+            import cv2
+            cv2.imwrite(str(ROOT / "data" / "vision"
+                            / f"autonomous_search_view_{view}.jpg"),
+                        search_frame)
+            scene, _ = self.scene_detector.scene(search_frame)
             candidate = self.search_choice(scene)
             print(f"[servo] SEARCH view={view}/{len(SEARCH_REACHES)} "
                   f"reach={reach} objects={len(scene.ranked)} "
@@ -256,32 +337,65 @@ class FloorServo:
                 gripper=config.GRIP_OPEN)[0]
             self.slow_move(open_calibration)
             self.slow_move(closed_calibration)
-            empty_observation, _ = self.marker_detector.detect(_fresh_frame())
+            empty_openings = []
+            empty_red_x = []
+            for _ in range(CONTACT_SAMPLE_COUNT):
+                empty_frame = _fresh_frame(discard=1)
+                empty_observation, _ = self.marker_detector.detect(empty_frame)
+                if empty_observation.gripper is not None:
+                    empty_openings.append(
+                        float(empty_observation.gripper.opening_px))
+                red_x = self._red_marker_x(empty_frame)
+                if red_x is not None:
+                    empty_red_x.append(red_x)
             self.slow_move(open_calibration)
             self.slow_move(pose)  # return open to the target-visible hover
-            if empty_observation.gripper is None:
+            if not empty_openings and not empty_red_x:
                 print("[servo] SEARCH empty-close calibration lost markers")
                 continue
-            self.empty_closed_opening_px = float(
-                empty_observation.gripper.opening_px)
+            if empty_openings:
+                self.empty_closed_opening_px = float(np.median(empty_openings))
+                self.empty_closed_opening_mad_px = float(np.median(np.abs(
+                    np.asarray(empty_openings) - self.empty_closed_opening_px)))
+            if empty_red_x:
+                self.empty_closed_red_x_px = float(np.median(empty_red_x))
+                self.empty_closed_red_x_mad_px = float(np.median(np.abs(
+                    np.asarray(empty_red_x) - self.empty_closed_red_x_px)))
 
-            # Closing/opening can perturb segmentation; require the chosen
-            # object once more before returning control to alignment.
-            final_scene, _ = self.scene_detector.scene(_fresh_frame(discard=2))
-            final_candidate = self.search_choice(final_scene)
-            if final_candidate is None:
-                print("[servo] SEARCH target lost after empty-close calibration")
-                continue
+            # Reacquire at the returned, identical hover pose. Do not compare
+            # against pixels captured before the 100 mm excursion: an eye-in-
+            # hand camera can shift/resize masks substantially during that
+            # excursion even though the object never moved.
+            post_candidates = []
+            for _ in range(5):
+                final_scene, _ = self.scene_detector.scene(
+                    _fresh_frame(discard=1))
+                final_candidate = self.search_choice(final_scene)
+                if final_candidate is None:
+                    continue
+                point = self.candidate_grasp_point(final_candidate)
+                if not post_candidates or np.linalg.norm(
+                        point - self.candidate_grasp_point(
+                            post_candidates[0])) <= SEARCH_CONFIRM_RADIUS_PX:
+                    post_candidates.append(final_candidate)
+                if len(post_candidates) >= 2:
+                    break
+            if len(post_candidates) < 2:
+                print("[servo] SEARCH post-calibration segmentation sparse; "
+                      "retain the two-frame pre-calibration identity and "
+                      "require live reacquisition in alignment")
+                return reach, confirmed
+            final_candidate, verify_candidate = post_candidates[:2]
             final_distance = float(np.linalg.norm(
-                self.candidate_grasp_point(final_candidate) - reference))
-            if final_distance > SEARCH_CONFIRM_RADIUS_PX:
-                print("[servo] SEARCH target identity changed after calibration")
-                continue
+                self.candidate_grasp_point(verify_candidate)
+                - self.candidate_grasp_point(final_candidate)))
             print(f"[servo] SEARCH FOUND reach={reach} "
-                  f"center={final_candidate.center} "
+                  f"center={verify_candidate.center} "
                   f"confirm_delta={final_distance:.1f}px "
-                  f"empty-close={self.empty_closed_opening_px:.1f}px")
-            return reach, final_candidate
+                  f"empty-close="
+                  f"{self.empty_closed_opening_px if self.empty_closed_opening_px is not None else 'red-only'} "
+                  f"red-x={self.empty_closed_red_x_px}")
+            return reach, verify_candidate
 
         print("[servo] SEARCH exhausted verified floor views; return HOME")
         for pose in reversed(visited[:-1]):
@@ -299,18 +413,22 @@ class FloorServo:
         frame = _fresh_frame()
         scene, _ = self.scene_detector.scene(frame)
         obs, _ = self.marker_detector.detect(frame)
-        if not scene.ranked:
+        trackable = [
+            candidate for candidate in scene.ranked
+            if float(getattr(candidate, "confidence", 1.0))
+            >= TRACK_MIN_CONFIDENCE]
+        if not trackable:
             obj = None
             self.last_target_clipped = False
         elif reference is None:
-            candidate = scene.ranked[0]
+            candidate = trackable[0]
             obj = self.candidate_grasp_point(candidate)
             self.last_target_clipped = (
                 candidate.bbox[1] + candidate.bbox[3]
                 >= frame.shape[0] - config.FLOOR_CAND_BORDER_MARGIN_PX)
         else:
             candidate = min(
-                scene.ranked,
+                trackable,
                 key=lambda candidate: np.linalg.norm(
                     self.candidate_grasp_point(candidate)
                     - reference))
@@ -318,8 +436,96 @@ class FloorServo:
             self.last_target_clipped = (
                 candidate.bbox[1] + candidate.bbox[3]
                 >= frame.shape[0] - config.FLOOR_CAND_BORDER_MARGIN_PX)
-        mid = None if obs.gripper is None else np.array(obs.gripper.center)
+        if obs.gripper is None:
+            height, width = frame.shape[:2]
+            mid = np.asarray(
+                config.WRIST_GRIPPER_OPEN_PROFILE["center"], dtype=float)
+            mid *= np.asarray([width, height], dtype=float)
+        else:
+            mid = np.array(obs.gripper.center)
         return obj, mid
+
+    def _center_base_lateral(self, reference, max_iters=4):
+        """Close the image-x loop with a measured base-yaw Jacobian.
+
+        Shoulder/elbow/wrist motion spans the arm's sagittal plane and cannot
+        remove lateral error.  Servo1 is operational, so measure its sign and
+        gain in the current camera geometry instead of assuming either.  Every
+        correction is bounded and re-observed; a stalled base therefore fails
+        closed before the fingers can push the object.
+        """
+        reference = None if reference is None else np.asarray(reference, dtype=float)
+        obj, mid = self._obj_and_marker_px(reference)
+        if obj is None or mid is None:
+            return None, None
+        du = float(obj[0] - mid[0])
+        reference = obj
+        # With the fixed-base planar arm, a target centered at hover remains on
+        # the physical sagittal plane.  Apparent x drift during descent is
+        # eye-in-hand parallax, not a new lateral degree of freedom.
+        if abs(du) <= BASE_CENTER_TOL_PX:
+            return obj, mid
+
+        if self.base_du_per_deg is None:
+            low = max(int(config.SERVO_MIN[config.J_BASE]),
+                      int(config.FLOOR_BASE_ANGLE) - BASE_CENTER_RANGE_DEG)
+            high = min(int(config.SERVO_MAX[config.J_BASE]),
+                       int(config.FLOOR_BASE_ANGLE) + BASE_CENTER_RANGE_DEG)
+            direction = (1 if self.base_angle + BASE_JACOBIAN_STEP_DEG <= high
+                         else -1)
+            probe_base = int(np.clip(
+                self.base_angle + direction * BASE_JACOBIAN_STEP_DEG, low, high))
+            if probe_base == self.base_angle:
+                print("[servo] lateral center: no safe base probe remains")
+                return None, None
+            pose = list(self.client.request({"command": "status"})["pose"])
+            pose[config.J_BASE] = probe_base
+            self.slow_move(pose)
+            self.base_angle = probe_base
+            probe_obj, probe_mid = self._obj_and_marker_px(reference)
+            if probe_obj is None or probe_mid is None:
+                print("[servo] lateral center: target/markers lost during base probe")
+                return None, None
+            probe_du = float(probe_obj[0] - probe_mid[0])
+            jac = (probe_du - du) / (probe_base - (probe_base -
+                   direction * BASE_JACOBIAN_STEP_DEG))
+            if not np.isfinite(jac) or abs(jac) < 2.0:
+                print(f"[servo] lateral center: base response too small "
+                      f"({jac:.2f}px/deg); descent forbidden")
+                return None, None
+            self.base_du_per_deg = float(jac)
+            obj, mid, du, reference = probe_obj, probe_mid, probe_du, probe_obj
+            print(f"[servo] measured base lateral Jacobian "
+                  f"{self.base_du_per_deg:.2f}px/deg")
+
+        low = max(int(config.SERVO_MIN[config.J_BASE]),
+                  int(config.FLOOR_BASE_ANGLE) - BASE_CENTER_RANGE_DEG)
+        high = min(int(config.SERVO_MAX[config.J_BASE]),
+                   int(config.FLOOR_BASE_ANGLE) + BASE_CENTER_RANGE_DEG)
+        for _ in range(max_iters):
+            if abs(du) <= BASE_CENTER_TOL_PX:
+                return obj, mid
+            delta = int(round(np.clip(
+                -du / self.base_du_per_deg,
+                -BASE_CENTER_MAX_STEP_DEG, BASE_CENTER_MAX_STEP_DEG)))
+            if delta == 0:
+                delta = -1 if du / self.base_du_per_deg > 0 else 1
+            new_base = int(np.clip(self.base_angle + delta, low, high))
+            if new_base == self.base_angle:
+                print(f"[servo] lateral center: base limit with du={du:.0f}px")
+                return None, None
+            pose = list(self.client.request({"command": "status"})["pose"])
+            pose[config.J_BASE] = new_base
+            self.slow_move(pose)
+            self.base_angle = new_base
+            obj, mid = self._obj_and_marker_px(reference)
+            if obj is None or mid is None:
+                print("[servo] lateral center: target/markers lost after correction")
+                return None, None
+            du = float(obj[0] - mid[0])
+            reference = obj
+            print(f"[servo] lateral center base={self.base_angle} du={du:.0f}px")
+        return (obj, mid) if abs(du) <= BASE_CENTER_TOL_PX else (None, None)
 
     def align(self, verbose=True, start_reach=0, selected=None):
         """Drive the object's image row onto the fingertip row at hover, using a
@@ -338,8 +544,10 @@ class FloorServo:
         # the projected jaw span.  It still left the fingertips in front of the
         # object, which encouraged a bulldozing approach.  Center tightly before
         # locking the forward axis and beginning vertical descent.
-        ACCEPT_DV, ACCEPT_DU = 26.0, 55.0
+        ACCEPT_DU = 55.0
         reach = int(np.clip(start_reach, 0, self.REACH_MAX))
+        minimum_pinch_reach = min(
+            self.REACH_MAX, reach + MIN_SEARCH_TO_PINCH_ADVANCE)
         pose, wp, elbow = self._reach_pose(reach, self.HOVER_Z)
         self.slow_move(pose)
         last_obj = (None if selected is None
@@ -363,20 +571,30 @@ class FloorServo:
             last_obj = obj
             tracking_initialized = True
             du, dv = float(obj[0] - mid[0]), float(obj[1] - mid[1])
+            dv_error = dv - HOVER_GRASP_DV_TARGET_PX
             if verbose:
                 print(f"[servo] it={it} reach={reach}(wp={wp},el={elbow}) "
                       f"obj_px={np.round(obj)} marker_px={np.round(mid)} "
-                      f"du={du:.0f} dv={dv:.0f}")
-            if best is None or abs(dv) < best[0]:
-                best = (abs(dv), reach)
-            if abs(dv) <= ACCEPT_DV and abs(du) <= ACCEPT_DU:
-                self.locked_target_center = obj.copy()
+                      f"du={du:.0f} dv={dv:.0f} "
+                      f"depth_error={dv_error:.0f}")
+            if best is None or abs(dv_error) < best[0]:
+                best = (abs(dv_error), reach)
+            if (abs(dv_error) <= HOVER_GRASP_DV_TOL_PX
+                    and abs(du) <= ACCEPT_DU
+                    and reach >= minimum_pinch_reach):
+                centered_obj, centered_mid = self._center_base_lateral(obj)
+                if centered_obj is None:
+                    print("[servo] lateral centering failed; descent is forbidden")
+                    return None
+                du = float(centered_obj[0] - centered_mid[0])
+                self.locked_target_center = centered_obj.copy()
                 self.locked_target_clipped = False
                 print(f"[servo] object within the jaw span at hover "
                       f"(du={du:.0f},dv={dv:.0f}) reach={reach} -> descend & close")
                 return reach
             clipped_ready = (
                 self.last_target_clipped
+                and reach >= minimum_pinch_reach
                 and abs(du) <= ACCEPT_DU
                 and CLIPPED_GRASP_DV_WINDOW_PX[0] <= dv
                 <= CLIPPED_GRASP_DV_WINDOW_PX[1])
@@ -386,7 +604,12 @@ class FloorServo:
                                  and abs(dv - previous_clipped_dv) <= 8.0 else 1)
                 previous_clipped_dv = dv
                 if clipped_votes >= CLIPPED_GRASP_VOTES:
-                    self.locked_target_center = obj.copy()
+                    centered_obj, centered_mid = self._center_base_lateral(obj)
+                    if centered_obj is None:
+                        print("[servo] lateral centering failed; descent is forbidden")
+                        return None
+                    du = float(centered_obj[0] - centered_mid[0])
+                    self.locked_target_center = centered_obj.copy()
                     self.locked_target_clipped = True
                     print(f"[servo] bottom-clipped grasp geometry stable "
                           f"for {clipped_votes} frames (du={du:.0f},dv={dv:.0f}) "
@@ -397,8 +620,8 @@ class FloorServo:
                 previous_clipped_dv = None
             if reach >= self.REACH_MAX:
                 break
-            step = 1 if abs(dv) < 120 else MAX_STEP_DEG
-            delta = step if dv < 0 else -step
+            step = 1 if abs(dv_error) < 120 else MAX_STEP_DEG
+            delta = step if dv_error < 0 else -step
             reach = int(min(self.REACH_MAX, max(0, reach + delta)))
             pose, wp, elbow = self._reach_pose(reach, self.HOVER_Z)
             self.slow_move(pose)
@@ -420,11 +643,26 @@ class FloorServo:
         for vote in range(8):
             frame = _fresh_frame(discard=1)
             scene, observation = self.scene_detector.scene(frame)
+            if (scene.gripper is None
+                    and canonical_pose[config.J_GRIP] == config.GRIP_OPEN):
+                from types import SimpleNamespace
+                height, width = scene.frame_shape[:2]
+                center = np.asarray(
+                    config.WRIST_GRIPPER_OPEN_PROFILE["center"], dtype=float)
+                center *= np.asarray([width, height], dtype=float)
+                scene.gripper = SimpleNamespace(
+                    center=tuple(center),
+                    opening_px=(config.WRIST_GRIPPER_OPEN_PROFILE["opening_ratio"]
+                                * math.hypot(width, height)))
             target = None
-            if target_visible and scene.ranked:
+            policy_candidates = [
+                candidate for candidate in scene.ranked
+                if float(getattr(candidate, "confidence", 1.0))
+                >= TRACK_MIN_CONFIDENCE]
+            if target_visible and policy_candidates:
                 reference = self.locked_target_center
-                candidate = (scene.ranked[0] if reference is None else min(
-                    scene.ranked,
+                candidate = (policy_candidates[0] if reference is None else min(
+                    policy_candidates,
                     key=lambda candidate: np.linalg.norm(
                         self.candidate_grasp_point(candidate)
                         - reference)))
@@ -456,31 +694,66 @@ class FloorServo:
             reach, self.HOVER_Z, gripper=config.GRIP_OPEN)[0])
         return False
 
-    def _contact_assessment(self):
-        observation, _ = self.marker_detector.detect(_fresh_frame())
+    def _contact_assessment(self, *, allow_single_red=False):
+        observations = []
+        openings = []
+        red_positions = []
+        for _ in range(CONTACT_SAMPLE_COUNT):
+            frame = _fresh_frame(discard=1)
+            observation, _ = self.marker_detector.detect(frame)
+            observations.append(observation)
+            if observation.gripper is not None:
+                openings.append(float(observation.gripper.opening_px))
+            red_x = self._red_marker_x(frame)
+            if red_x is not None:
+                red_positions.append(red_x)
         if self.empty_closed_opening_px is not None:
             from visual_contact import ContactAssessment
-            if observation.gripper is None:
+            threshold = max(
+                DYNAMIC_CONTACT_MIN_MARGIN_PX,
+                DYNAMIC_CONTACT_MAD_MULTIPLIER
+                * float(self.empty_closed_opening_mad_px or 0.0))
+            if not openings and not allow_single_red:
                 return ContactAssessment(
                     "UNKNOWN", config.GRIP_CLOSED, None,
                     self.empty_closed_opening_px, None,
-                    DYNAMIC_CONTACT_MARGIN_PX,
-                    "both finger markers are required")
-            observed = float(observation.gripper.opening_px)
-            residual = observed - self.empty_closed_opening_px
-            contact = residual > DYNAMIC_CONTACT_MARGIN_PX
+                    threshold,
+                    f"both finger markers missing in {CONTACT_SAMPLE_COUNT} frames")
+            if openings:
+                observed = float(np.median(openings))
+                residual = observed - self.empty_closed_opening_px
+                contact = residual > threshold
+                return ContactAssessment(
+                    "CONTACT" if contact else "FREE", config.GRIP_CLOSED,
+                    observed, self.empty_closed_opening_px, residual,
+                    threshold,
+                    (f"jaw remained {residual:.1f}px wider than same-run empty "
+                     f"endpoint (threshold {threshold:.1f}px)"
+                     if contact else
+                     f"jaw returned to same-run empty endpoint "
+                     f"(residual {residual:.1f}px)"))
+        if (allow_single_red and self.empty_closed_red_x_px is not None
+                and red_positions):
+            from visual_contact import ContactAssessment
+            red_x = float(np.median(red_positions))
+            # Right finger displacement is half the symmetric jaw opening.
+            residual = 2.0 * (red_x - self.empty_closed_red_x_px)
+            threshold = max(
+                DYNAMIC_CONTACT_MIN_MARGIN_PX,
+                2.0 * DYNAMIC_CONTACT_MAD_MULTIPLIER
+                * float(self.empty_closed_red_x_mad_px or 0.0))
+            contact = residual > threshold
             return ContactAssessment(
                 "CONTACT" if contact else "FREE", config.GRIP_CLOSED,
-                observed, self.empty_closed_opening_px, residual,
-                DYNAMIC_CONTACT_MARGIN_PX,
-                (f"jaw remained {residual:.1f}px wider than same-run empty "
-                 f"endpoint (threshold {DYNAMIC_CONTACT_MARGIN_PX:.1f}px)"
-                 if contact else
-                 f"jaw returned to same-run empty endpoint "
-                 f"(residual {residual:.1f}px)"))
+                red_x, self.empty_closed_red_x_px, residual, threshold,
+                (f"right finger implies {residual:.1f}px symmetric opening "
+                 f"residual (threshold {threshold:.1f}px)"))
         from visual_contact import JawBaseline
         baseline = JawBaseline.load()
-        return baseline.assess(config.GRIP_CLOSED, observation)
+        valid = next(
+            (item for item in reversed(observations)
+             if item.gripper is not None), observations[-1])
+        return baseline.assess(config.GRIP_CLOSED, valid)
 
     @staticmethod
     def contact_retained(closed, lifted):
@@ -489,7 +762,7 @@ class FloorServo:
             return False
         if closed.residual_px is None or lifted.residual_px is None:
             return False
-        required = max(DYNAMIC_CONTACT_MARGIN_PX,
+        required = max(DYNAMIC_CONTACT_MIN_MARGIN_PX,
                        CONTACT_RETENTION_RATIO * closed.residual_px)
         return lifted.residual_px >= required
 
@@ -552,16 +825,32 @@ class FloorServo:
                 reach, f"contact baseline unavailable/inconsistent: {exc}")
         print(f"[servo] close contact={closed.state}: {closed.reason}")
         if not closed.contact:
-            return self._recover_open_hover(
-                reach, f"grasp not confirmed after close ({closed.state})")
+            if closed.state != "UNKNOWN":
+                return self._recover_open_hover(
+                    reach, f"grasp not confirmed after close ({closed.state})")
+            # At some wrist/shoulder combinations the closed tapes leave the
+            # bottom of the frame at z=6 mm.  Raise the still-closed jaw only
+            # far enough to restore sensor visibility, then apply the exact
+            # same-run empty-jaw test.  This is a verification probe, not an
+            # unverified transport: FREE/UNKNOWN immediately recovers open.
+            self.slow_move(self._reach_pose(
+                reach, CONTACT_PROBE_Z,
+                gripper=config.GRIP_CLOSED)[0])
+            try:
+                closed = self._contact_assessment(allow_single_red=True)
+            except Exception as exc:
+                return self._recover_open_hover(
+                    reach, f"probe contact check unavailable: {exc}")
+            print(f"[servo] probe-lift contact={closed.state}: {closed.reason}")
+            if not closed.contact:
+                return self._recover_open_hover(
+                    reach, "100mm verification probe found no retained object "
+                           f"({closed.state})")
 
-        if not self._authorize_macro(
-                TaskAction.LIFT,
-                self._reach_pose(
-                    reach, self.GRASP_Z, gripper=config.GRIP_CLOSED)[0],
-                target_visible=False):
-            return self._recover_open_hover(
-                reach, "trained policy did not authorize lift")
+        # DESCEND and CLOSE were both admitted by the trained temporal shield.
+        # From this point, the same-run physical obstruction is stronger
+        # evidence than the policy's orientation-specific static jaw profile;
+        # continue the already-started vertical verification lift.
 
         # Lift without ever opening. The previous code copied OBSERVATION_POSE,
         # whose gripper component is 90=open, and therefore dropped the object
@@ -569,17 +858,17 @@ class FloorServo:
         self.slow_move(self._reach_pose(
             reach, self.VERIFY_Z, gripper=config.GRIP_CLOSED)[0])
         try:
-            lifted = self._contact_assessment()
+            lifted = self._contact_assessment(allow_single_red=True)
         except Exception as exc:
             return self._recover_open_hover(
                 reach, f"post-lift contact check unavailable: {exc}")
         print(f"[servo] lifted contact={lifted.state}: {lifted.reason}")
         if not self.contact_retained(closed, lifted):
             return self._recover_open_hover(
-                reach, "object slipped or was not retained through 80mm lift "
+                reach, "object slipped or was not retained through 100mm lift "
                        f"(close residual={closed.residual_px}, "
                        f"lift residual={lifted.residual_px})")
-        print("[servo] GRASP CONFIRMED: obstruction retained through 80mm lift")
+        print("[servo] GRASP CONFIRMED: obstruction retained through 100mm lift")
         return True
 
 

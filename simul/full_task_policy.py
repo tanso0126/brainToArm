@@ -135,10 +135,18 @@ def shield_action(observation, proposed: TaskAction | int) -> TaskAction:
     servo = _decode_servo(values)
     elbow = int(round(float(servo[config.J_ELBOW])))
     elbow = int(np.clip(elbow, *config.FLOOR_ELBOW_RANGE))
-    hover_shoulder = floor_shoulder(elbow, "hover")
-    grasp_shoulder = floor_shoulder(elbow, "grasp")
-    at_grasp = abs(servo[config.J_SHOULDER] - grasp_shoulder) < \
-        abs(servo[config.J_SHOULDER] - hover_shoulder)
+    # Runtime vertical-pinch poses vary wrist pitch, so shoulder proximity to
+    # the legacy wp=180 floor curve can label a true 6 mm pose as hover. The
+    # analytic FK is regression-locked to this MuJoCo model and uses only the
+    # already-commanded real servo vector; classify the actual tool height.
+    try:
+        from arm_fk import tool_position
+        at_grasp = float(tool_position(servo)[2]) <= 0.025
+    except (ImportError, ValueError):
+        hover_shoulder = floor_shoulder(elbow, "hover")
+        grasp_shoulder = floor_shoulder(elbow, "grasp")
+        at_grasp = abs(servo[config.J_SHOULDER] - grasp_shoulder) < \
+            abs(servo[config.J_SHOULDER] - hover_shoulder)
     gripper_command_open = servo[config.J_GRIP] < (
         config.GRIP_OPEN + config.GRIP_CLOSED) / 2.0
 

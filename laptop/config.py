@@ -123,6 +123,7 @@ FLOOR_SHOULDER_PER_ELBOW = -6.0 / 11.0
 FLOOR_ELBOW_RANGE = (78, 110)
 FLOOR_VECTOR_STEP_DEG = 4
 ARM_SESSION_SOCKET = "data/runtime/arm_session.sock"
+WRIST_CAMERA_MAX_FRAME_AGE_S = 1.0  # autonomous motion requires a live publisher
 GRIP_FEEDBACK_ENABLED = False  # requires an FSR/current-sensor signal on Uno A0
 GRIP_FEEDBACK_DELTA = 80       # ADC counts above the open-gripper baseline
 
@@ -332,7 +333,7 @@ WRIST_MARKER_MIN_SEPARATION_RATIO = 0.05
 WRIST_MARKER_MAX_SEPARATION_RATIO = 0.24
 WRIST_MARKER_MIN_FILL_RATIO = 0.38
 WRIST_MARKER_MAX_ASPECT = 3.0
-WRIST_MARKER_MAX_PAIR_AREA_RATIO = 2.4
+WRIST_MARKER_MAX_PAIR_AREA_RATIO = 4.0
 WRIST_MARKER_MIN_WIDTH_RATIO = 0.012
 WRIST_MARKER_MAX_WIDTH_RATIO = 0.16
 WRIST_MARKER_MIN_HEIGHT_RATIO = 0.025
@@ -351,7 +352,7 @@ WRIST_GRIPPER_OPEN_PROFILE = {
     "red_area_ratio": 0.00368,
 }
 WRIST_GRIPPER_CENTER_TOLERANCE = (0.08, 0.06)
-WRIST_MARKER_PROFILE_AREA_FACTOR_RANGE = (0.42, 2.2)
+WRIST_MARKER_PROFILE_AREA_FACTOR_RANGE = (0.20, 2.8)
 WRIST_LATEST_PREVIEW_INTERVAL_S = 0.5
 
 # Default target mode finds a compact, saturated object but explicitly removes
@@ -404,7 +405,7 @@ WRIST_SEARCH_KINEMATICS_VERIFIED = False
 # pixel size is assumed; the same code runs whatever the venue objects are.
 FLOOR_CAND_MIN_AREA_RATIO = 0.0008   # ignore specks / segmentation dust
 FLOOR_CAND_MAX_AREA_RATIO = 0.35     # near-field objects may fill much of the view
-FLOOR_CAND_MAX_ASPECT = 6.0          # reject long thin edges/shadows
+FLOOR_CAND_MAX_ASPECT = 10.0         # admit stick-like tools; cables remain thinner
 FLOOR_CAND_MARKER_IOU = 0.12         # drop a candidate overlapping a finger tape
 FLOOR_CAND_BORDER_MARGIN_PX = 2      # frame-touching blobs are usually floor/arm
 # Rejection is by IMAGE POSITION, not by a per-frame segment id: FastSAM

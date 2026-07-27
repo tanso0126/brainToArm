@@ -144,6 +144,7 @@ def _park_at_observation_pose():
     client = ArmSessionClient()
     print(f"[floor-cal] parking at observation pose {OBSERVATION_POSE}")
     client.request({"command": "move", "pose": OBSERVATION_POSE,
+                    "require_camera": True,
                     "settle_s": config.FLOOR_SETTLE_S})
     return client
 

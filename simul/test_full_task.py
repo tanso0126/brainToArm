@@ -91,6 +91,23 @@ class FullTaskTests(unittest.TestCase):
         self.assertEqual(first.action, TaskAction.WAIT)
         self.assertEqual(second.action, TaskAction.CLOSE)
 
+        markerless_scene = SimpleNamespace(
+            gripper=None, frame_shape=(720, 1280, 3), ranked=[])
+
+        # Real fixed-reach poses use wrist pitch !=180; shoulder 130 looks
+        # closer to the legacy hover curve but the current FK puts the tool at
+        # ~6 mm and must therefore authorize the same guarded close.
+        real_grasp_pose = [90, 130, 90, 156, config.GRIP_OPEN, 170]
+        controller.reset()
+        first = controller.decide(
+            markerless_scene, wrist, real_grasp_pose,
+            target=None, target_locked=True)
+        second = controller.decide(
+            markerless_scene, wrist, real_grasp_pose,
+            target=None, target_locked=True)
+        self.assertEqual(first.action, TaskAction.WAIT)
+        self.assertEqual(second.action, TaskAction.CLOSE)
+
         controller.reset()
         blocked = controller.decide(
             scene, wrist, pose, target=None, target_locked=False)
@@ -99,8 +116,6 @@ class FullTaskTests(unittest.TestCase):
         # At the final open grasp pose the object can cover one tape as well as
         # its own mask. The pre-descent lock permits close, but only contact
         # verification (which requires both markers) may subsequently lift.
-        markerless_scene = SimpleNamespace(
-            gripper=None, frame_shape=(720, 1280, 3), ranked=[])
         controller.reset()
         first = controller.decide(
             markerless_scene, wrist, pose, target=None, target_locked=True)

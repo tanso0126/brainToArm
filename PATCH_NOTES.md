@@ -1949,3 +1949,85 @@ prove a real lift without a supplied reach or target coordinate.
 - `python3 -m unittest simul.test_full_task simul.test_mujoco_robot -v` passes.
 - `PYTHONPATH=laptop python3 laptop/test_pipeline.py` passes, including
   jaw-corridor selection and slipped-object retention rejection.
+
+## Patch 51 — collision-interlocked look/reach and table-touch calibration
+
+### Intent
+
+Finish the interrupted post-patch-50 physical-controller work without opening
+the serial port or camera device. The table/camera setup has moved, so the old
+pixel-to-floor homography is stale. Replace blind dependence on that mapping
+with a repeat-confirmed table-height measurement and a closed-loop eye-in-hand
+look/reach path, while enforcing collision and live-camera checks at the one
+persistent arm-command owner.
+
+### Changes
+
+- Added `laptop/arm_safety.py`, an authoritative swept-trajectory interlock
+  using the calibrated six-joint FK, conservative base/mast/link/hand/camera
+  envelopes, table clearance, and non-adjacent self-collision checks.
+- Extended `arm_fk.py` to model base yaw and expose all joint, tool, and mounted
+  camera centres. `arm_session.py` now rejects unsafe motion before serial
+  transmission, provides a read-only `check` command, and can require a fresh
+  daemon-published wrist frame for every autonomous waypoint.
+- Routed floor calibration, teaching, selection, and servo moves through the
+  fresh-frame requirement. Production wrist search now uses the same physical
+  safety model; its former synthetic planar model remains only for isolated
+  regression tests.
+- Added `laptop/table_touch_calibrate.py`. It builds a fixed-pitch 2 mm nominal
+  descent, removes backlash consistently, measures table-background optical
+  flow, repeats a suspected flow plateau without driving deeper, saves the
+  confirmed FK table z to ignored local calibration data, and retreats to a
+  clear pose even if perception fails. The initial 280 mm WIP plan intersected
+  the conservative base envelope; the finished default is a collision-checked
+  300 mm line with a -2 mm lower bound.
+- Added `laptop/look_reach.py`. Its general mode locks one portable target,
+  separates motor-4 LOOK rotation from real shoulder/elbow REACH translation,
+  replans in bounded 3-degree steps, requires target continuity/growth, and
+  refuses blind motion. Its vector mode performs the fixed-tool-x coordinated
+  descent, same-orientation empty-jaw calibration, close, 100 mm lift, and
+  retained-obstruction verification. Physical execution remains gated by
+  `--run`; vector execution now requires and consumes the repeat-confirmed
+  `table_touch.json` z offset.
+- Hardened `floor_servo.py` with strictly fresh frames, confidence gates,
+  low-light linear normalization, a measured bounded base-yaw centring loop,
+  multi-frame/single-red same-run contact evidence, and a 100 mm retention
+  probe. The runtime policy shield now classifies low wrist-pitch poses by FK
+  tool height rather than the legacy wrist-180 floor curve.
+- Added focused safety, look/reach, and table-touch regression suites. No
+  physical command, serial open, camera-device open, or training run occurred
+  while completing this patch.
+
+### Entry points
+
+```bash
+# Read-only collision report through the running arm daemon.
+PYTHONPATH=laptop python3 laptop/arm_session.py check 90 124 90 180 90 170
+
+# Hardware-free table-touch plan; add --run only for the operator-gated trial.
+PYTHONPATH=laptop python3 laptop/table_touch_calibrate.py
+PYTHONPATH=laptop python3 laptop/table_touch_calibrate.py --run --x-mm 300
+
+# One-step look/reach plan; --run permits motion, --grasp permits final close.
+PYTHONPATH=laptop python3 laptop/look_reach.py
+PYTHONPATH=laptop python3 laptop/look_reach.py --run
+PYTHONPATH=laptop python3 laptop/look_reach.py --run --grasp
+
+# Calibrated fixed-vector close/lift proof. Requires table_touch.json.
+PYTHONPATH=laptop python3 laptop/look_reach.py --run --vector-grasp
+```
+
+### Verification
+
+- `PYTHONPATH=laptop python3 laptop/test_pipeline.py`: passes.
+- `python3 laptop/test_arm_safety.py`: 6/6 pass.
+- `python3 laptop/test_look_reach.py`: 9/9 pass.
+- `python3 laptop/test_table_touch.py`: 4/4 pass.
+- `python3 -m unittest simul.test_full_task`: 5/5 pass.
+- The requested combined
+  `python3 -m unittest simul.test_full_task simul.test_mujoco_robot` runs 11
+  non-render tests successfully here; the two existing renderer tests cannot
+  create a MuJoCo CGL context in the headless Codex process
+  (`CGLError: invalid CoreGraphics connection`). This is an execution-environment
+  limitation, not a changed assertion. No simulation or training pipeline was
+  run beyond these regression tests.
