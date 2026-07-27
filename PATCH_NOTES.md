@@ -1562,6 +1562,31 @@ the brain signal will not touch the arm logic.
 - Physically NOT yet verified: wrist-camera floor grasp (alignment sign, descend,
   close, contact, lift). This remains gated behind `FLOOR_GRASP_EXECUTE_VERIFIED`.
 
+## Patch 42 — physical-shape MuJoCo robot and wrist camera
+
+- Added `simul/mujoco_robot.py`, an Apple-Silicon/headless MuJoCo assembly that
+  uses the supplied STL parts as non-colliding visual geometry and explicit
+  capsules/boxes plus named joint frames for stable physics. It never opens a
+  serial port or camera device.
+- Kept the exact real six-command convention at the public boundary. Motor 1
+  has no simulated joint and commands other than the locked 90 degrees are
+  rejected. Shoulder, elbow, wrist, gripper, and roll commands are checked
+  against the repository's actual servo limits; 90 opens and 180 closes the
+  symmetric simulated jaws.
+- Added a nonlinear linkage mapping whose local floor portion reproduces both
+  measured reference poses and the `-6/11` simultaneous shoulder/elbow curve.
+  The model puts the tool center at about 41 mm for hover and 8 mm for grasp;
+  across elbow 78..110 each level stays within 2.5 mm while translating forward
+  by more than 15 mm.
+- Mounted a single RGB camera above and aimed through the jaws. Its 16:9 frame
+  contains the gripper, object, blue-left/red-right tape convention, and no
+  simulator-only sites, object pose, depth, or segmentation layer.
+- Added `smoke_mujoco.py` and `test_mujoco_robot.py`. They validate the locked
+  base, servo bounds, gripper direction, floor geometry, marker order, object
+  visibility, actuator count, and headless rendering. The generated contact
+  sheet is ignored and therefore cannot pollute source control or training
+  reproducibility.
+
 ## Patch 42 — hardware-measured floor Jacobian and corrected depth alignment
 
 ### Intent

@@ -41,3 +41,34 @@ by rewards or a teacher, but must never enter the deployed actor observation.
 Motor 1 is locked at 90 degrees for the current planar task. The remaining
 servo commands use the same minima/maxima, 90/180 gripper convention, 170-degree
 level wrist roll, and floor reference poses as the real controller.
+
+## MuJoCo robot model
+
+`mujoco_robot.py` builds the assembled kinematic model. It does not guess joint
+pivots from the print-bed layout: named STL parts are non-colliding visuals,
+while capsules and boxes define stable collision geometry. Its public control
+boundary is always the physical six-value servo vector. There is no base joint,
+so a policy cannot accidentally learn a motion that failed motor 1 cannot make.
+
+The shoulder mapping is intentionally piecewise because the printed linkage is
+not a direct one-degree servo-to-joint mechanism. The near-floor portion is fit
+to both physically reproduced levels and the measured `-6/11` shoulder/elbow
+vector. Across elbow 78..110 degrees, each curve varies by under 2.5 mm in
+height while translating the tool by over 15 mm. This is a calibrated local
+model, not a claim that every unmeasured joint pose is already exact.
+
+The gripper camera renders only RGB. At the 170-degree level wrist it reproduces
+the physical tape convention (blue left, red right), includes both fingers and
+the space between them, and never renders simulator sites, depth, masks, or
+object coordinates into the actor input.
+
+Run the headless visual and numeric checks without opening the webcam or Uno:
+
+```bash
+python3 simul/smoke_mujoco.py
+python3 simul/test_mujoco_robot.py
+```
+
+The smoke sheet is written to ignored
+`simul/generated/mujoco_smoke.png`. Expected tool-center heights are about 41 mm
+at the hover reference and 8 mm at the grasp reference.
