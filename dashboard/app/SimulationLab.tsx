@@ -103,9 +103,9 @@ type ObjectDraft = {
 
 const PHASE_COPY: Record<string, { title: string; detail: string }> = {
   idle: { title: "준비됨", detail: "물체와 목표 트레이를 배치한 뒤 자동 실행하세요." },
-  scanning: { title: "3D 탐색", detail: "1번 축과 손목 RGB 카메라로 작업영역을 훑고 있습니다." },
+  scanning: { title: "3D 탐색", detail: "1번 축은 90°에 고정하고 2·3·4번과 손목 RGB 카메라로 전후 작업영역을 훑습니다." },
   target: { title: "후보 제시 · ErrP", detail: "카메라로 찾은 후보에 대한 오류 반응을 확인합니다." },
-  reaching: { title: "접근 중", detail: "실제 관절 제한 안에서 목표의 반경과 방향으로 이동합니다." },
+  reaching: { title: "접근 중", detail: "고정된 단일 시상면과 실제 관절 제한 안에서 목표 깊이로 이동합니다." },
   grasping: { title: "물리 파지", detail: "MuJoCo 접촉으로 닫고 실제 물체 상승을 검증합니다." },
   transporting: { title: "운반 중", detail: "물체를 든 상태로 목표 트레이에 이동합니다." },
   evaluating: { title: "배송 확인 · ErrP", detail: "놓은 뒤에도 거부 신호를 받을 수 있습니다." },
@@ -116,7 +116,7 @@ const PHASE_COPY: Record<string, { title: string; detail: string }> = {
   error: { title: "엔진 오류", detail: "실행 기록의 원인을 확인하세요." },
 };
 
-const JOINT_LABELS = ["1 Base yaw", "2 Shoulder", "3 Elbow", "4 Wrist pitch", "5 Gripper", "6 Wrist roll"];
+const JOINT_LABELS = ["1 Base · FIXED", "2 Shoulder", "3 Elbow", "4 Wrist pitch", "5 Gripper", "6 Wrist roll"];
 
 function polar(x: number, y: number) {
   return {
@@ -164,27 +164,22 @@ function PlacementMap({
   const ref = useRef<SVGSVGElement>(null);
   const dragging = useRef(false);
   const radiusRange = status.workspace.radiusMm;
-  const yawRange = status.workspace.yawDeg;
-
   const pointFor = useCallback((xMm: number, yMm: number) => {
-    const { radiusMm, yawDeg } = polar(xMm, yMm);
-    const angleT = (yawDeg - yawRange[0]) / (yawRange[1] - yawRange[0]);
+    const { radiusMm } = polar(xMm, yMm);
     const radiusT = (radiusMm - radiusRange[0]) / (radiusRange[1] - radiusRange[0]);
     return {
-      x: 26 + angleT * 248,
-      y: 92 - radiusT * 58,
+      x: 34 + radiusT * 232,
+      y: 61,
     };
-  }, [radiusRange, yawRange]);
+  }, [radiusRange]);
 
-  const placeAt = useCallback((clientX: number, clientY: number) => {
+  const placeAt = useCallback((clientX: number) => {
     if (!selectedId || disabled || !ref.current) return;
     const bounds = ref.current.getBoundingClientRect();
-    const x = Math.max(26, Math.min(274, (clientX - bounds.left) / bounds.width * 300));
-    const y = Math.max(34, Math.min(92, (clientY - bounds.top) / bounds.height * 126));
-    const yawDeg = yawRange[0] + (x - 26) / 248 * (yawRange[1] - yawRange[0]);
-    const radiusMm = radiusRange[0] + (92 - y) / 58 * (radiusRange[1] - radiusRange[0]);
-    onPlace(selectedId, radiusMm, yawDeg);
-  }, [disabled, onPlace, radiusRange, selectedId, yawRange]);
+    const x = Math.max(34, Math.min(266, (clientX - bounds.left) / bounds.width * 300));
+    const radiusMm = radiusRange[0] + (x - 34) / 232 * (radiusRange[1] - radiusRange[0]);
+    onPlace(selectedId, radiusMm, 0);
+  }, [disabled, onPlace, radiusRange, selectedId]);
 
   return (
     <svg
@@ -197,10 +192,10 @@ function PlacementMap({
         if (!selectedId || disabled) return;
         dragging.current = true;
         event.currentTarget.setPointerCapture(event.pointerId);
-        placeAt(event.clientX, event.clientY);
+        placeAt(event.clientX);
       }}
       onPointerMove={(event) => {
-        if (dragging.current) placeAt(event.clientX, event.clientY);
+        if (dragging.current) placeAt(event.clientX);
       }}
       onPointerUp={(event) => {
         dragging.current = false;
@@ -210,11 +205,11 @@ function PlacementMap({
       }}
     >
       <title>MuJoCo 3D 작업영역 배치 도구</title>
-      <path d="M26 92 Q150 8 274 92" className="workspace-band outer" />
-      <path d="M26 92 Q150 42 274 92" className="workspace-band inner" />
-      <path d="M150 105 L150 18" className="workspace-center" />
-      <circle cx="150" cy="112" r="8" className="workspace-base" />
-      <text x="150" y="124" textAnchor="middle">로봇 기준 · 반경 387–414 mm · yaw ±38°</text>
+      <path d="M30 48 H270 V74 H30 Z" className="workspace-band outer" />
+      <path d="M34 55 H266 V67 H34 Z" className="workspace-band inner" />
+      <path d="M18 61 H282" className="workspace-center" />
+      <circle cx="15" cy="61" r="8" className="workspace-base" />
+      <text x="150" y="105" textAnchor="middle">servo1 90° 고정 · 전후 {radiusRange[0].toFixed(0)}–{radiusRange[1].toFixed(0)} mm 단일 시상면</text>
       {status.objects.map((item) => {
         const point = pointFor(item.xMm, item.yMm);
         return (
@@ -501,7 +496,7 @@ export default function SimulationLab({
         <div><span>현재 단계</span><strong>{phase.title}</strong><small>{phase.detail}</small></div>
         <div><span>선택 후보</span><strong>{active?.label ?? "—"}</strong><small>{active ? `wrist RGB · ${status.detector.pixelCount} px` : "카메라 탐색 대기"}</small></div>
         <div><span>물리 엔진</span><strong>{status.engine} contact</strong><small>물체 상승·손끝 추종으로 파지 검증</small></div>
-        <div><span>실험 사이클</span><strong>#{status.cycle}</strong><small>최종 목표 구성 · servo1 yaw 활성</small></div>
+        <div><span>실험 사이클</span><strong>#{status.cycle}</strong><small>실물 동일 · servo1 90° 고정</small></div>
       </div>
 
       <div className="sim-layout sim-3d-layout">
@@ -573,7 +568,7 @@ export default function SimulationLab({
               onPlace={place}
               disabled={status.running || busy}
             />
-            <p className="sim-note">점 또는 파란 목표 트레이를 선택한 뒤 드래그하세요. 반경·yaw는 실제 로봇의 도달 가능 영역으로 강제됩니다.</p>
+            <p className="sim-note">점 또는 파란 목표 트레이를 선택한 뒤 좌우로 드래그하세요. 1번 모터가 고정되어 모든 배치는 실제와 같은 단일 전후 작업선으로 강제됩니다.</p>
           </article>
         </div>
 
@@ -626,7 +621,7 @@ export default function SimulationLab({
                 <label>색상<input type="color" value={draft.color} disabled={status.running} onChange={(event) => setDraft({ ...draft, color: event.target.value })} /></label>
                 <label>크기 <b>{draft.sizeMm.toFixed(1)} mm</b><input type="range" min="4.5" max="8" step=".5" value={draft.sizeMm} disabled={status.running} onChange={(event) => setDraft({ ...draft, sizeMm: Number(event.target.value) })} /></label>
                 <label>반경 <b>{draft.radiusMm.toFixed(1)} mm</b><input type="range" min={status.workspace.radiusMm[0]} max={status.workspace.radiusMm[1]} step=".5" value={draft.radiusMm} disabled={status.running} onChange={(event) => setDraft({ ...draft, radiusMm: Number(event.target.value) })} /></label>
-                <label>방향 <b>{draft.yawDeg.toFixed(1)}°</b><input type="range" min={status.workspace.yawDeg[0]} max={status.workspace.yawDeg[1]} step="1" value={draft.yawDeg} disabled={status.running} onChange={(event) => setDraft({ ...draft, yawDeg: Number(event.target.value) })} /></label>
+                <label>1번 축 <b>90° 고정</b><input type="range" min="90" max="90" value="90" disabled aria-label="1번 베이스 축 고정값" readOnly /></label>
                 <div>
                   <button className="sim-save-button" onClick={saveDraft} disabled={status.running || busy}><Save size={13} />3D 장면 반영</button>
                   <button className="sim-delete-button" onClick={() => void perform("/api/simulation/objects/delete", { id: selected.id })} disabled={status.running || busy}><Trash2 size={13} />삭제</button>

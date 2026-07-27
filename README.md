@@ -36,11 +36,12 @@ precise steps to bring it up. No other context is required.
 > Full evidence, commands, and the corrected earlier findings are recorded in
 > [`docs/EEG_DEVICE_COMMS.md`](docs/EEG_DEVICE_COMMS.md).
 
-> ### ✅ Base rotation restored; calibrated planar pick remains available
+> ### ⚠️ Current base rotation locked; calibrated planar pick remains available
 >
-> Servo1 base yaw is operational again and manual jog/3-D control may command
-> it through 0–180°. The previously verified side-camera controller remains a
-> deliberately fixed-plane mode: it locks servo1 at 90°,
+> Servo1 was restored during an earlier session but is currently treated as
+> non-responsive again. The active real and simulated task modes lock it at
+> 90°. The previously verified side-camera controller remains a
+> deliberately fixed-plane mode:
 > re-detects the object before every attempt, corrects
 > shoulder/elbow in image pixels, rotates wrist pitch to 180° and the physically
 > level wrist roll to 170°, opens the
@@ -146,12 +147,11 @@ precise steps to bring it up. No other context is required.
 > and physical lift/follow verification.
 >
 > The compact top-down widget is only a scene-authoring control. It edits object
-> shape, color, size, radius, yaw, and tray placement inside the reachable
-> annulus; it is not used as a control observation or success signal. The studio
-> adds servo-1 yaw for the final repaired-arm target configuration so objects can
-> be physically separated. The promoted policy/evaluation model remains fixed
-> base and unchanged. The real servo 1 was last observed non-responsive, so yaw
-> behavior is a simulation target until that hardware is repaired again.
+> shape, color, size, and front/back placement on the calibrated 387–414 mm
+> line; it is not used as a control observation or success signal. The studio
+> has no servo-1 joint or actuator, exposes the same six controls as the original
+> fixed-base model, and forces command 1 to 90°. Thus the 3D scene now shares
+> the real arm's current inability to turn left or right.
 >
 > A rejection may arrive before grasp, while carrying, after tray drop, or after
 > completion. A late rejection causes a real simulated re-grasp, lift, return,

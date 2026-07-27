@@ -60,13 +60,13 @@ fixed-base evaluation remain unchanged. `studio.py` builds a separate runtime
 MJCF from it and adds:
 
 - editable box/cylinder/sphere free bodies;
-- a low physical destination tray;
-- a seventh MuJoCo actuator representing servo-1 yaw;
-- a target workspace annulus: radius 387–414 mm, yaw -38° to +38°.
+- a nearly floor-flush physical destination tray;
+- the same six MuJoCo controls as the fixed-base robot;
+- a single sagittal workspace line: depth 387–414 mm, lateral position 0.
 
-This yaw actuator is the **final repaired-arm target configuration**. The real
-servo 1 was last observed mechanically/electrically non-responsive. The 3D demo
-must not be presented as proof that current hardware yaw works.
+Servo 1 has no MuJoCo joint or actuator. Every pose forcibly reports and
+commands 90°, matching the currently non-responsive real base motor. Search
+uses only coordinated servo 2/3/4 movement.
 
 ## 4. What the screen means
 
@@ -91,9 +91,9 @@ engine, origin bookkeeping, delivery planning, and success verification.
 ### Scene placement map
 
 The small top-down SVG is only an authoring tool. Select a point or the blue
-tray and drag it; the backend projects the request into the reachable
-radius/yaw limits and rebuilds the paused MuJoCo scene. It is deliberately not
-used for robot perception or task success.
+tray and drag it left/right; the backend projects the request onto the reachable
+fixed-base depth interval and rebuilds the paused MuJoCo scene. It is
+deliberately not used for robot perception or task success.
 
 ### Success
 
@@ -134,8 +134,8 @@ Editing is disabled while the physics task is running.
 
 - Add: sphere, box, cylinder
 - Edit: name, shape, RGB color, half-size 4.5–8.0 mm
-- Place: radius 387–414 mm, yaw -38° to +38°
-- Move tray: same bounded annulus
+- Place: depth 387–414 mm on the fixed y=0 line
+- Move tray: the same bounded line
 - Delete: selected table object
 - Reset: return every object to its authored origin and clear task memory
 
@@ -200,7 +200,7 @@ python3 -m py_compile simul/studio.py laptop/eeg_dashboard.py
 The studio regression suite covers:
 
 - original STL arm plus overview/wrist JPEG rendering;
-- servo-1 target yaw actuator and seven MuJoCo controls;
+- absent servo-1 yaw joint, six MuJoCo controls, and an invariant 90° base command;
 - scene edit clamping;
 - physical delivery;
 - rejection after completion;
@@ -211,8 +211,10 @@ The studio regression suite covers:
 
 - This is now a real MuJoCo rigid-body/contact studio, not the removed 2D mock.
 - Its success is simulation evidence, not a real-arm success rate.
-- The final multi-object task assumes servo 1 is repaired. Current real servo 1
-  must be fixed and recalibrated before this yaw policy transfers.
+- The current demo intentionally cannot yaw. Multiple objects and the tray must
+  share the narrow calibrated front/back lane, just as on the current real arm.
+- Restoring servo 1 later requires a separate calibration and patch; simulation
+  will not silently enable it ahead of the hardware.
 - RGB candidate gating is exercised, but the complete autonomous transport
   planner still uses known authored origin/tray coordinates. That task metadata
   is not claimed to be inferred from monocular RGB.

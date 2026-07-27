@@ -53,12 +53,12 @@ except ImportError:
     from laptop.floor_motion import floor_pose
 
 
-MAX_OBJECTS = 7
+MAX_OBJECTS = 2
 WORKSPACE_RADIUS = (0.387, 0.414)
-WORKSPACE_YAW_DEG = (-38.0, 38.0)
-DEFAULT_BASKET = (0.3215, -0.2251)
+WORKSPACE_YAW_DEG = (0.0, 0.0)
+DEFAULT_BASKET = (0.396, 0.0)
 DEFAULT_COLORS = ("#ffb000", "#376dfa", "#19a05b", "#a839fd", "#f04f65")
-SCAN_ROUTE = ((55, 92), (72, 92), (90, 92), (108, 92), (125, 92))
+SCAN_ROUTE = ((90, 110), (90, 102), (90, 94), (90, 86), (90, 78))
 MOTION_SERVO_STEP_DEG = 2.0
 MIN_SAFE_TOOL_X_M = 0.175
 MIN_AIR_TOOL_Z_M = 0.017
@@ -150,34 +150,22 @@ def build_studio_mjcf(
     base = world.find("./body[@name='base']")
     if base is None:
         raise RuntimeError("MuJoCo base body가 없습니다")
-    ET.SubElement(
-        base, "joint", name="studio_base_yaw", type="hinge",
-        axis="0 0 1", range="-90 90", damping="2.4", armature="0.02",
-    )
-    actuator = root.find("actuator")
-    if actuator is None:
-        raise RuntimeError("MuJoCo actuator가 없습니다")
-    ET.SubElement(
-        actuator, "position", name="studio_base_yaw_position",
-        joint="studio_base_yaw", kp="190", kv="16",
-        ctrllimited="true", ctrlrange="-1.570796 1.570796",
-    )
-
-    # A shallow tray is visible and physical, but its 3 mm lip remains below
-    # the jaw row so a rejected delivery can be picked back up.
+    # The real task has no depth sensor and must be able to retrieve a late
+    # rejection. Keep the tray physical but nearly flush with the shared floor
+    # so the same calibrated grasp height remains valid.
     tray = ET.SubElement(
         world, "body", name="basket",
         pos=f"{basket_x:.6f} {basket_y:.6f} 0")
     ET.SubElement(
         tray, "geom", name="basket_floor", type="box",
-        pos="0 0 0.0015", size="0.006 0.025 0.0015",
+        pos="0 0 0.00025", size="0.006 0.025 0.00025",
         rgba="0.12 0.34 0.96 0.34", contype="1", conaffinity="2",
         friction="1.0 0.01 0.001",
     )
     for name, y in (("basket_left", -0.0265), ("basket_right", 0.0265)):
         ET.SubElement(
             tray, "geom", name=name, type="box",
-            pos=f"0 {y:.6f} 0.003", size="0.006 0.0015 0.003",
+            pos=f"0 {y:.6f} 0.0005", size="0.006 0.0015 0.0005",
             rgba="0.12 0.34 0.96 0.72", contype="1", conaffinity="2",
         )
 
@@ -208,14 +196,11 @@ class MuJoCoStudio:
         self._spec = RobotSpec.from_manifest()
         self._objects = [
             SceneObject(
-                "object-1", "노란 원통", "cylinder", "#ffb000", 0.0060,
-                0.3823, 0.1392, 0.3823, 0.1392),
+                "object-1", "노란 원통", "cylinder", "#ffb000", 0.0045,
+                0.3870, 0.0000, 0.3870, 0.0000),
             SceneObject(
-                "object-2", "파란 블록", "box", "#376dfa", 0.0060,
-                0.4045, 0.0000, 0.4045, 0.0000),
-            SceneObject(
-                "object-3", "초록 공", "sphere", "#19a05b", 0.0055,
-                0.3773, -0.1373, 0.3773, -0.1373),
+                "object-2", "초록 블록", "box", "#19a05b", 0.0045,
+                0.4140, 0.0000, 0.4140, 0.0000),
         ]
         self._basket_x, self._basket_y = DEFAULT_BASKET
         self._rejected: list[str] = []
@@ -296,9 +281,8 @@ class MuJoCoStudio:
 
     def _targets(self, pose: Iterable[float]):
         servo = self._validate_pose(pose)
-        planar = servo.copy()
-        planar[0] = self._spec.base_locked_deg
-        return servo, servo_to_joint_targets(planar, self._spec)
+        servo[0] = self._spec.base_locked_deg
+        return servo, servo_to_joint_targets(servo, self._spec)
 
     def _set_pose_static(self, pose: Iterable[float]):
         servo, targets = self._targets(pose)
@@ -306,25 +290,18 @@ class MuJoCoStudio:
             joint = mujoco.mj_name2id(
                 self._model, mujoco.mjtObj.mjOBJ_JOINT, name)
             self._data.qpos[int(self._model.jnt_qposadr[joint])] = value
-        yaw_joint = mujoco.mj_name2id(
-            self._model, mujoco.mjtObj.mjOBJ_JOINT, "studio_base_yaw")
-        yaw = math.radians(servo[0] - self._spec.base_locked_deg)
-        self._data.qpos[int(self._model.jnt_qposadr[yaw_joint])] = yaw
         self._data.qvel[:] = 0
         self._data.ctrl[:] = (
             targets["shoulder"], targets["elbow"], targets["wrist_pitch"],
             targets["wrist_roll"], targets["grip_left"], targets["grip_right"],
-            yaw,
         )
         mujoco.mj_forward(self._model, self._data)
 
     def _command_pose(self, pose: Iterable[float]) -> np.ndarray:
         servo, targets = self._targets(pose)
-        yaw = math.radians(servo[0] - self._spec.base_locked_deg)
         self._data.ctrl[:] = (
             targets["shoulder"], targets["elbow"], targets["wrist_pitch"],
             targets["wrist_roll"], targets["grip_left"], targets["grip_right"],
-            yaw,
         )
         return servo
 
@@ -341,15 +318,14 @@ class MuJoCoStudio:
     def _floor_pose_world(
         self, x: float, y: float, level: str, gripper: int,
     ) -> list[int]:
-        radius = math.hypot(x, y)
+        if abs(y) > 0.008:
+            raise ValueError("고정된 1번 축의 단일 시상면 작업영역 밖에 있습니다")
+        radius = x
         elbow = min(
             self._floor_x_by_elbow,
             key=lambda value: abs(self._floor_x_by_elbow[value] - radius))
-        yaw = math.degrees(math.atan2(y, x))
-        if not WORKSPACE_YAW_DEG[0] <= yaw <= WORKSPACE_YAW_DEG[1]:
-            raise ValueError("목표가 허용된 base yaw 작업영역 밖에 있습니다")
         pose = floor_pose(elbow, level, gripper=gripper)
-        pose[0] = int(round(self._spec.base_locked_deg + yaw))
+        pose[0] = int(round(self._spec.base_locked_deg))
         return pose
 
     def _step_seconds(self, seconds: float, *, real_time_scale: float = 0.48):
@@ -365,7 +341,9 @@ class MuJoCoStudio:
 
     def _drive(self, target: Iterable[float], seconds: float, *, floor=False):
         target = self._validate_pose(target)
+        target[0] = self._spec.base_locked_deg
         start = self._pose.copy()
+        start[0] = self._spec.base_locked_deg
         segments = max(
             1, int(math.ceil(float(np.max(np.abs(target - start)))
                              / MOTION_SERVO_STEP_DEG)))
@@ -546,8 +524,11 @@ class MuJoCoStudio:
         self._add_event(f"{item.label}: 거부 기억에 추가", "error")
 
     def _pick(self, item: SceneObject, *, from_basket=False) -> bool:
-        x = self._basket_x if from_basket else item.x
-        y = self._basket_y if from_basket else item.y
+        if from_basket:
+            position = self._object_position(item.id)
+            x, y = float(position[0]), float(position[1])
+        else:
+            x, y = item.x, item.y
         self._phase = "reaching"
         if not self._drive(
                 self._floor_pose_world(
@@ -585,27 +566,16 @@ class MuJoCoStudio:
                     x, y, "hover", config.GRIP_OPEN), 0.45)
             return False
         item.status = "held"
-        yaw = math.radians(float(self._pose[0]) - self._spec.base_locked_deg)
-        rotation_world_to_local = np.asarray((
-            (math.cos(yaw), math.sin(yaw)),
-            (-math.sin(yaw), math.cos(yaw)),
-        ))
-        self._held_offsets_local[item.id] = (
-            rotation_world_to_local @ (after[:2] - tool[:2]))
+        self._held_offsets_local[item.id] = after[:2] - tool[:2]
         self._add_event(f"{item.label}: 물리 파지·들림 검증", "success")
         return True
 
     def _place(
         self, item: SceneObject, x: float, y: float, *, returning=False,
     ) -> bool:
-        yaw = math.atan2(y, x)
-        rotation_local_to_world = np.asarray((
-            (math.cos(yaw), -math.sin(yaw)),
-            (math.sin(yaw), math.cos(yaw)),
-        ))
         local_offset = self._held_offsets_local.get(
             item.id, np.zeros(2, dtype=np.float64))
-        tool_goal = np.asarray((x, y)) - rotation_local_to_world @ local_offset
+        tool_goal = np.asarray((x, 0.0)) - local_offset
         tool_x, tool_y = float(tool_goal[0]), float(tool_goal[1])
         self._phase = "returning" if returning else "transporting"
         if not self._drive(
@@ -769,6 +739,10 @@ class MuJoCoStudio:
                     try:
                         if self._return_item(target):
                             self._run()
+                        else:
+                            with self._lock:
+                                self._running = False
+                                self._phase = "paused"
                     except Exception as exc:
                         with self._lock:
                             self._running = False
@@ -819,9 +793,8 @@ class MuJoCoStudio:
             index = len(self._objects)
             color = color or DEFAULT_COLORS[index % len(DEFAULT_COLORS)]
             _hex_rgb(color)
-            radius = 0.402
-            yaw = math.radians(-30 + (index % 5) * 15)
-            x, y = radius * math.cos(yaw), radius * math.sin(yaw)
+            x = 0.387 if index == 0 else 0.414
+            y = 0.0
             item = SceneObject(
                 f"object-{uuid.uuid4().hex[:8]}",
                 str(label or f"물체 {index + 1}")[:32],
@@ -855,14 +828,9 @@ class MuJoCoStudio:
                 item.x = float(payload["xMm"]) / 1000.0
             if "yMm" in payload:
                 item.y = float(payload["yMm"]) / 1000.0
-            radius = float(np.clip(
-                math.hypot(item.x, item.y),
-                WORKSPACE_RADIUS[0], WORKSPACE_RADIUS[1]))
-            yaw = float(np.clip(
-                math.atan2(item.y, item.x),
-                math.radians(WORKSPACE_YAW_DEG[0]),
-                math.radians(WORKSPACE_YAW_DEG[1])))
-            item.x, item.y = radius * math.cos(yaw), radius * math.sin(yaw)
+            item.x = float(np.clip(
+                item.x, WORKSPACE_RADIUS[0], WORKSPACE_RADIUS[1]))
+            item.y = 0.0
             item.origin_x, item.origin_y = item.x, item.y
             self._rebuild()
             self._add_event(f"{item.label}: 배치/외형 갱신", "info")
@@ -885,15 +853,10 @@ class MuJoCoStudio:
         with self._lock:
             self._require_editable()
             x = float(x_mm) / 1000.0
-            y = float(y_mm) / 1000.0
-            radius = float(np.clip(
-                math.hypot(x, y), WORKSPACE_RADIUS[0], WORKSPACE_RADIUS[1]))
-            yaw = float(np.clip(
-                math.atan2(y, x),
-                math.radians(WORKSPACE_YAW_DEG[0]),
-                math.radians(WORKSPACE_YAW_DEG[1])))
-            self._basket_x, self._basket_y = (
-                radius * math.cos(yaw), radius * math.sin(yaw))
+            float(y_mm)  # validate input even though fixed-base mode forces y=0
+            self._basket_x = float(np.clip(
+                x, WORKSPACE_RADIUS[0], WORKSPACE_RADIUS[1]))
+            self._basket_y = 0.0
             self._rebuild()
             self._add_event("목표 트레이 위치를 갱신했습니다.", "info")
             return self.status()
@@ -943,7 +906,7 @@ class MuJoCoStudio:
                         round(value * 1000, 1) for value in WORKSPACE_RADIUS],
                     "yawDeg": list(WORKSPACE_YAW_DEG),
                     "baseNeutralDeg": self._spec.base_locked_deg,
-                    "baseMode": "target-yaw-enabled",
+                    "baseMode": "fixed-90",
                 },
                 "detector": dict(self._detector),
                 "events": [asdict(event) for event in self._events[:24]],

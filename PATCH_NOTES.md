@@ -2416,3 +2416,36 @@ diagram remains only as a scene-placement control.
 - The existing fixed-base MuJoCo model, complete-task physics suite, dashboard
   build/render tests, lint, Python compilation, and EEG pipeline are rerun as
   regression gates for this patch.
+
+## Patch 61 — make the 3D studio match the broken fixed base
+
+### Correction
+
+Patch 60 added a simulation-only base-yaw actuator as a future repaired-arm
+target. That made the visible robot more capable than the current real arm and
+violated the simulation fidelity requirement.
+
+### Changes
+
+- Removed `studio_base_yaw` from the MJCF and removed its actuator. The studio
+  now has the original six MuJoCo controls, and command 1 is forcibly 90° even
+  if another value reaches the pose boundary.
+- Replaced the yaw scan with a servo-2/3/4 depth sweep while servo 1 remains
+  fixed.
+- Projected object and tray edits onto the calibrated y=0, 387–414 mm
+  front/back line. The UI now renders that narrow line instead of a yaw fan and
+  labels motor 1 as fixed.
+- Limited the default fixed-plane scene to two separated objects. The target
+  tray is nearly flush with the shared floor so a late rejection can be
+  re-grasped at the same calibrated height without a nonexistent lateral
+  approach.
+- Fixed late-return failure cleanup so a failed tray recovery cannot leave the
+  simulation falsely marked as running.
+
+### Verification
+
+- The studio test asserts that `studio_base_yaw` does not exist, MuJoCo has six
+  actuators, servo 1 remains exactly 90°, and every edited object has y=0.
+- Three consecutive accelerated physics runs completed delivery, post-completion
+  rejection, physical tray recovery, return within 7 mm, rejection-memory
+  update, next-object selection, and second delivery within 7 mm of the tray.

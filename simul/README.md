@@ -101,12 +101,12 @@ and start the run. The page displays:
 - commanded six-servo telemetry and an event trace.
 
 The studio makes no serial or webcam connection and cannot move the real arm.
-Its extra `studio_base_yaw` joint represents the intended final arm after motor
-1 is repaired, so multiple objects around the base can be tested today. The
-currently verified physical arm still has a non-responsive motor 1, and the
-fixed-base policy/evaluation model described below remains unchanged. A studio
-result is therefore evidence about the target 3D task and controller logic, not
-proof that the present broken-base hardware can reproduce yaw motion.
+Like the current real arm, it has no base-yaw joint or actuator: servo 1 is
+forced to 90° in every pose and search uses only servos 2/3/4. Objects and the
+tray are therefore constrained to one calibrated front/back line. The default
+scene contains two objects because the verified fixed-plane floor interval is
+only 27 mm long; pretending to arrange objects around the base would again
+create behavior that the hardware cannot execute.
 
 Run the studio physics tests:
 

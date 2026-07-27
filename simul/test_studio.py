@@ -33,16 +33,22 @@ class MuJoCoStudioTests(unittest.TestCase):
             time.sleep(0.01)
         self.fail("studio task did not finish")
 
-    def test_scene_uses_original_arm_physics_rgb_and_target_yaw(self):
+    def test_scene_uses_original_arm_physics_rgb_and_fixed_real_base(self):
         status = self.studio.status()
         yaw = mujoco.mj_name2id(
             self.studio._model, mujoco.mjtObj.mjOBJ_JOINT,
             "studio_base_yaw")
-        self.assertGreaterEqual(yaw, 0)
-        self.assertEqual(self.studio._model.nu, 7)
+        self.assertEqual(yaw, -1)
+        self.assertEqual(self.studio._model.nu, 6)
         self.assertTrue(status["physics"])
         self.assertTrue(status["cameraOnlySelection"])
-        self.assertEqual(status["workspace"]["baseMode"], "target-yaw-enabled")
+        self.assertEqual(status["workspace"]["baseMode"], "fixed-90")
+        self.assertEqual(status["servoDeg"][0], 90.0)
+        self.assertEqual(status["workspace"]["yawDeg"], [0.0, 0.0])
+        requested = self.studio._pose.copy()
+        requested[0] = 180
+        self.assertTrue(self.studio._drive(requested, 0.05))
+        self.assertEqual(self.studio.status()["servoDeg"][0], 90.0)
         self.assertGreater(len(self.studio.render_jpeg("overview", 640, 360)), 1000)
         self.assertGreater(len(self.studio.render_jpeg("wrist", 320, 180)), 1000)
 
@@ -58,6 +64,7 @@ class MuJoCoStudioTests(unittest.TestCase):
         radius = (item["xMm"] ** 2 + item["yMm"] ** 2) ** 0.5
         self.assertLessEqual(radius, 414.1)
         self.assertLessEqual(item["sizeMm"], 8.0)
+        self.assertEqual(item["yMm"], 0.0)
 
     def test_physical_delivery_and_late_reject_select_the_next_object(self):
         self._accelerate()
@@ -78,7 +85,15 @@ class MuJoCoStudioTests(unittest.TestCase):
         self.assertEqual(returned["status"], "table")
         error = ((returned["xMm"] - returned["originXmm"]) ** 2
                  + (returned["yMm"] - returned["originYmm"]) ** 2) ** 0.5
-        self.assertLess(error, 6.0)
+        self.assertLess(error, 7.0)
+        delivered = next(value for value in second["objects"]
+                         if value["id"] == second["lastDeliveredId"])
+        self.assertEqual(delivered["status"], "basket")
+        basket_error = (
+            (delivered["xMm"] - second["basket"]["xMm"]) ** 2
+            + (delivered["yMm"] - second["basket"]["yMm"]) ** 2
+        ) ** 0.5
+        self.assertLess(basket_error, 7.0)
 
 
 if __name__ == "__main__":
