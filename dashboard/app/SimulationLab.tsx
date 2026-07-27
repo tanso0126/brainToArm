@@ -515,7 +515,9 @@ export default function SimulationLab({ eegRunning, apiOnline }: { eegRunning: b
   const [rejectedIds, setRejectedIds] = useState<string[]>([]);
   const [signalSource, setSignalSource] = useState<SignalSource>("manual");
   const [events, setEvents] = useState<EventItem[]>([
-    { id: 1, kind: "info", text: "시뮬레이션 작업실이 준비되었습니다.", at: nowLabel() },
+    // SSR and the browser can have different clocks/time zones. Keep the
+    // hydration snapshot deterministic; only user/runtime events use nowLabel().
+    { id: 1, kind: "info", text: "시뮬레이션 작업실이 준비되었습니다.", at: "시작 전" },
   ]);
   const [cycle, setCycle] = useState(1);
   const [lastDeliveredId, setLastDeliveredId] = useState<string | null>(null);

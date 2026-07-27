@@ -2356,3 +2356,13 @@ serial port and issued no physical motion.
 - Synthetic 8-second dashboard baseline: 2,046 samples accepted and ErrP status
   reports ready.
 - `PYTHONPATH=laptop python3 laptop/test_pipeline.py`: all checks pass.
+
+## Patch 59 — deterministic simulation hydration
+
+- Removed the render-time localized clock value from the simulation's initial
+  event. Server and browser now hydrate the same constant `시작 전`; timestamps
+  are generated only for events occurring after hydration.
+- Added root-level hydration suppression for attributes injected into `<html>`
+  by browser extensions (the reported environment added `webcrx=""`).
+- This fixes the actual text mismatch without hiding mismatches inside the
+  application tree.
