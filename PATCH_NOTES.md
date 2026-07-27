@@ -1561,3 +1561,56 @@ the brain signal will not touch the arm logic.
   assumption would have been wrong; the class-agnostic path handled it.
 - Physically NOT yet verified: wrist-camera floor grasp (alignment sign, descend,
   close, contact, lift). This remains gated behind `FLOOR_GRASP_EXECUTE_VERIFIED`.
+
+## Patch 42 — hardware-measured floor Jacobian and corrected depth alignment
+
+### Intent
+
+Patch 41 servoed the target toward the jaws in image *x* on an assumed elbow
+sign. Bringing the arm to the real floor-hover pose and watching the wrist
+camera showed that assumption was wrong: on the fixed-base floor curve, elbow
+moves the object in DEPTH (image *y*), not sideways. Correct the alignment axis
+and replace the assumed sign with a measured Jacobian.
+
+### Measurement (mounted PW315, floor hover, 2026-07-27)
+
+Stepping elbow across four poses and tracking the object centroid:
+
+| elbow | object image y |
+|---:|---:|
+| 90 | 296 |
+| 86 | 354 |
+| 82 | 405 |
+| 78 | 451 |
+
+- `d(object y)/d(elbow) = -12.9 px/deg` (elbow down moves the object toward the
+  jaws). `d(object x)/d(elbow) = +1.3 px/deg` (~0). The base is fixed at 90, so a
+  sideways offset is not servoable and the object must sit near the jaw
+  centerline. This is a local hardware model, not monocular depth.
+
+### Changes
+
+- `config.py`: replaced the assumed `FLOOR_X_ALIGN_*` constants with measured
+  `FLOOR_ALIGN_DY_PER_ELBOW=-12.9`, a jaw-row tolerance, a bounded elbow step, a
+  centerline-offset tolerance, and `FLOOR_ALIGN_VERIFIED=True` (depth axis + sign
+  + gain confirmed on camera). `FLOOR_GRASP_EXECUTE_VERIFIED` stays False:
+  alignment is verified, but descend/close/lift are not.
+- `floor_grasp.py`: alignment now servos the object's image *y* to the jaw row
+  with the measured gain, re-measuring each step. A large *x* offset fails closed
+  with "move the object onto the centerline"; running past the calibrated elbow
+  band fails closed with "move the object closer to the base". Both are actionable
+  physical instructions rather than silent misbehavior.
+- `test_pipeline.py`: updated the state-machine fake to the depth-aligned axis.
+
+### Verification
+
+- `python3 laptop/test_pipeline.py` full suite passes.
+- Live hardware (arm at floor hover, headless camera publisher): the controller
+  recognized the yellow object (FastSAM), depth-servoed elbow 90->86->82->78 with
+  the object y-error shrinking 431->362->275->217 px exactly as the offline
+  Jacobian predicts, then failed closed at the band limit ("elbow would need 74,
+  limit [78,110]; move the object closer to the base") and recovered to open
+  hover. No descent occurred; the workspace cables were never approached.
+- Physical setup still required for a real pick: object placed within the floor
+  band (nearer the base, near the centerline) and the workspace cables removed
+  from the motion path.

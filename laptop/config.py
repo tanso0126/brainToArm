@@ -411,14 +411,22 @@ FLOOR_CAND_BORDER_MARGIN_PX = 2      # frame-touching blobs are usually floor/ar
 # renumbers instances every frame, so a transient id cannot name "the object
 # the human vetoed". A vetoed image location stays vetoed as ids reshuffle.
 FLOOR_REJECT_RADIUS_RATIO = 0.06     # fraction of the frame diagonal
-# Horizontal floor alignment drives the target under the jaws by nudging elbow
-# along the calibrated floor curve and re-measuring (visual servo, so only the
-# SIGN of the response matters, not an exact px/deg gain). The wrist-camera
-# sign is not yet physically confirmed, so real descent stays gated below.
-FLOOR_X_ALIGN_TOL_PX = 40.0
-FLOOR_X_ALIGN_ELBOW_STEP = 2         # bounded elbow nudge per correction
-FLOOR_X_ALIGN_MAX_ITERS = 8
-FLOOR_X_ALIGN_ELBOW_SIGN = -1        # elbow+ moves target left in the wrist view (assumed; confirm on hardware)
+# Floor alignment. Measured on the mounted PW315 at hover on 2026-07-27 by
+# stepping elbow 90->78 and tracking the object centroid across four poses:
+#   d(object image y)/d(elbow) = -12.9 px/deg   (elbow down => object toward jaws)
+#   d(object image x)/d(elbow) =  +1.3 px/deg   (~0; sideways is NOT controllable)
+# So the floor curve's elbow controls the object's DEPTH (image y), not its
+# sideways position: the base is fixed at 90 for planar floor grasp, so a
+# left/right offset cannot be servoed and the object must sit near the jaw
+# centerline. Alignment therefore drives the object's image y to the jaw row
+# with this Jacobian and re-measures each step (an exact gain plus its verified
+# sign, so the proportional step is well posed).
+FLOOR_ALIGN_DY_PER_ELBOW = -12.9     # px per +1 deg elbow (measured)
+FLOOR_ALIGN_TOL_PX = 40.0            # object within this of the jaw row = aligned
+FLOOR_ALIGN_MAX_ELBOW_STEP = 4       # clamp per-iteration elbow correction
+FLOOR_ALIGN_MAX_ITERS = 10
+FLOOR_ALIGN_X_CENTERLINE_TOL_PX = 140.0  # base is fixed; object must be near centerline
+FLOOR_ALIGN_VERIFIED = True          # depth axis + sign + gain confirmed on camera 2026-07-27
 FLOOR_SETTLE_S = 1.9                 # DONE is a software slew; wait real linkage settle
 FLOOR_SETTLE_DISCARD_FRAMES = 3      # then drop stale camera frames before measuring
 # Master execution gate. While False, the controller performs the full

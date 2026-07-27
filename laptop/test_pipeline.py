@@ -877,9 +877,10 @@ def test_floor_grasp_selection_and_reject():
             return list(config.HOME_POSE)
 
     def make_perceive(opening_px, target, keep_after_lift=True):
-        # Jaw centered on the target so alignment converges immediately.
+        # Object already on the jaw row (depth-aligned) and on the centerline,
+        # so the measured-Jacobian depth servo converges on the first pass.
         def perceive():
-            gripper = SimpleNamespace(center=(target.center[0], 693.0))
+            gripper = SimpleNamespace(center=(target.center[0], target.center[1] + 3.0))
             ranked = [target] if keep_after_lift else []
             scene = SimpleNamespace(
                 ranked=ranked, gripper=gripper, marker_boxes=[],

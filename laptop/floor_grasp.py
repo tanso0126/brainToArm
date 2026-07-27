@@ -284,12 +284,18 @@ class FloorGraspController:
         return GraspResult(False, "STOP", reason, executed=self.execute,
                            trace=trace)
 
-    def _x_error(self, scene, observation, target):
-        """Signed image-x error (target - jaw center), jaw center if seen."""
-        if scene.gripper is not None:
-            return target.center[0] - scene.gripper.center[0]
-        width = scene.frame_shape[1]
-        return target.center[0] - width / 2.0
+    def _depth_error(self, scene, target):
+        """Signed image-y error jaw_row - object_y (>0 => object beyond jaws).
+
+        The rigid mount fixes the jaw row, so the target grasp row is the jaw
+        centroid's y. Positive error means the object sits farther out (higher in
+        the wrist-down image) and the arm must reach further along the floor.
+        """
+        return scene.gripper.center[1] - target.center[1]
+
+    def _centerline_offset(self, scene, target):
+        """Signed image-x offset object - jaw center (base is fixed; unservoable)."""
+        return target.center[0] - scene.gripper.center[0]
 
     # -- main routine --------------------------------------------------
     def grasp(self, target):
@@ -298,16 +304,18 @@ class FloorGraspController:
         self._log(trace, f"TARGET_SELECTED center={tuple(round(v,1) for v in target.center)} "
                          f"area={target.area:.0f}")
 
-        # --- FLOOR_X_ALIGN: bounded visual servo along the floor curve ---
-        # Re-measure each iteration and nudge elbow so the target drifts toward
-        # the jaw center in x. Only the SIGN of the response is used, so an exact
-        # px/deg gain is not required -- but the sign itself is still unverified
-        # on the wrist camera, which is why execution stays gated.
+        # --- FLOOR_DEPTH_ALIGN: servo object image-y to the jaw row via elbow ---
+        # The wrist-camera floor Jacobian was measured on hardware: elbow moves
+        # the object in DEPTH (image y), not sideways. Each step re-measures and
+        # nudges elbow by the measured gain toward the jaw row. Sideways offset
+        # cannot be corrected (base fixed at 90), so a large x offset fails
+        # closed with a clear "move the object onto the centerline" reason.
         elbow = self.reference_elbow
         lower, upper = config.FLOOR_ELBOW_RANGE
+        gain = config.FLOOR_ALIGN_DY_PER_ELBOW
         current = target
         aligned = False
-        for iteration in range(config.FLOOR_X_ALIGN_MAX_ITERS):
+        for iteration in range(config.FLOOR_ALIGN_MAX_ITERS):
             scene, observation = self.perceive()
             if scene.gripper is None:
                 return self._recover(
@@ -315,25 +323,38 @@ class FloorGraspController:
             # Re-acquire the same object by nearest-position continuity: FastSAM
             # ids are not stable, so identity is carried by image location.
             current = _nearest(scene.ranked, current) or current
-            error = self._x_error(scene, observation, current)
-            self._log(trace, f"FLOOR_X_ALIGN iter={iteration} x_error={error:+.1f}px "
+            x_offset = self._centerline_offset(scene, current)
+            if abs(x_offset) > config.FLOOR_ALIGN_X_CENTERLINE_TOL_PX:
+                return self._recover(
+                    trace, f"object is {x_offset:+.0f}px off the jaw centerline; "
+                           "base is fixed at 90, so move the object sideways to "
+                           "the base center")
+            depth_error = self._depth_error(scene, current)
+            self._log(trace, f"FLOOR_DEPTH_ALIGN iter={iteration} "
+                             f"y_error={depth_error:+.1f}px x_offset={x_offset:+.1f}px "
                              f"elbow={elbow}")
-            if abs(error) <= config.FLOOR_X_ALIGN_TOL_PX:
+            if abs(depth_error) <= config.FLOOR_ALIGN_TOL_PX:
                 aligned = True
                 break
-            magnitude = config.FLOOR_X_ALIGN_ELBOW_STEP
-            direction = config.FLOOR_X_ALIGN_ELBOW_SIGN * (1 if error > 0 else -1)
-            proposed = int(elbow + magnitude * direction)
+            # elbow_delta from the measured gain, clamped to a bounded step.
+            raw_delta = depth_error / gain
+            step = max(-config.FLOOR_ALIGN_MAX_ELBOW_STEP,
+                       min(config.FLOOR_ALIGN_MAX_ELBOW_STEP, raw_delta))
+            proposed = int(round(elbow + step))
+            if proposed == elbow:
+                proposed = elbow + (1 if step > 0 else -1)
             if not lower <= proposed <= upper:
                 return self._recover(
-                    trace, f"floor alignment hit elbow limit at {proposed}")
+                    trace, f"object is out of the reachable floor band "
+                           f"(elbow would need {proposed}, limit [{lower},{upper}]); "
+                           "move the object closer to the base")
             elbow = proposed
             if self.execute:
                 self.arm.floor("hover", elbow, settle_s=config.FLOOR_SETTLE_S)
             else:
                 self._log(trace, f"PLANNED hover elbow -> {elbow} (execution gated)")
         if not aligned:
-            return self._recover(trace, "floor alignment did not converge")
+            return self._recover(trace, "floor depth alignment did not converge")
         self._log(trace, f"aligned at elbow={elbow}")
 
         if not self.execute:
