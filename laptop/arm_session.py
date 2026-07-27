@@ -157,8 +157,17 @@ class ArmSessionServer:
                             "ok": False,
                             "error": f"{type(exc).__name__}: {exc}",
                         }
-                    file.write(_json_line(response))
-                    file.flush()
+                    # A client that disconnected mid-request (e.g. an interrupted
+                    # command) makes write/flush raise. That must never take down
+                    # the persistent owner -- otherwise every interruption forces
+                    # a reconnect and an extra Uno reset. Swallow it and keep
+                    # serving; the arm already executed the completed command.
+                    try:
+                        file.write(_json_line(response))
+                        file.flush()
+                    except OSError as exc:
+                        print(f"[arm-session] client write failed, ignoring: {exc}",
+                              flush=True)
         finally:
             listener.close()
             self.listener = None
