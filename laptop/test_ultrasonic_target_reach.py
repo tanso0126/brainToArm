@@ -1,6 +1,8 @@
 import unittest
+from unittest.mock import patch
 
 from ultrasonic_target_reach import (
+    _wait_for_stable_sonar,
     adaptive_advance_mm,
     approach_stop_decision,
     fingertip_floor_clearance_mm,
@@ -37,6 +39,21 @@ class ApproachStopTests(unittest.TestCase):
         swept = transition_fingertip_floor_clearance_mm(high, low)
         self.assertLessEqual(swept, fingertip_floor_clearance_mm(high))
         self.assertLessEqual(swept, fingertip_floor_clearance_mm(low) + 0.1)
+
+    @patch("ultrasonic_target_reach.time.sleep")
+    @patch("ultrasonic_target_reach.wait_for_stable_profile")
+    def test_unstable_sonar_retries_without_ending_approach(
+            self, stable_profile, _sleep):
+        expected = (object(), ("attempt",))
+        stable_profile.side_effect = [TimeoutError("multipath"), expected]
+        logs = []
+
+        result = _wait_for_stable_sonar(
+            object(), logger=lambda message, **_kwargs: logs.append(message))
+
+        self.assertIs(result, expected)
+        self.assertEqual(stable_profile.call_count, 2)
+        self.assertIn("holding pose and retrying", logs[0])
 
 
 if __name__ == "__main__":

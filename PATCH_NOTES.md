@@ -3197,3 +3197,7 @@ and the trained model backend.
 - Sensor loss, target loss, stale camera, configured joint limits, and
   non-floor body collision remain fail-closed hardware faults rather than
   normal approach-completion conditions.
+- A live run exposed a transient multipath interval in which no two stable
+  batches formed during the old eight-second deadline. Unstable sonar now
+  holds the current pose and retries indefinitely; it no longer terminates the
+  autonomous approach or requires a person to restart it.

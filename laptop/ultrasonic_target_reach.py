@@ -134,6 +134,22 @@ def _reacquire(detector, selector, attempts=3):
     return frame, scene, None
 
 
+def _wait_for_stable_sonar(client, logger=print):
+    """Wait in place through multipath instead of ending autonomous approach."""
+    cycle = 0
+    while True:
+        cycle += 1
+        try:
+            return wait_for_stable_profile(client, timeout_s=8.0)
+        except TimeoutError as exc:
+            logger(
+                f"[sonar-reach] unstable echo cycle {cycle}; "
+                f"holding pose and retrying ({exc})",
+                flush=True,
+            )
+            time.sleep(0.25)
+
+
 def _draw_preview(frame, scene, candidate, pose, distance_mm, step, decision):
     import cv2
 
@@ -212,7 +228,7 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
                 f"target {x_error:+.0f}px from sonar x axis; "
                 "base/lateral alignment required")
 
-        profile, attempts = wait_for_stable_profile(client, timeout_s=8.0)
+        profile, attempts = _wait_for_stable_sonar(client)
         distance = float(profile.distance_mm)
         jaw_ready, jaw_reason, row_gap = _jaw_metrics(scene, candidate)
         if row_gap is None:
