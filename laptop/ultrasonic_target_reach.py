@@ -70,6 +70,10 @@ FINAL_JAW_HORIZONTAL_FRACTION = 0.30
 TRACKING_PX_PER_WRIST_DEG = -6.0
 TRACKING_MAX_WRIST_STEP_DEG = 10
 PRE_CLOSE_LIFT_MM = 12.0
+# One servo-quantized fixed-reach lift from the measured 126 px pre-close view
+# raises the fingertip from 20.8 to about 28.2 mm, matching the successful
+# object-height band without translating toward the object.
+PRE_CLOSE_FINE_LIFT_MM = 3.0
 VERIFY_LIFT_MM = 25.0
 RETAINED_BOTTOM_RATIO = 0.90
 RETAINED_HORIZONTAL_RATIO = 0.20
@@ -282,6 +286,18 @@ def _final_grasp_gate(scene, candidate):
             f"{FINAL_JAW_GAP_MIN_PX:.0f}..{FINAL_JAW_GAP_MAX_PX:.0f}px")
     return True, (
         f"final grasp aligned: offset {horizontal:.0f}px, gap {gap:.0f}px")
+
+
+def _preclose_needs_fine_lift(scene, candidate):
+    """True only when lateral aim is valid and the object is still too low."""
+    gripper = getattr(scene, "gripper", None)
+    if gripper is None or candidate is None:
+        return False
+    horizontal = abs(float(candidate.center[0]) - float(gripper.center[0]))
+    allowed = FINAL_JAW_HORIZONTAL_FRACTION * float(gripper.opening_px)
+    gap = float(gripper.center[1]) - float(
+        candidate.bbox[1] + candidate.bbox[3])
+    return horizontal <= allowed and gap > FINAL_JAW_GAP_MAX_PX
 
 
 def _vertical_lift_pose(pose, lift_mm):
@@ -619,6 +635,26 @@ def _clearance_grasp_and_verify(
             "state": "preclose-target-lost", "pose": preclose,
             "distance_mm": distance_mm,
         }
+    if _preclose_needs_fine_lift(scene, candidate):
+        adjusted = _vertical_lift_pose(preclose, PRE_CLOSE_FINE_LIFT_MM)
+        report = safety.transition_report(preclose, adjusted)
+        if not report.safe:
+            raise RuntimeError(
+                "pre-close fine lift rejected: " + report.explain())
+        print(
+            f"[sonar-reach] pre-close object remains below finger row; "
+            f"fixed-reach fine lift {preclose[1:4]}->{adjusted[1:4]}",
+            flush=True,
+        )
+        mover.slow_move(adjusted, final_settle=0.40)
+        preclose = adjusted
+        _frame, scene, candidate = _reacquire(
+            detector, selector, attempts=4)
+        if candidate is None:
+            return {
+                "state": "fine-lift-target-lost", "pose": preclose,
+                "distance_mm": distance_mm,
+            }
     aligned, reason = _final_grasp_gate(scene, candidate)
     print(f"[sonar-reach] after clearance lift: {reason}", flush=True)
     if not aligned:

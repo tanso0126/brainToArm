@@ -6,6 +6,7 @@ import numpy as np
 
 from ultrasonic_target_reach import (
     _final_grasp_gate,
+    _preclose_needs_fine_lift,
     _retained_image_gate,
     _candidate_on_sonar_axis,
     adaptive_advance_mm,
@@ -76,6 +77,21 @@ class ApproachStopTests(unittest.TestCase):
         self.assertTrue(_final_grasp_gate(scene, aligned)[0])
         self.assertFalse(_final_grasp_gate(scene, overshot)[0])
         self.assertTrue(_final_grasp_gate(scene, measured_perfect)[0])
+
+    def test_preclose_fine_lift_only_corrects_vertical_gap(self):
+        scene = SimpleNamespace(gripper=SimpleNamespace(
+            center=(620.0, 696.0), opening_px=290.0))
+        measured_far = SimpleNamespace(
+            center=(610.0, 445.0), bbox=(580, 315, 60, 255))
+        laterally_wrong = SimpleNamespace(
+            center=(800.0, 445.0), bbox=(770, 315, 60, 255))
+        ready = SimpleNamespace(
+            center=(610.0, 480.0), bbox=(580, 350, 60, 285))
+
+        self.assertTrue(_preclose_needs_fine_lift(scene, measured_far))
+        self.assertFalse(_preclose_needs_fine_lift(
+            scene, laterally_wrong))
+        self.assertFalse(_preclose_needs_fine_lift(scene, ready))
 
     def test_motor_four_uses_measured_pixel_error_with_large_headroom(self):
         self.assertEqual(tracking_wrist_target(178, -60), 168)

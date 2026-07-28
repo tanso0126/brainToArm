@@ -3478,3 +3478,30 @@ and the trained model backend.
   be commanded.
 - Added a regression test for the measured 12.0 mm safe pose and -9.1 mm
   rejected transition.
+
+## Patch 94 — adapt pre-close height by one measured servo quantum
+
+### Physical finding
+
+- The complete run reached the 12.0 mm floor-stop pose and automatically
+  performed the 12 mm fixed-reach clearance lift. At
+  `[90,113,75,174,open,170]` the fingertip was 20.8 mm above the floor and the
+  real object remained centred, but its final jaw-row gap was 126 px versus the
+  verified close range ending at 90 px. The image gate correctly refused to
+  close.
+- A 3 mm request from this pose resolves to the next integer-servo pose
+  `[90,112,75,174,open,170]`, raising the physical fingertip to 28.2 mm with
+  15.8 mm minimum modeled clearance. That band brackets the previously
+  successful 25.2 mm pre-close height.
+
+### Changes
+
+- If and only if the object is laterally inside the strict final jaw corridor
+  but remains below the verified finger-row range after the normal clearance
+  lift, the controller performs one fixed-reach 3 mm fine-lift quantum.
+- It reacquires the same locked object and reruns the complete final gate after
+  settling. There is no repeated search, forward translation, or permissive
+  threshold change; failure after the one measured adjustment still leaves the
+  gripper open.
+- Added tests proving the fine lift is requested for vertical gap only and
+  cannot compensate a lateral misalignment.
