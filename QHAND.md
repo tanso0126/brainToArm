@@ -209,11 +209,24 @@ correct/error trials and training the `model` backend; the baseline heuristic is
 a diagnostic/demo detector and must not be reported as validated subject
 accuracy.
 
-The simulator keeps basket delivery in a ten-second review phase. During that
-phase it runs serialized 0.8-second CH8 ErrP epochs continuously, instead of
-checking only once. Dashboard status refreshes do not cancel an epoch result.
-A detected rejection therefore still retrieves the delivered object, returns it
-to its recorded origin, and selects the next non-rejected object.
+The simulator keeps basket delivery in an unlimited review phase until the
+operator presses stop. A server-side CH8 asynchronous monitor advances an
+overlapping 1 s trailing window every 62.5 ms and requires two consecutive
+50% crossings. This is a continuous sliding classifier, not a sequence of fake
+0.8-second action onsets. The baseline backend remains an explicitly untrained
+diagnostic heuristic; validated asynchronous use requires participant-specific
+labeled correct/error data and threshold tuning. A confirmed asynchronous
+detection is a direct correction signal and is not skipped by the TAR cadence.
+A detected rejection retrieves
+the delivered object, returns it to its recorded origin, and selects the next
+non-rejected object.
+
+Research basis: Spüler and Niethammer (2015) used a 1 s window shifted by
+62.5 ms for asynchronous continuous-feedback classification; Lopes-Dias et al.
+(2019) used overlapping classifier windows and required two consecutive
+above-threshold outputs. Both trained participant-specific classifiers from
+labeled error/correct data. The present CH8 rest heuristic copies the online
+windowing mechanics, not their validated classifier accuracy.
 
 The calibration button uses its own full eight-second quality window, not the
 short two-second channel badge. It becomes enabled only when enough samples are

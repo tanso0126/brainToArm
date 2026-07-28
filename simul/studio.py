@@ -64,7 +64,6 @@ MOTION_SERVO_STEP_DEG = 2.0
 MIN_SAFE_TOOL_X_M = 0.175
 MIN_AIR_TOOL_Z_M = 0.017
 TARGET_REVIEW_SECONDS = 1.6
-POST_DELIVERY_REVIEW_SECONDS = 10.0
 
 
 @dataclass
@@ -536,9 +535,10 @@ class MuJoCoStudio:
         self._camera_detections()
         return target
 
-    def _wait_for_veto(self, seconds: float) -> bool:
-        deadline = time.monotonic() + seconds
-        while self._running and time.monotonic() < deadline:
+    def _wait_for_veto(self, seconds: float | None) -> bool:
+        deadline = None if seconds is None else time.monotonic() + seconds
+        while (self._running
+               and (deadline is None or time.monotonic() < deadline)):
             if self._reject.wait(timeout=0.04):
                 return True
         return self._reject.is_set()
@@ -707,16 +707,13 @@ class MuJoCoStudio:
                 self._phase = "evaluating"
                 self._add_event(
                     f"{target.label}: 바구니 도착 · "
-                    f"{POST_DELIVERY_REVIEW_SECONDS:.0f}초 ErrP 연속 검토",
+                    "정지할 때까지 ErrP 연속 검토",
                     "success")
-                if self._wait_for_veto(POST_DELIVERY_REVIEW_SECONDS):
+                if self._wait_for_veto(None):
                     self._return_item(target)
                     continue
-                self._phase = "completed"
-                self._running = False
-                self._active_id = target.id
-                self._add_event(
-                    f"{target.label}: 거부 없음 · 배송 확정", "success")
+                # No timeout means a false result here is an explicit operator
+                # stop. stop() already preserves the scene in paused state.
                 return
         except Exception as exc:
             with self._lock:
@@ -923,7 +920,8 @@ class MuJoCoStudio:
                 "cycle": self._cycle,
                 "activeId": self._active_id,
                 "lastDeliveredId": self._last_delivered_id,
-                "postDeliveryReviewSeconds": POST_DELIVERY_REVIEW_SECONDS,
+                "postDeliveryReviewSeconds": None,
+                "postDeliveryReviewMode": "until-stopped",
                 "rejectedIds": list(self._rejected),
                 "objects": objects,
                 "basket": {

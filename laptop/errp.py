@@ -15,6 +15,8 @@ Pipeline (given an epoch of EEG right after action onset):
 numpy/scipy/sklearn are used when present; a pure-python fallback keeps the mock
 demo runnable on a bare interpreter. Real deployment: pip install -r requirements.
 """
+from collections import deque
+from datetime import datetime, timezone
 import math
 import config
 
@@ -285,3 +287,117 @@ class ErrPDetector:
                 "model": self.model,
                 "metadata": self._model_metadata(),
             }, f)
+
+
+class AsyncErrPMonitor:
+    """Overlapping online ErrP evaluation over one continuous EEG stream.
+
+    This is not a timer that invents a fresh action onset. It advances a
+    trailing window by a small sample leap and requires consecutive positive
+    classifier outputs, as used by asynchronous ErrP studies. The configured
+    detector may still be the baseline heuristic; only a participant-trained
+    model makes the classification a trained ErrP decoder.
+    """
+
+    def __init__(
+            self, detector, fs=None, window_s=None, step_s=None,
+            consecutive=None, refractory_s=None, threshold=None):
+        self.detector = detector
+        self.fs = float(config.EEG_FS if fs is None else fs)
+        self.window_s = float(
+            config.ERRP_ASYNC_WINDOW_S if window_s is None else window_s)
+        self.step_s = float(
+            config.ERRP_ASYNC_STEP_S if step_s is None else step_s)
+        self.required_consecutive = int(
+            config.ERRP_ASYNC_CONSECUTIVE
+            if consecutive is None else consecutive)
+        self.refractory_s = float(
+            config.ERRP_ASYNC_REFRACTORY_S
+            if refractory_s is None else refractory_s)
+        self.threshold = float(
+            config.ERRP_THRESHOLD if threshold is None else threshold)
+        self.window_samples = max(2, int(round(self.window_s * self.fs)))
+        self.step_samples = max(1, int(round(self.step_s * self.fs)))
+        if self.required_consecutive < 1:
+            raise ValueError("asynchronous ErrP confirmations must be positive")
+        if self.refractory_s < 0:
+            raise ValueError("asynchronous ErrP refractory period must be non-negative")
+        self.reset()
+
+    def reset(self):
+        self._window = deque(maxlen=self.window_samples)
+        self._samples_since_evaluation = 0
+        self._evaluations = 0
+        self._consecutive = 0
+        self._latest_probability = None
+        self._latest_diagnostics = None
+        self._latest_sample_time = None
+        self._last_detection_sample_time = None
+        self._detection_sequence = 0
+        self._detected_at = None
+
+    def ingest(self, rows):
+        """Consume ``(sample_time, channel_values)`` pairs in sample order."""
+        for sample_time, values in rows:
+            self._window.append(list(values))
+            self._latest_sample_time = float(sample_time)
+            self._samples_since_evaluation += 1
+            if len(self._window) < self.window_samples:
+                continue
+            if self._samples_since_evaluation < self.step_samples:
+                continue
+            self._samples_since_evaluation = 0
+            diagnostics = self.detector.diagnose(list(self._window))
+            probability = float(diagnostics["probability"])
+            self._evaluations += 1
+            self._latest_probability = probability
+            self._latest_diagnostics = diagnostics
+            if probability >= self.threshold:
+                self._consecutive = min(
+                    self.required_consecutive, self._consecutive + 1)
+            else:
+                self._consecutive = 0
+            refractory_ready = (
+                self._last_detection_sample_time is None
+                or sample_time - self._last_detection_sample_time
+                >= self.refractory_s
+            )
+            if (self._consecutive >= self.required_consecutive
+                    and refractory_ready):
+                self._detection_sequence += 1
+                self._last_detection_sample_time = float(sample_time)
+                self._detected_at = datetime.now(timezone.utc).isoformat(
+                    timespec="milliseconds")
+                self._consecutive = 0
+        return self.status()
+
+    def status(self):
+        diagnostics = self._latest_diagnostics or {}
+        return {
+            "mode": (
+                "trained-model"
+                if self.detector.backend == "model"
+                else "baseline-heuristic"
+            ),
+            "trained": self.detector.backend == "model",
+            "windowMs": round(self.window_s * 1000.0, 1),
+            "stepMs": round(self.step_s * 1000.0, 1),
+            "logicalEvaluationsPerSecond": round(1.0 / self.step_s, 1),
+            "requiredConsecutive": self.required_consecutive,
+            "refractoryMs": round(self.refractory_s * 1000.0, 1),
+            "threshold": self.threshold,
+            "bufferedSamples": len(self._window),
+            "requiredSamples": self.window_samples,
+            "evaluations": self._evaluations,
+            "probability": self._latest_probability,
+            "aboveThreshold": (
+                self._latest_probability is not None
+                and self._latest_probability >= self.threshold
+            ),
+            "consecutive": self._consecutive,
+            "detectionSequence": self._detection_sequence,
+            "detectedAt": self._detected_at,
+            "negativeDeflectionMv": diagnostics.get("negativeDeflection"),
+            "baselineStdMv": diagnostics.get("baselineStd"),
+            "zScore": diagnostics.get("zScore"),
+        }

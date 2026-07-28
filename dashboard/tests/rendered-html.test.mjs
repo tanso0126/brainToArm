@@ -42,10 +42,12 @@ test("starter preview is removed and localhost API is explicit", async () => {
   assert.match(page, /저장 안정 기준 불러오기/);
   assert.match(page, /측정 시작 시 자동 적용/);
   assert.match(page, /보통 ErrP 기준은 50% 고정/);
-  assert.match(simulationLab, /놓은 뒤 10초 동안 끊기지 않고/);
-  assert.match(simulationLab, /배송 후 연속 판정/);
-  assert.match(simulationLab, /SIM_BASKET_REVIEW/);
-  assert.match(simulationLab, /while \(!cancelled\)/);
+  assert.match(simulationLab, /정지 버튼을 누를 때까지/);
+  assert.match(simulationLab, /비동기 슬라이딩 · 정지할 때까지/);
+  assert.match(simulationLab, /\/api\/errp\/async/);
+  assert.match(simulationLab, /useState<SignalSource>\("polyg"\)/);
+  assert.match(simulationLab, /window\.setInterval\(\(\) => void pull\(\), 50\)/);
+  assert.match(simulationLab, /2회 연속/);
   assert.match(page, /샘플 수는 안정도 점수가 아니며/);
   assert.match(page, /\/api\/baseline\/load/);
   assert.match(page, /index 0 · ×0\.10/);

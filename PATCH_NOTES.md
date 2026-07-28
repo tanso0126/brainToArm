@@ -2800,3 +2800,48 @@ and the trained model backend.
   review and a ten-second post-delivery review.
 - Added dashboard source/render coverage for continuous basket review and the
   operator-facing ten-second explanation.
+
+## Patch 71 — replace periodic pseudo-epochs with asynchronous sliding ErrP
+
+### Gap found
+
+- The ten-second review still imposed an arbitrary deadline even though the
+  operator explicitly owns trial termination.
+- Repeating non-overlapping 0.8-second requests treated each timer tick as if a
+  new robot error onset had occurred. That is not continuous asynchronous ErrP
+  detection and can miss a response between windows.
+
+### Changes
+
+- Removed automatic post-delivery completion. The MuJoCo task remains in
+  `evaluating` until the operator presses the simulation stop button.
+- Added a server-side asynchronous CH8 monitor. It advances an overlapping
+  1 s trailing window every 62.5 ms and requires two consecutive probability
+  crossings before publishing one detection, followed by a one-second
+  refractory period. The 32-sample HID report can add at most 125 ms of delivery
+  latency, but logical windows remain sample-timestamped.
+- Added a small `/api/errp/async` status endpoint. The UI polls only this compact
+  result during post-delivery review and reacts to monotonic detection sequence
+  numbers; it no longer sends periodic fake `SIM_BASKET_REVIEW` onsets.
+- A two-window asynchronous confirmation is a direct correction signal; TAR
+  continues to control autonomy weighting but does not discard that detection.
+- The simulation now defaults its correction source to the connected PolyG-I
+  instead of silently returning to manual mode after a page reload.
+- Kept the original event-locked path for actual discrete robot action onsets.
+- The UI exposes live probability, consecutive count, sliding window/leap, and
+  whether the backend is a participant-trained model or the current untrained
+  baseline heuristic. ErrP remains an error-processing response, not a general
+  anger detector.
+- The window/leap follows Spüler & Niethammer (2015,
+  https://doi.org/10.3389/fnhum.2015.00155); consecutive confirmation follows
+  Lopes-Dias et al. (2019,
+  https://doi.org/10.1038/s41598-019-54109-x). Both papers used labeled,
+  participant-trained classifiers, so their reported performance is not
+  attributed to the current CH8 rest heuristic.
+
+### Verification
+
+- Added deterministic coverage proving overlapping sample leaps, two-consecutive
+  confirmation, and immediate probability refresh without snapshot gaps.
+- Updated MuJoCo coverage to prove post-delivery waits for rejection or explicit
+  stop rather than a timeout.

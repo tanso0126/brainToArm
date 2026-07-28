@@ -96,6 +96,30 @@ type ErrpStatus = {
     baselineStdMv: number | null;
     zScore: number | null;
   } | null;
+  asynchronous: AsyncErrpStatus;
+};
+
+type AsyncErrpStatus = {
+  enabled: boolean;
+  mode: "trained-model" | "baseline-heuristic";
+  trained: boolean;
+  windowMs: number;
+  stepMs: number;
+  logicalEvaluationsPerSecond: number;
+  requiredConsecutive: number;
+  refractoryMs: number;
+  threshold: number;
+  bufferedSamples: number;
+  requiredSamples: number;
+  evaluations: number;
+  probability: number | null;
+  aboveThreshold: boolean;
+  consecutive: number;
+  detectionSequence: number;
+  detectedAt: string | null;
+  negativeDeflectionMv: number | null;
+  baselineStdMv: number | null;
+  zScore: number | null;
 };
 
 type LoadStatus = {
@@ -173,7 +197,8 @@ type SimulationStatus = {
   cycle: number;
   activeId: string | null;
   lastDeliveredId: string | null;
-  postDeliveryReviewSeconds: number;
+  postDeliveryReviewSeconds: number | null;
+  postDeliveryReviewMode: "until-stopped";
   rejectedIds: string[];
   objects: SimObject[];
   basket: { xMm: number; yMm: number };
@@ -211,7 +236,7 @@ const PHASE_COPY: Record<string, { title: string; detail: string }> = {
   reaching: { title: "접근 중", detail: "고정된 단일 시상면과 실제 관절 제한 안에서 목표 깊이로 이동합니다." },
   grasping: { title: "물리 파지", detail: "MuJoCo 접촉으로 닫고 실제 물체 상승을 검증합니다." },
   transporting: { title: "운반 중", detail: "물체를 든 상태로 목표 트레이에 이동합니다." },
-  evaluating: { title: "배송 확인 · ErrP", detail: "놓은 뒤 10초 동안 끊기지 않고 거부 반응을 확인합니다." },
+  evaluating: { title: "배송 확인 · ErrP", detail: "정지 버튼을 누를 때까지 CH8 거부 반응을 계속 판정합니다." },
   returning: { title: "원위치 복귀", detail: "트레이에서 회수해 저장된 원점으로 되돌립니다." },
   completed: { title: "배송 완료", detail: "늦은 거부가 오면 다시 회수할 수 있습니다." },
   paused: { title: "일시정지", detail: "현재 MuJoCo 상태를 유지합니다." },
@@ -368,17 +393,20 @@ function SimulationLab({
   const [busy, setBusy] = useState(false);
   const [selectedId, setSelectedId] = useState<string | "basket" | null>(null);
   const [draft, setDraft] = useState<ObjectDraft | null>(null);
-  const [signalSource, setSignalSource] = useState<SignalSource>("manual");
+  const [signalSource, setSignalSource] = useState<SignalSource>("polyg");
   const [localErrpReady, setLocalErrpReady] = useState(false);
   const [errpBusy, setErrpBusy] = useState(false);
   const [errpError, setErrpError] = useState("");
-  const errpMonitorGeneration = useRef(0);
+  const targetErrpGeneration = useRef(0);
+  const handledAsyncDetectionRef = useRef(0);
+  const [asyncErrp, setAsyncErrp] = useState<AsyncErrpStatus | null>(null);
   const overviewImageRef = useRef<HTMLImageElement>(null);
   const wristImageRef = useRef<HTMLImageElement>(null);
   const errpReady = Boolean(
     (errpStatus?.baselineReady && loadStatus?.baselineReady)
     || localErrpReady);
   const calibrationWindow = errpStatus?.calibrationWindow;
+  const shownAsyncErrp = asyncErrp ?? errpStatus?.asynchronous ?? null;
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -526,57 +554,98 @@ function SimulationLab({
 
   useEffect(() => {
     if (signalSource !== "polyg" || !errpReady || !eegRunning) return;
-    if (!["target", "evaluating"].includes(decisionPhase) || !decisionObjectId) return;
+    if (decisionPhase !== "target" || !decisionObjectId) return;
 
     let cancelled = false;
     let startTimer = 0;
-    const generation = ++errpMonitorGeneration.current;
-    const wait = (milliseconds: number) => new Promise<void>((resolve) => {
-      window.setTimeout(resolve, milliseconds);
-    });
+    const generation = ++targetErrpGeneration.current;
 
-    const monitor = async () => {
+    const checkTarget = async () => {
       setErrpBusy(true);
       try {
-        do {
-          const response = await fetch(`${API_BASE}/api/errp/check`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              marker: decisionPhase === "target"
-                ? "SIM_TARGET_PRESENTED"
-                : "SIM_BASKET_REVIEW",
-            }),
-          });
-          const payload = await response.json();
-          if (!response.ok) throw new Error(payload.error || "ErrP 판정 실패");
-          if (cancelled) return;
-          if (payload.isError) {
-            reject();
-            return;
-          }
-          if (decisionPhase !== "evaluating") return;
-          await wait(100);
-        } while (!cancelled);
+        const response = await fetch(`${API_BASE}/api/errp/check`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ marker: "SIM_TARGET_PRESENTED" }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || "ErrP 판정 실패");
+        if (!cancelled && payload.isError) reject();
       } catch (error) {
         if (!cancelled) {
           setEngineError(error instanceof Error ? error.message : String(error));
         }
       } finally {
-        if (errpMonitorGeneration.current === generation) setErrpBusy(false);
+        if (targetErrpGeneration.current === generation) setErrpBusy(false);
       }
     };
 
     // Deferring the request prevents React development-mode effect probing
-    // from creating two overlapping 0.8-second server-side epochs.
-    startTimer = window.setTimeout(() => void monitor(), 80);
+    // from duplicating this one event-locked target-presentation epoch.
+    startTimer = window.setTimeout(() => void checkTarget(), 80);
     return () => {
       cancelled = true;
       window.clearTimeout(startTimer);
-      if (errpMonitorGeneration.current === generation) {
-        errpMonitorGeneration.current += 1;
+      if (targetErrpGeneration.current === generation) {
+        targetErrpGeneration.current += 1;
         setErrpBusy(false);
       }
+    };
+  }, [
+    decisionCycle,
+    decisionObjectId,
+    decisionPhase,
+    eegRunning,
+    errpReady,
+    reject,
+    signalSource,
+  ]);
+
+  useEffect(() => {
+    if (signalSource !== "polyg" || !errpReady || !eegRunning) return;
+    if (decisionPhase !== "evaluating" || !decisionObjectId) return;
+
+    let cancelled = false;
+    let inFlight = false;
+    let armed = false;
+    let timer = 0;
+
+    const pull = async () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      try {
+        const response = await fetch(`${API_BASE}/api/errp/async`, {
+          cache: "no-store",
+        });
+        const payload = await response.json() as AsyncErrpStatus;
+        if (!response.ok) throw new Error("비동기 ErrP 상태 조회 실패");
+        if (cancelled) return;
+        setAsyncErrp(payload);
+        if (!armed) {
+          // Arm from a fresh server sequence at phase entry so an older
+          // transport-phase false positive cannot reject the delivered item.
+          handledAsyncDetectionRef.current = payload.detectionSequence;
+          armed = true;
+          return;
+        }
+        if (payload.detectionSequence > handledAsyncDetectionRef.current) {
+          handledAsyncDetectionRef.current = payload.detectionSequence;
+          reject();
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setEngineError(error instanceof Error ? error.message : String(error));
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    timer = window.setInterval(() => void pull(), 50);
+    void pull();
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
     };
   }, [
     decisionCycle,
@@ -791,11 +860,16 @@ function SimulationLab({
                 <div><span><Zap size={15} />연속 TAR</span><strong>θ CH1–4 / α CH8</strong></div>
                 <div><span><Zap size={15} />최근 8초 품질</span><strong>{calibrationWindowLabel(calibrationWindow)}</strong></div>
                 <div><span><Zap size={15} />휴식 기준</span><strong>{errpReady ? "ErrP + TAR 완료" : "통합 보정 필요"}</strong></div>
-                <div><span><Radar size={15} />현재 ErrP 감시</span><strong>{status.phase === "evaluating" && errpBusy ? `배송 후 연속 판정 · ${status.postDeliveryReviewSeconds.toFixed(0)}초 창` : errpBusy ? "행동 직후 판정 중" : "다음 행동 대기"}</strong></div>
+                <div><span><Radar size={15} />현재 ErrP 감시</span><strong>{status.phase === "evaluating" ? "비동기 슬라이딩 · 정지할 때까지" : errpBusy ? "행동 직후 event-locked 판정" : "다음 행동 대기"}</strong></div>
                 {loadStatus?.baselineReady && <>
                   <div><span><Brain size={15} />TAR / 휴식 대비</span><strong>{loadStatus.tar?.toFixed(3) ?? "—"} / {loadStatus.smoothedRelativeTar != null ? `${loadStatus.smoothedRelativeTar >= 0 ? "+" : ""}${(loadStatus.smoothedRelativeTar * 100).toFixed(1)}%` : "—"}</strong></div>
                   <div><span><Brain size={15} />자율성 가중치</span><strong>로봇 {(loadStatus.robotWeight * 100).toFixed(0)} · 인간 {(loadStatus.humanWeight * 100).toFixed(0)}</strong></div>
-                  <div><span><Zap size={15} />ErrP 행동 반영</span><strong>보통 ≥{(loadStatus.errpThreshold * 100).toFixed(0)}% 매 {loadStatus.errpApplyStride}번째 · 강한 ≥{(loadStatus.strongErrpOverrideThreshold * 100).toFixed(0)}% 즉시</strong></div>
+                  <div><span><Zap size={15} />ErrP 행동 반영</span><strong>비동기 ≥{(loadStatus.errpThreshold * 100).toFixed(0)}% 2회 연속 즉시 거부</strong></div>
+                </>}
+                {shownAsyncErrp && <>
+                  <div><span><Activity size={15} />실시간 P(error)</span><strong>{shownAsyncErrp.probability == null ? `${shownAsyncErrp.bufferedSamples}/${shownAsyncErrp.requiredSamples} 준비` : `${(shownAsyncErrp.probability * 100).toFixed(1)}% · 연속 ${shownAsyncErrp.consecutive}/${shownAsyncErrp.requiredConsecutive}`}</strong></div>
+                  <div><span><Gauge size={15} />슬라이딩 판정기</span><strong>{shownAsyncErrp.windowMs.toFixed(0)}ms 창 · {shownAsyncErrp.stepMs.toFixed(1)}ms 이동</strong></div>
+                  <div><span><Brain size={15} />판정기 상태</span><strong>{shownAsyncErrp.trained ? "피험자 학습 모델" : "휴식 기반 휴리스틱 · 미학습"}</strong></div>
                 </>}
                 <button onClick={calibrateErrp} disabled={!apiOnline || !eegRunning || errpBusy || !calibrationWindow?.ready}>{errpBusy ? "처리 중…" : calibrationWindow?.ready ? "최근 8초로 통합 보정·저장" : "신호 확인 후 보정"}</button>
                 {savedBaseline?.available && <button onClick={loadSavedBaseline} disabled={!apiOnline || !eegRunning || errpBusy || !savedBaseline.compatible || errpReady}>저장 안정 기준 불러오기</button>}
@@ -812,7 +886,7 @@ function SimulationLab({
                     <strong>{errpStatus.lastDecision.zScore?.toFixed(2) ?? "모델 판정"}</strong>
                   </div>
                 ) : null}
-                <small>보통 ErrP 기준은 50% 고정입니다. ErrP는 각 행동 판정창에서 CH8로 계속 계산하며, TAR가 높으면 로봇 가중치와 적용 간격이 커지고 낮으면 인간/ErrP 반영이 커집니다. 매우 강한 ErrP는 간격과 무관하게 즉시 반영합니다.</small>
+                <small>행동 직후 ErrP는 event-locked로, 배송 후 감시는 CH8의 겹치는 슬라이딩 창으로 처리합니다. 비동기는 2회 연속 50%를 넘어야 거부합니다. 미학습 휴리스틱은 진단용이며, 분노 자체를 측정하는 감정 분류기가 아닙니다.</small>
               </div>
             )}
           </article>

@@ -14,7 +14,7 @@ from pathlib import Path
 import config
 from lxsdf import LXSDFParser, build_packet
 import kinematics
-from errp import ErrPDetector
+from errp import AsyncErrPMonitor, ErrPDetector
 from eeg_bridge import EEGBridge
 from cognitive_load import AutonomyAllocator, CognitiveLoadEstimator
 from polyg_hid import (
@@ -590,6 +590,42 @@ def test_errp():
             row[0] -= 40
     check(det.p_error(wrong_channel) < config.ERRP_THRESHOLD,
           "a CH1-only deflection cannot masquerade as the specified CH8 ErrP")
+
+
+def test_asynchronous_errp_sliding_monitor():
+    print("[errp-async] overlapping windows + consecutive confirmation")
+
+    class StubDetector:
+        backend = "baseline"
+
+        def __init__(self):
+            self.probabilities = iter((0.60, 0.70, 0.10))
+
+        def diagnose(self, _window):
+            return {
+                "probability": next(self.probabilities),
+                "negativeDeflection": 1.0,
+                "baselineStd": 1.0,
+                "zScore": 1.0,
+            }
+
+    monitor = AsyncErrPMonitor(
+        StubDetector(), fs=100, window_s=0.20, step_s=0.05,
+        consecutive=2, refractory_s=1.0, threshold=0.5)
+    status = monitor.ingest([
+        (index / 100.0, [0.0] * config.EEG_CHANNELS)
+        for index in range(25)
+    ])
+    check(status["evaluations"] == 2,
+          "20-sample window advances by overlapping five-sample leaps")
+    check(status["detectionSequence"] == 1,
+          "two consecutive threshold crossings create exactly one detection")
+    status = monitor.ingest([
+        (index / 100.0, [0.0] * config.EEG_CHANNELS)
+        for index in range(25, 30)
+    ])
+    check(status["evaluations"] == 3 and not status["aboveThreshold"],
+          "the next overlapping window updates probability without a snapshot gap")
 
 
 def test_errp_model_metadata():
@@ -1206,6 +1242,7 @@ if __name__ == "__main__":
     test_cognitive_load_and_autonomy()
     test_dashboard_integrates_tar_allocation()
     test_errp()
+    test_asynchronous_errp_sliding_monitor()
     test_errp_model_metadata()
     test_eeg_packet_timestamps()
     test_ring_recent_is_time_based()

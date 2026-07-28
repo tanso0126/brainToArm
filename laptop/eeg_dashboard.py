@@ -48,7 +48,7 @@ from polyg_hid import (
     PolyGIHID,
     enumerate_devices,
 )
-from errp import ErrPDetector
+from errp import AsyncErrPMonitor, ErrPDetector
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -188,6 +188,7 @@ class EEGDashboardService:
         self._gain_index = config.EEG_HID_GAIN_INDEX
         self._sample_selector = config.EEG_HID_SAMPLE_SELECTOR
         self._errp_detector = ErrPDetector(backend=config.ERRP_BACKEND)
+        self._async_errp = AsyncErrPMonitor(self._errp_detector)
         self._errp_lock = threading.Lock()
         self._baseline_lock = threading.Lock()
         self._baseline_path = Path(baseline_path)
@@ -271,6 +272,7 @@ class EEGDashboardService:
             self._sample_selector = sample_selector
             # Rest baselines belong to one participant/acquisition session.
             self._errp_detector = ErrPDetector(backend=config.ERRP_BACKEND)
+            self._async_errp = AsyncErrPMonitor(self._errp_detector)
             self._errp_baseline_ready = False
             self._errp_last = None
             self._baseline_source = None
@@ -363,6 +365,7 @@ class EEGDashboardService:
             self._last_report_mono = arrival
             self._reports += 1
 
+            async_rows = []
             for index, (raw_counts, raw_adc_mv, filtered_mv) in enumerate(zip(
                     rows, raw_adc_mv_rows, filtered_rows)):
                 sample_t = first_sample_t + index * dt
@@ -374,8 +377,11 @@ class EEGDashboardService:
                     self._sequence, sample_t, clean_counts,
                     clean_raw_mv, clean_filtered_mv))
                 self._samples += 1
+                async_rows.append((sample_t, clean_filtered_mv))
                 self._write_record_row_locked(
                     sample_t, clean_counts, clean_raw_mv, clean_filtered_mv)
+            if self._errp_baseline_ready:
+                self._async_errp.ingest(async_rows)
             if self._record_file is not None:
                 self._record_file.flush()
 
@@ -593,6 +599,7 @@ class EEGDashboardService:
                 baseline["alphaPowers"],
             )
             self._errp_detector.restore_baseline_std(baseline["errpStdMv"])
+            self._async_errp.reset()
             self._errp_baseline_ready = True
             self._load_baseline_ready = True
             self._load_state = load_state
@@ -646,8 +653,10 @@ class EEGDashboardService:
                 + ", ".join(bad_channels)
                 + ". CH1·2·3·4·8/REF/GND 접촉·움직임·PGA를 확인하고 "
                   "깨끗한 8초를 다시 확보하세요")
-        load_state = self._load_estimator.calibrate(window)
-        self._errp_detector.update_baseline(window)
+        with self._lock:
+            load_state = self._load_estimator.calibrate(window)
+            self._errp_detector.update_baseline(window)
+            self._async_errp.reset()
         created_at = self._save_baseline(load_state)
         with self._lock:
             self._errp_baseline_ready = True
@@ -980,6 +989,10 @@ class EEGDashboardService:
                         if self._errp_detector.baseline_std is not None else None),
                     "calibrationWindow": calibration_window,
                     "lastDecision": self._errp_last,
+                    "asynchronous": {
+                        "enabled": self._errp_baseline_ready,
+                        **self._async_errp.status(),
+                    },
                 },
                 "cognitiveLoad": cognitive_load,
                 "savedBaseline": saved_baseline,
@@ -1007,6 +1020,13 @@ class EEGDashboardService:
                     }
                     for seq, sample_t, _counts, _raw_mv, filtered_mv in selected
                 ],
+            }
+
+    def asynchronous_errp_status(self):
+        with self._lock:
+            return {
+                "enabled": self._errp_baseline_ready,
+                **self._async_errp.status(),
             }
 
     def recordings(self):
@@ -1082,6 +1102,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/api/status":
                 self._json(self.service.status())
+                return
+            if parsed.path == "/api/errp/async":
+                self._json(self.service.asynchronous_errp_status())
                 return
             if parsed.path == "/api/simulation/status":
                 self._json(self.service.simulation.status())

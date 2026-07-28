@@ -135,6 +135,28 @@ type DashboardStatus = {
       baselineStdMv: number | null;
       zScore: number | null;
     } | null;
+    asynchronous: {
+      enabled: boolean;
+      mode: "trained-model" | "baseline-heuristic";
+      trained: boolean;
+      windowMs: number;
+      stepMs: number;
+      logicalEvaluationsPerSecond: number;
+      requiredConsecutive: number;
+      refractoryMs: number;
+      threshold: number;
+      bufferedSamples: number;
+      requiredSamples: number;
+      evaluations: number;
+      probability: number | null;
+      aboveThreshold: boolean;
+      consecutive: number;
+      detectionSequence: number;
+      detectedAt: string | null;
+      negativeDeflectionMv: number | null;
+      baselineStdMv: number | null;
+      zScore: number | null;
+    };
   };
   cognitiveLoad: {
     baselineReady: boolean;

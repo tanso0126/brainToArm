@@ -219,6 +219,16 @@ ERRP_BASELINE_S = 0.2      # pre-onset baseline for correction
 ERRP_BAND = (1.0, 10.0)    # ErrP bandpass (Hz)
 ERRP_THRESHOLD = 0.5       # ordinary decision threshold, fixed at 50%
 EEG_AUTO_LOAD_BASELINE = True  # restore an exact-compatible saved rest baseline
+# Asynchronous online mode follows the continuous-feedback literature: an
+# overlapping trailing window, frequent leap, two consecutive positives, and a
+# refractory period. With 32 samples per HID report, detections arrive in
+# batches at most 125 ms late even though the logical leap is 62.5 ms.
+# Spüler & Niethammer (2015): 1 s window advanced by 62.5 ms. Lopes-Dias
+# et al. (2019): consecutive threshold crossings for asynchronous confirmation.
+ERRP_ASYNC_WINDOW_S = 1.0
+ERRP_ASYNC_STEP_S = 0.0625
+ERRP_ASYNC_CONSECUTIVE = 2
+ERRP_ASYNC_REFRACTORY_S = 1.0
 
 # Continuous cognitive load: TAR = mean(theta power CH1..CH4) / alpha power CH8.
 # Normalize within participant/session as (current TAR - resting TAR) / resting TAR.

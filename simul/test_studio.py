@@ -22,7 +22,16 @@ class MuJoCoStudioTests(unittest.TestCase):
             return original_step(seconds, real_time_scale=0)
 
         self.studio._step_seconds = no_wall_clock
-        self.studio._wait_for_veto = lambda _seconds: self.studio._reject.is_set()
+
+        def fast_wait(seconds):
+            if seconds is None:
+                while self.studio._running:
+                    if self.studio._reject.wait(timeout=0.01):
+                        return True
+                return self.studio._reject.is_set()
+            return self.studio._reject.is_set()
+
+        self.studio._wait_for_veto = fast_wait
 
     def _wait_complete(self, timeout=8):
         deadline = time.monotonic() + timeout
@@ -32,6 +41,15 @@ class MuJoCoStudioTests(unittest.TestCase):
                 return status
             time.sleep(0.01)
         self.fail("studio task did not finish")
+
+    def _wait_status(self, predicate, timeout=8):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status = self.studio.status()
+            if predicate(status):
+                return status
+            time.sleep(0.01)
+        self.fail("studio task did not reach the expected state")
 
     def test_scene_uses_original_arm_physics_rgb_and_fixed_real_base(self):
         status = self.studio.status()
@@ -71,7 +89,8 @@ class MuJoCoStudioTests(unittest.TestCase):
     def test_physical_delivery_and_late_reject_select_the_next_object(self):
         self._accelerate()
         self.studio.start()
-        first = self._wait_complete()
+        first = self._wait_status(
+            lambda status: status["phase"] == "evaluating")
         first_id = first["lastDeliveredId"]
         self.assertIsNotNone(first_id)
         first_item = next(value for value in first["objects"]
@@ -79,7 +98,11 @@ class MuJoCoStudioTests(unittest.TestCase):
         self.assertEqual(first_item["status"], "basket")
 
         self.studio.reject()
-        second = self._wait_complete()
+        second = self._wait_status(
+            lambda status: (
+                status["phase"] == "evaluating"
+                and status["lastDeliveredId"] != first_id
+            ))
         self.assertIn(first_id, second["rejectedIds"])
         self.assertNotEqual(second["lastDeliveredId"], first_id)
         returned = next(value for value in second["objects"]
@@ -97,19 +120,23 @@ class MuJoCoStudioTests(unittest.TestCase):
         ) ** 0.5
         self.assertLess(basket_error, 7.0)
 
-    def test_delivery_keeps_a_ten_second_rejection_window(self):
+    def test_delivery_waits_for_rejection_or_explicit_stop(self):
         self._accelerate()
         waits = []
 
         def record_window(seconds):
             waits.append(seconds)
+            if seconds is None:
+                self.studio._running = False
+                self.studio._phase = "paused"
             return self.studio._reject.is_set()
 
         self.studio._wait_for_veto = record_window
         self.studio.start()
         status = self._wait_complete()
-        self.assertEqual(status["postDeliveryReviewSeconds"], 10.0)
-        self.assertEqual(waits, [1.6, 10.0])
+        self.assertIsNone(status["postDeliveryReviewSeconds"])
+        self.assertEqual(status["postDeliveryReviewMode"], "until-stopped")
+        self.assertEqual(waits, [1.6, None])
 
 
 if __name__ == "__main__":

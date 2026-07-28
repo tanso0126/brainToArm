@@ -540,10 +540,18 @@ brainToArm/
   participant with the same electrode/REF/GND placement; raw EEG is not stored
   in this baseline file.
   In the 3D studio, the target presentation opens one onset-locked ErrP epoch.
-  After basket placement, the UI keeps opening serialized review epochs for ten
-  seconds; normal 400 ms status refreshes no longer cancel an in-flight result.
-  A rejection in that review period retrieves the item, returns it to its saved
-  origin, and advances to the next candidate.
+  After basket placement, a server-side asynchronous monitor evaluates one
+  overlapping 1 s trailing window every 62.5 ms and requires two consecutive
+  50% crossings. It runs until the operator presses stop; it does not invent
+  periodic robot-action onsets. The current baseline backend is explicitly a
+  diagnostic heuristic. A defensible asynchronous decoder requires labeled
+  correct/error trials and a participant-trained model. A detected rejection
+  retrieves the item, returns it to its saved origin, and advances to the next
+  candidate. The online mechanics follow
+  [Spüler & Niethammer (2015)](https://doi.org/10.3389/fnhum.2015.00155)
+  and [Lopes-Dias et al. (2019)](https://doi.org/10.1038/s41598-019-54109-x);
+  unlike those trained multi-electrode studies, the project's current CH8-only
+  rest heuristic has not established participant-level TPR/TNR.
 
 - **`record_errp.py`** — Collects training data. A goal is fixed for the session,
   then the script drives the arm through
