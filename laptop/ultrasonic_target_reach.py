@@ -73,6 +73,7 @@ RETAINED_BOTTOM_RATIO = 0.90
 RETAINED_HORIZONTAL_RATIO = 0.20
 LOADED_HOME_REASSERT_TEMPLATE = [90, 90, 90, 150, 180, 170]
 SEARCH_WRIST_SEQUENCE = (140, 150, 160, 170, 180)
+SEARCH_SELECTION_MIN_WRIST = 170
 FAR_ADVANCE_MM = 20.0
 MID_ADVANCE_MM = 15.0
 APPROACH_MAX_JOINT_STEP_DEG = 12
@@ -316,6 +317,19 @@ def open_ready_pose(pose):
     return ready
 
 
+def _candidate_on_sonar_axis(candidate, frame_width):
+    if candidate is None:
+        return False
+    aim_x = SONAR_AIM_X_RATIO * float(frame_width)
+    return abs(float(candidate.center[0]) - aim_x) <= MAX_AIM_X_ERROR_PX
+
+
+def _clear_target_lock(selector):
+    """Discard a background lock while retaining explicit ErrP vetoes."""
+    selector.current = None
+    selector.lock = None
+
+
 def _open_and_find_target(
         client, mover, safety, detector, selector, pose, execute):
     """Open at HOME, then lower the wrist camera through a bounded search."""
@@ -328,30 +342,40 @@ def _open_and_find_target(
             mover.slow_move(ready, final_settle=0.45)
         pose = ready
 
-    frame, scene, candidate = acquire_initial_target(
-        detector, target_selector=selector, pose=pose)
-    if candidate is not None or not execute:
+    frame = scene = candidate = None
+    if not execute:
+        frame, scene, candidate = acquire_initial_target(
+            detector, target_selector=selector, pose=pose)
         return pose, frame, scene, candidate
 
     for wrist in SEARCH_WRIST_SEQUENCE:
         search_pose = list(pose)
         search_pose[config.J_WRIST] = int(wrist)
-        if search_pose == pose:
+        if search_pose != pose:
+            report = safety.transition_report(pose, search_pose)
+            if not report.safe:
+                continue
+            print(
+                f"[sonar-reach] SEARCH wrist {pose[config.J_WRIST]}"
+                f"->{search_pose[config.J_WRIST]}",
+                flush=True,
+            )
+            _fast_approach_move(client, search_pose, settle_s=0.35)
+            pose = search_pose
+        if wrist < SEARCH_SELECTION_MIN_WRIST:
             continue
-        report = safety.transition_report(pose, search_pose)
-        if not report.safe:
-            continue
-        print(
-            f"[sonar-reach] SEARCH wrist {pose[config.J_WRIST]}"
-            f"->{search_pose[config.J_WRIST]}",
-            flush=True,
-        )
-        _fast_approach_move(client, search_pose, settle_s=0.35)
-        pose = search_pose
+        _clear_target_lock(selector)
         frame, scene, candidate = acquire_initial_target(
             detector, target_selector=selector, pose=pose)
-        if candidate is not None:
+        if _candidate_on_sonar_axis(candidate, frame.shape[1]):
             return pose, frame, scene, candidate
+        if candidate is not None:
+            print(
+                f"[sonar-reach] SEARCH rejected off-axis lock "
+                f"x={candidate.center[0]:.0f}px; lowering camera",
+                flush=True,
+            )
+            _clear_target_lock(selector)
     return pose, frame, scene, None
 
 

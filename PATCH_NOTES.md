@@ -3337,3 +3337,17 @@ and the trained model backend.
   floor/sonar stop, clearance lift, coloured-finger close gate, verification
   lift, retention check, and loaded staged HOME return without a new process or
   human command between phases.
+
+### First full-cycle correction
+
+- The first command correctly rejected motion when the wrist publisher was
+  stale; no servo command was sent. Restarting the AVerMedia publisher exposed
+  the true HOME view, which looks into the classroom rather than at the local
+  tabletop.
+- The next command selected a background candidate at `(547,457)` before
+  lowering the camera, then rejected it only 3 px beyond the sonar-axis limit.
+  HOME/background detections are now never eligible for selection.
+- Search lowers motor 4 through the safe sequence but begins target selection
+  only at 170°. Any resulting lock more than 90 px from the sonar axis is
+  cleared and search continues to 180°. Explicit ErrP veto history is retained
+  while these accidental background locks are discarded.

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from ultrasonic_target_reach import (
     _final_grasp_gate,
     _retained_image_gate,
+    _candidate_on_sonar_axis,
     adaptive_advance_mm,
     approach_stop_decision,
     fingertip_floor_clearance_mm,
@@ -88,6 +89,12 @@ class ApproachStopTests(unittest.TestCase):
         home = [90, 70, 90, 140, 170, 170]
         self.assertEqual(
             open_ready_pose(home), [90, 70, 90, 140, 90, 170])
+
+    def test_search_rejects_home_background_outside_sonar_axis(self):
+        near_axis = SimpleNamespace(center=(600.0, 450.0))
+        background = SimpleNamespace(center=(546.0, 450.0))
+        self.assertTrue(_candidate_on_sonar_axis(near_axis, 1280))
+        self.assertFalse(_candidate_on_sonar_axis(background, 1280))
 
 if __name__ == "__main__":
     unittest.main()
