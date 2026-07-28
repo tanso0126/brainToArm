@@ -3271,3 +3271,24 @@ and the trained model backend.
   diagnostic only. Retention requires the same locked object to remain
   horizontally centred with its bounding box bottom in the lowest 10% of the
   wrist frame, matching the successful held-object image.
+
+## Patch 86 — transport a verified grasp back to HOME while holding
+
+### Changes
+
+- Added a loaded-HOME pose derived from the single firmware/config HOME source.
+  Every joint uses HOME except motor 5, which preserves the current fully
+  closed 180° command instead of HOME's nearly-closed 170° value.
+- A retained 25 mm verification lift now continues automatically through one
+  fully swept collision-checked HOME transition. The task completes as
+  `home-with-object`; the gripper is never opened because no drop target has
+  been configured yet.
+- A non-closed gripper, failed retention evidence, or unsafe loaded trajectory
+  cannot enter the transport stage.
+
+### Current physical route
+
+- Verified held pose: `[90,111,70,177,180,170]`.
+- Loaded HOME: `[90,70,90,140,180,170]`.
+- The authoritative collision model accepts the complete interpolated route
+  with 46.8 mm minimum clearance.

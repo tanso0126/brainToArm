@@ -7,6 +7,7 @@ from ultrasonic_target_reach import (
     adaptive_advance_mm,
     approach_stop_decision,
     fingertip_floor_clearance_mm,
+    home_pose_holding,
     tracking_wrist_target,
     transition_fingertip_floor_clearance_mm,
 )
@@ -72,6 +73,11 @@ class ApproachStopTests(unittest.TestCase):
 
         self.assertTrue(_retained_image_gate(frame, held)[0])
         self.assertFalse(_retained_image_gate(frame, table)[0])
+
+    def test_loaded_home_preserves_only_closed_gripper_value(self):
+        held = [90, 111, 70, 177, 180, 170]
+        self.assertEqual(
+            home_pose_holding(held), [90, 70, 90, 140, 180, 170])
 
 if __name__ == "__main__":
     unittest.main()

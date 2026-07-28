@@ -293,6 +293,31 @@ def _retained_image_gate(frame, candidate):
         f"lateral={horizontal:.0f}px")
 
 
+def home_pose_holding(pose):
+    """HOME for every joint except the currently loaded gripper servo."""
+    home = list(config.HOME_POSE)
+    home[config.J_GRIP] = int(pose[config.J_GRIP])
+    return home
+
+
+def _return_home_holding(client, mover, safety, pose):
+    """Transport a retained object to HOME without ever opening the gripper."""
+    if int(pose[config.J_GRIP]) != int(config.GRIP_CLOSED):
+        raise RuntimeError("HOME transport requires a closed gripper")
+    home = home_pose_holding(pose)
+    report = safety.transition_report(pose, home)
+    if not report.safe:
+        raise RuntimeError(
+            "loaded HOME transition rejected: " + report.explain())
+    print(
+        f"[sonar-reach] loaded HOME {pose} -> {home}; "
+        f"clearance={report.minimum_clearance_mm:.1f}mm",
+        flush=True,
+    )
+    mover.slow_move(home, final_settle=0.8)
+    return home
+
+
 def _clearance_grasp_and_verify(
         client, mover, safety, detector, selector, pose, distance_mm):
     """Lift open fingers off the table, close, then verify a retained lift."""
@@ -346,9 +371,12 @@ def _clearance_grasp_and_verify(
         f"retained={retained_ok} ({retained_reason})",
         flush=True,
     )
+    final_pose = (
+        _return_home_holding(client, mover, safety, verified)
+        if retained_ok else verified)
     return {
-        "state": "retained" if retained_ok else "closed-unverified",
-        "pose": verified, "distance_mm": distance_mm,
+        "state": "home-with-object" if retained_ok else "closed-unverified",
+        "pose": final_pose, "distance_mm": distance_mm,
         "retained_shift_px": shift, "retained_reason": retained_reason,
     }
 
