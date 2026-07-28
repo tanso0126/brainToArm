@@ -3229,3 +3229,30 @@ and the trained model backend.
   degree-by-degree slew directly instead of adding slow 3° host-side chunks
   and repeated settling delays. The same full swept collision check still runs
   before every command.
+
+## Patch 85 — lift clear of the table before closing and verify retention
+
+### Physical finding
+
+- The fast tracked approach reached the object and correctly stopped before a
+  candidate transition whose modeled fingertip clearance was only 3.4 mm.
+  The actual stopped pose was `[90,133,63,180,90,170]` with 13.5 mm modeled
+  endpoint height, but the open printed fingers visibly rested against the
+  tabletop due to remaining model/assembly offset.
+- The combined solver still gave motor 4 only 2–3° corrections during large
+  translations. Target row consequently varied `382→487→583 px` and motor 4
+  reached its 180° limit despite the new 65%-height aim point.
+
+### Changes
+
+- Added the measured motor-4 response directly to every combined move:
+  approximately `-6 px/degree`, with up to 10° correction per 15–20 mm macro
+  step. Motors 2/3 still supply translation while motor 4 actively keeps the
+  object on the camera/sonar aim row.
+- A floor or sonar completion now begins a fixed-reach, fixed-pitch 12 mm
+  open-jaw clearance lift. The controller reacquires the same locked object and
+  reruns the strict coloured-finger alignment gate before allowing closure.
+- After closing, the arm performs a collision-checked 25 mm verification lift.
+  A retained object must remain within 35 px of its pre-close wrist-camera
+  centre. The controller reports `retained` only with that direct evidence;
+  otherwise it stays closed and reports `closed-unverified`.

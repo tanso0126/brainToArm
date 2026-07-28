@@ -36,6 +36,7 @@ from floor_servo import FloorServo, _fresh_frame
 from look_reach import (
     LookReachTargetSelector,
     acquire_initial_target,
+    pose_at_reach,
     plan_resolved_step,
 )
 from ultrasonic_depth import acquire_profile
@@ -64,6 +65,11 @@ SONAR_NEAR_ROW_GAP_PX = 110.0
 FINAL_JAW_GAP_MIN_PX = 15.0
 FINAL_JAW_GAP_MAX_PX = 90.0
 FINAL_JAW_HORIZONTAL_FRACTION = 0.30
+TRACKING_PX_PER_WRIST_DEG = -6.0
+TRACKING_MAX_WRIST_STEP_DEG = 10
+PRE_CLOSE_LIFT_MM = 12.0
+VERIFY_LIFT_MM = 25.0
+RETAINED_CENTER_TOLERANCE_PX = 35.0
 FAR_ADVANCE_MM = 20.0
 MID_ADVANCE_MM = 15.0
 APPROACH_MAX_JOINT_STEP_DEG = 12
@@ -105,6 +111,21 @@ def adaptive_advance_mm(row_gap_px):
     if gap > FAR_ROW_GAP_PX:
         return FAR_ADVANCE_MM
     return MID_ADVANCE_MM
+
+
+def tracking_wrist_target(current_wrist, vertical_error_px):
+    """Use the measured motor-4 pixel response, not a tiny generic IK term."""
+    desired_pixel_delta = -float(vertical_error_px)
+    servo_delta = int(round(np.clip(
+        desired_pixel_delta / TRACKING_PX_PER_WRIST_DEG,
+        -TRACKING_MAX_WRIST_STEP_DEG,
+        TRACKING_MAX_WRIST_STEP_DEG,
+    )))
+    return int(np.clip(
+        int(current_wrist) + servo_delta,
+        config.SERVO_MIN[config.J_WRIST],
+        config.SERVO_MAX[config.J_WRIST],
+    ))
 
 
 def fingertip_floor_clearance_mm(pose, table_z_m=0.0):
@@ -240,6 +261,76 @@ def _final_grasp_gate(scene, candidate):
         f"final grasp aligned: offset {horizontal:.0f}px, gap {gap:.0f}px")
 
 
+def _vertical_lift_pose(pose, lift_mm):
+    """Raise at fixed forward reach and pitch so the fingers do not sweep."""
+    geometry = arm_fk.geometry(pose)
+    lifted = pose_at_reach(
+        pose,
+        float(geometry.tool[0]),
+        float(geometry.tool[2]) + float(lift_mm) / 1000.0,
+    )
+    lifted[config.J_GRIP] = int(pose[config.J_GRIP])
+    return lifted
+
+
+def _clearance_grasp_and_verify(
+        client, mover, safety, detector, selector, pose, distance_mm):
+    """Lift open fingers off the table, close, then verify a retained lift."""
+    preclose = _vertical_lift_pose(pose, PRE_CLOSE_LIFT_MM)
+    report = safety.transition_report(pose, preclose)
+    if not report.safe:
+        raise RuntimeError(
+            "pre-close clearance lift rejected: " + report.explain())
+    mover.slow_move(preclose, final_settle=0.45)
+
+    _frame, scene, candidate = _reacquire(detector, selector, attempts=4)
+    if candidate is None:
+        return {
+            "state": "preclose-target-lost", "pose": preclose,
+            "distance_mm": distance_mm,
+        }
+    aligned, reason = _final_grasp_gate(scene, candidate)
+    print(f"[sonar-reach] after clearance lift: {reason}", flush=True)
+    if not aligned:
+        return {
+            "state": "preclose-alignment-failed", "pose": preclose,
+            "distance_mm": distance_mm, "reason": reason,
+        }
+    reference_center = np.asarray(candidate.center, dtype=float)
+
+    closed = list(preclose)
+    closed[config.J_GRIP] = config.GRIP_CLOSED
+    report = safety.transition_report(preclose, closed)
+    if not report.safe:
+        raise RuntimeError("close rejected: " + report.explain())
+    mover.slow_move(closed, final_settle=0.55)
+
+    verified = _vertical_lift_pose(closed, VERIFY_LIFT_MM)
+    report = safety.transition_report(closed, verified)
+    if not report.safe:
+        raise RuntimeError(
+            "verification lift rejected: " + report.explain())
+    mover.slow_move(verified, final_settle=0.65)
+
+    _frame, _scene, retained = _reacquire(detector, selector, attempts=4)
+    shift = None
+    if retained is not None:
+        shift = float(np.linalg.norm(
+            np.asarray(retained.center, dtype=float) - reference_center))
+    retained_ok = shift is not None and shift <= RETAINED_CENTER_TOLERANCE_PX
+    print(
+        f"[sonar-reach] verification lift target shift="
+        f"{'missing' if shift is None else f'{shift:.1f}px'} "
+        f"retained={retained_ok}",
+        flush=True,
+    )
+    return {
+        "state": "retained" if retained_ok else "closed-unverified",
+        "pose": verified, "distance_mm": distance_mm,
+        "retained_shift_px": shift,
+    }
+
+
 def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
         detector=None, selector=None):
     client = client or ArmSessionClient()
@@ -312,6 +403,9 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
             f"jaw={jaw_reason}", flush=True)
 
         if decision.action == "floor":
+            if execute and allow_grasp:
+                return _clearance_grasp_and_verify(
+                    client, mover, safety, detector, selector, pose, distance)
             return {
                 "state": "floor-clearance-stop", "pose": pose,
                 "distance_mm": distance,
@@ -321,6 +415,9 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
         if decision.action == "sonar":
             final_aligned, final_reason = _final_grasp_gate(scene, candidate)
             print(f"[sonar-reach] {final_reason}", flush=True)
+            if execute and allow_grasp:
+                return _clearance_grasp_and_verify(
+                    client, mover, safety, detector, selector, pose, distance)
             if not execute or not allow_grasp or not final_aligned:
                 return {
                     "state": (
@@ -330,17 +427,6 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
                     "fingertip_floor_clearance_mm": floor_clearance,
                     "preview": str(PREVIEW),
                 }
-            closed = list(pose)
-            closed[config.J_GRIP] = config.GRIP_CLOSED
-            report = safety.transition_report(pose, closed)
-            if not report.safe:
-                raise RuntimeError(
-                    "close rejected: " + report.explain())
-            mover.slow_move(closed, final_settle=0.8)
-            return {
-                "state": "closed", "pose": closed,
-                "distance_mm": distance, "preview": str(PREVIEW)}
-
         vertical_error = float(candidate.center[1]) - aim_y
         advance_mm = adaptive_advance_mm(row_gap)
         plan = plan_resolved_step(
@@ -352,6 +438,8 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
             raise RuntimeError("no bounded 2/3/4 step remains")
 
         next_pose = list(plan["pose"])
+        next_pose[config.J_WRIST] = tracking_wrist_target(
+            pose[config.J_WRIST], vertical_error)
         swept_floor_clearance = transition_fingertip_floor_clearance_mm(
             pose, next_pose)
         if swept_floor_clearance <= FINGERTIP_FLOOR_STOP_MM:

@@ -6,6 +6,7 @@ from ultrasonic_target_reach import (
     adaptive_advance_mm,
     approach_stop_decision,
     fingertip_floor_clearance_mm,
+    tracking_wrist_target,
     transition_fingertip_floor_clearance_mm,
 )
 
@@ -50,6 +51,11 @@ class ApproachStopTests(unittest.TestCase):
 
         self.assertTrue(_final_grasp_gate(scene, aligned)[0])
         self.assertFalse(_final_grasp_gate(scene, overshot)[0])
+
+    def test_motor_four_uses_measured_pixel_error_with_large_headroom(self):
+        self.assertEqual(tracking_wrist_target(178, -60), 168)
+        self.assertEqual(tracking_wrist_target(168, 30), 173)
+        self.assertEqual(tracking_wrist_target(178, 0), 178)
 
 if __name__ == "__main__":
     unittest.main()
