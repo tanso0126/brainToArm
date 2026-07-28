@@ -150,6 +150,27 @@ def repeated_profile(client, batches=3, samples_per_batch=12,
          f"batch spread {spread:.1f} mm > {max_batch_spread_mm:.1f} mm"))
 
 
+def wait_for_stable_profile(client, timeout_s=8.0, batches=2,
+                            samples_per_batch=8, retry_pause_s=0.25,
+                            **profile_options):
+    """Wait for measured stability, not an assumed fixed servo settle delay."""
+    deadline = time.monotonic() + float(timeout_s)
+    attempts = []
+    while time.monotonic() < deadline:
+        result = repeated_profile(
+            client, batches=batches, samples_per_batch=samples_per_batch,
+            **profile_options)
+        attempts.append(result)
+        if result.stable:
+            return result, tuple(attempts)
+        if retry_pause_s:
+            time.sleep(float(retry_pause_s))
+    last_reason = attempts[-1].reason if attempts else "no measurement"
+    raise TimeoutError(
+        f"ultrasonic echo did not settle within {timeout_s:.1f}s: "
+        f"{last_reason}")
+
+
 @dataclass(frozen=True)
 class SonarMount:
     """Planar sonar extrinsic relative to the motor-4 camera bracket frame."""
@@ -328,6 +349,9 @@ def main():
         "repeat-profile", help="read only; checks stability across batches")
     repeat.add_argument("--batches", type=int, default=3)
     repeat.add_argument("--samples", type=int, default=12)
+    stable = subparsers.add_parser(
+        "wait-stable", help="read only; waits out servo/backlash transients")
+    stable.add_argument("--timeout", type=float, default=8.0)
     predict = subparsers.add_parser("predict-floor")
     predict.add_argument("--calibration", default=str(DEFAULT_CALIBRATION_PATH))
     args = parser.parse_args()
@@ -343,6 +367,14 @@ def main():
         result = repeated_profile(
             client, batches=args.batches, samples_per_batch=args.samples)
         print(json.dumps(asdict(result), indent=2))
+        return
+    if args.action == "wait-stable":
+        result, attempts = wait_for_stable_profile(
+            client, timeout_s=args.timeout)
+        print(json.dumps({
+            "result": asdict(result),
+            "attempts": len(attempts),
+        }, indent=2))
         return
     pose = client.request({"command": "status"})["pose"]
     mount, payload = load_calibration(args.calibration)

@@ -11,6 +11,7 @@ from ultrasonic_depth import (
     repeated_profile,
     robust_profile,
     save_calibration,
+    wait_for_stable_profile,
 )
 
 
@@ -50,6 +51,23 @@ class RangeProfileTests(unittest.TestCase):
             min_cluster_samples=7)
         self.assertFalse(result.stable)
         self.assertEqual(result.batch_spread_mm, 17.0)
+
+    def test_wait_for_stable_profile_ignores_initial_servo_transient(self):
+        class FakeClient:
+            def __init__(self):
+                self.values = iter(
+                    ([120] * 7) + ([140] * 7)
+                    + ([145] * 7) + ([145] * 7))
+
+            def request(self, _payload):
+                return {"valid": True, "distanceMm": next(self.values)}
+
+        result, attempts = wait_for_stable_profile(
+            FakeClient(), timeout_s=1, batches=2, samples_per_batch=7,
+            retry_pause_s=0, pause_s=0, min_cluster_samples=7)
+        self.assertTrue(result.stable)
+        self.assertEqual(result.distance_mm, 145.0)
+        self.assertEqual(len(attempts), 2)
 
 
 class SonarGeometryTests(unittest.TestCase):

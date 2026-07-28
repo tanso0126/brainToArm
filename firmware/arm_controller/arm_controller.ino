@@ -63,6 +63,7 @@ const uint8_t GRIP_FEEDBACK_PIN = A0;
 Servo servos[N];
 float current[N];   // live angle (float for smooth slew)
 int   target[N];    // commanded angle
+int   lastWritten[N]; // avoid rewriting an unchanged pulse command every tick
 bool  announced;    // have we already sent DONE for the current target set?
 
 int clampJoint(uint8_t i, int deg) {
@@ -81,6 +82,7 @@ void setup() {
     current[i] = HOME_DEG[i];
     target[i]  = HOME_DEG[i];
     servos[i].write((int)current[i]);
+    lastWritten[i] = (int)current[i];
   }
   announced = true;
   Serial.println("READY");
@@ -231,7 +233,11 @@ void slew() {
       current[i] += (diff > 0 ? 1 : -1) * min(SLEW_DEG_PER_TICK, (float)fabs(diff));
       allReached = false;
     }
-    servos[i].write((int)(current[i] + 0.5));
+    int output = (int)(current[i] + 0.5);
+    if (output != lastWritten[i]) {
+      servos[i].write(output);
+      lastWritten[i] = output;
+    }
   }
   if (allReached && !announced) { Serial.println("DONE"); announced = true; }
 }

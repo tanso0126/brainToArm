@@ -3012,3 +3012,24 @@ and the trained model backend.
   145/135/128 mm batches.
 - Synthetic fitting now recovers a non-default wrist scale, and a regression
   proves a low-quality result cannot be saved.
+
+## Patch 78 — measure after servo vibration settles
+
+### Physical finding
+
+- The same stationary 180° pose previously produced different short bursts
+  immediately after motion, but after remaining still three independent
+  12-echo batches all returned a 145 mm median with 0 mm inter-batch spread.
+- The dominant error is therefore a motion/backlash settling transient, not a
+  fixed sonar conversion error that should be forced into the calibration.
+
+### Changes
+
+- The Uno now changes a Servo library pulse command only when its rounded target
+  degree changes. It continues generating the last PWM pulse and never detaches
+  a load-bearing joint, but no longer rewrites the same value every 15 ms.
+- Added an adaptive stable-range wait. It repeatedly evaluates independent echo
+  batches and proceeds only when measured inter-batch agreement passes; a fixed
+  sleep alone can no longer authorize depth use.
+- Added a regression where the first 120/140 mm attempt is rejected and the
+  following 145/145 mm attempt is accepted.
