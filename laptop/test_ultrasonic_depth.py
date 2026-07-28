@@ -37,14 +37,18 @@ class RangeProfileTests(unittest.TestCase):
 
 
 class SonarGeometryTests(unittest.TestCase):
-    def test_motor4_does_not_change_forearm_sensor_ray(self):
+    def test_motor4_changes_sensor_ray_but_motor6_does_not(self):
         mount = SonarMount(0.018, 0.052, 24.0)
-        pose_a = [90, 124, 90, 130, 90, 170]
-        pose_b = [90, 124, 90, 180, 180, 30]
+        pose_a = [90, 100, 100, 160, 90, 170]
+        pose_b = [90, 100, 100, 180, 90, 170]
+        pose_roll = [90, 100, 100, 160, 180, 30]
         origin_a, direction_a = mount.ray(pose_a)
         origin_b, direction_b = mount.ray(pose_b)
-        np.testing.assert_allclose(origin_a, origin_b, atol=1e-12)
-        np.testing.assert_allclose(direction_a, direction_b, atol=1e-12)
+        origin_roll, direction_roll = mount.ray(pose_roll)
+        self.assertGreater(np.linalg.norm(origin_a - origin_b), 1e-3)
+        self.assertGreater(np.linalg.norm(direction_a - direction_b), 0.1)
+        np.testing.assert_allclose(origin_a, origin_roll, atol=1e-12)
+        np.testing.assert_allclose(direction_a, direction_roll, atol=1e-12)
 
     def test_fit_recovers_synthetic_forearm_mount_with_outlier(self):
         actual = SonarMount(0.021, 0.049, 27.0)

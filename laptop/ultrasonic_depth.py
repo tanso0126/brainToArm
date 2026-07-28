@@ -6,10 +6,11 @@ clusters.  This module consequently exposes a *profile* (raw echoes, dominant
 cluster, MAD, support and validity) rather than pretending every integer is a
 usable depth.
 
-The sensor is physically attached to the forearm, above the motor-4 pivot.  Its
-extrinsic transform is therefore expressed in :func:`arm_fk.forearm_pose`, not
-the gripper/tool frame.  A floor calibration fits the local x/z offset and beam
-pitch from several known robot poses and their stable empty-table ranges.
+The sensor is physically attached to the motor-4 camera bracket.  Its extrinsic
+transform is therefore expressed in :func:`arm_fk.sensor_pose`: it follows
+motor-4 pitch but not motor-6 roll.  A floor calibration fits the local x/z
+offset and beam pitch from several known robot poses and their stable
+empty-table ranges.
 """
 
 from dataclasses import asdict, dataclass
@@ -113,7 +114,7 @@ def acquire_profile(client, samples=15, interval_s=0.060, **profile_options):
 
 @dataclass(frozen=True)
 class SonarMount:
-    """Planar sonar extrinsic relative to the motor-4 pivot/forearm frame."""
+    """Planar sonar extrinsic relative to the motor-4 camera bracket frame."""
 
     origin_x_m: float
     origin_z_m: float
@@ -121,7 +122,7 @@ class SonarMount:
 
     def ray(self, servo: Sequence[float]):
         """Return ``(origin, unit_direction)`` in the robot base frame."""
-        rotation, pivot = arm_fk.forearm_pose(servo)
+        rotation, pivot = arm_fk.sensor_pose(servo)
         pitch = math.radians(self.beam_pitch_deg)
         local_origin = np.array(
             [self.origin_x_m, 0.0, self.origin_z_m], dtype=float)
@@ -163,14 +164,15 @@ def fit_floor_mount(samples: Sequence[FloorCalibrationSample],
         raise ValueError("at least four stable floor poses are required")
     if len({tuple(sample.pose) for sample in samples}) != len(samples):
         raise ValueError("calibration poses must be distinct")
-    forearm_angles = [
+    sensor_angles = [
         arm_fk.shoulder_joint_deg(sample.pose[1])
         + arm_fk.elbow_joint_deg(sample.pose[2])
+        + arm_fk.wrist_pitch_joint_deg(sample.pose[3])
         for sample in samples
     ]
-    if max(forearm_angles) - min(forearm_angles) < 8.0:
+    if max(sensor_angles) - min(sensor_angles) < 8.0:
         raise ValueError(
-            "forearm calibration poses need at least 8 degrees of angle span")
+            "sensor calibration poses need at least 8 degrees of angle span")
 
     try:
         from scipy.optimize import least_squares
@@ -228,8 +230,8 @@ def fit_floor_mount(samples: Sequence[FloorCalibrationSample],
             index for index in range(len(samples))
             if index not in inlier_indices
         ],
-        "forearm_angle_span_deg": float(max(forearm_angles)
-                                         - min(forearm_angles)),
+        "sensor_angle_span_deg": float(max(sensor_angles)
+                                       - min(sensor_angles)),
         "success": bool(result.success),
         "message": str(result.message),
     }
@@ -239,7 +241,7 @@ def save_calibration(path, result, samples, table_z_m=0.0):
     path = Path(path)
     payload = {
         "version": 1,
-        "coordinate_frame": "motor4_pivot_forearm",
+        "coordinate_frame": "motor4_pivot_after_pitch_before_roll",
         "table_z_m": float(table_z_m),
         "mount": asdict(result["mount"]),
         "fit": {key: value for key, value in result.items() if key != "mount"},

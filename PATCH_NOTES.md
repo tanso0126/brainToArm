@@ -2960,3 +2960,27 @@ and the trained model backend.
   grasp curve stays blocked until physical recalibration.
 - Added a regression that specifically requires both previously accepted
   contact poses to fail with `finger-table`.
+
+## Patch 76 — identify the real motor-4 sensor frame
+
+### Controlled physical result
+
+- At the high `[90,100,100,...,90,170]` pose, shoulder and elbow were held
+  fixed while only motor 4 changed from 180° to 160°.
+- The live camera view rotated and the stable sonar echo changed from roughly
+  135 mm to 165 mm. The sensors therefore rotate with motor 4; the earlier
+  forearm-fixed assumption was false.
+- Motor 6 mechanically rolls the gripper below the camera bracket and is not
+  part of the sensor transform.
+
+### Changes
+
+- Added an explicit sensor rotation containing base, shoulder, elbow and
+  motor-4 pitch, before motor-6 roll.
+- Moved the camera collision seed to that pre-roll frame and changed sonar rays
+  to use the same measured kinematic attachment.
+- Calibration angle-span validation now includes motor-4 pitch. This permits a
+  safer calibration with the arm held high and stationary while only the wrist
+  pitch changes.
+- Replaced the old invariance test with a regression proving motor 4 changes the
+  sensor ray while motor 6 and gripper opening do not.
