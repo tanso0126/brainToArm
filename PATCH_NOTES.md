@@ -3532,3 +3532,32 @@ and the trained model backend.
   and after its reacquisition.
 - Added a regression test with the measured partial, complete, and unrelated
   masks, proving only the complete mask of the locked object is selected.
+
+## Patch 96 — verify the held object inside the closed-jaw corridor
+
+### Physical finding
+
+- The strict close gate passed at offset 12 px and gap 58 px. The controller
+  closed the gripper and executed the collision-checked 25 mm verification
+  lift, but instance-lock matching then returned no object and stopped before
+  HOME.
+- The live lifted frame visibly showed the blue/white object held between the
+  fingers. With detected closed-finger boxes, their inner corridor was
+  `x=610..669`; a generic saturated connected component filled that corridor
+  continuously from `y=369` to the bottom row, with area 8,692 px. FastSAM had
+  split it because the object overlaps the blue finger in the close-up.
+
+### Changes
+
+- Added a post-lift-only fallback that inspects strictly between the two
+  detected closed-finger boxes. It requires one hue-independent vivid component
+  to fill at least 12% of the corridor, span at least 25% of frame height, and
+  remain clipped in the bottom 5%—the geometry observed only for an object
+  rising with the gripper.
+- The fallback runs only after the pre-close identity/alignment gate, physical
+  close, and verification lift. It cannot authorize initial selection or make
+  an empty gripper close.
+- The recovered component still passes the existing centred/bottom-clipped
+  retention gate before loaded HOME is allowed.
+- Added positive held-object and negative short-background-blob regression
+  tests.

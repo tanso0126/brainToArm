@@ -9,6 +9,7 @@ from ultrasonic_target_reach import (
     _final_grasp_gate,
     _preclose_needs_fine_lift,
     _retained_image_gate,
+    _retained_corridor_candidate,
     _candidate_on_sonar_axis,
     adaptive_advance_mm,
     approach_observation_pose,
@@ -131,6 +132,25 @@ class ApproachStopTests(unittest.TestCase):
 
         self.assertTrue(_retained_image_gate(frame, held)[0])
         self.assertFalse(_retained_image_gate(frame, table)[0])
+
+    def test_retention_recovers_vivid_object_inside_closed_jaws(self):
+        frame = np.full((720, 1280, 3), 220, dtype=np.uint8)
+        cv2.rectangle(frame, (610, 365), (650, 719), (255, 0, 0), -1)
+        scene = SimpleNamespace(
+            marker_boxes=[(485, 518, 125, 202), (669, 612, 99, 108)])
+
+        candidate = _retained_corridor_candidate(frame, scene)
+
+        self.assertIsNotNone(candidate)
+        self.assertTrue(_retained_image_gate(frame, candidate)[0])
+
+    def test_retention_corridor_rejects_short_background_blob(self):
+        frame = np.full((720, 1280, 3), 220, dtype=np.uint8)
+        cv2.rectangle(frame, (610, 640), (650, 719), (255, 0, 0), -1)
+        scene = SimpleNamespace(
+            marker_boxes=[(485, 518, 125, 202), (669, 612, 99, 108)])
+
+        self.assertIsNone(_retained_corridor_candidate(frame, scene))
 
     def test_loaded_home_preserves_only_closed_gripper_value(self):
         held = [90, 111, 70, 177, 180, 170]

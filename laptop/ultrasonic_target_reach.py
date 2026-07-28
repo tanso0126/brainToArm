@@ -366,6 +366,55 @@ def _retained_image_gate(frame, candidate):
         f"lateral={horizontal:.0f}px")
 
 
+def _retained_corridor_candidate(frame, scene):
+    """Detect a lifted vivid object continuously filling the closed-jaw gap."""
+    marker_boxes = sorted(getattr(scene, "marker_boxes", ()),
+                          key=lambda box: box[0])
+    if len(marker_boxes) < 2:
+        return None
+    height, width = frame.shape[:2]
+    left = int(marker_boxes[0][0] + marker_boxes[0][2])
+    right = int(marker_boxes[-1][0])
+    top = int(round(0.30 * height))
+    if right - left < 15:
+        return None
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(
+        hsv,
+        np.asarray((0, VIVID_MIN_SATURATION, VIVID_MIN_VALUE),
+                   dtype=np.uint8),
+        np.asarray((179, 255, 255), dtype=np.uint8),
+    )
+    roi = np.zeros_like(mask)
+    roi[top:height, left:right] = 255
+    mask = cv2.bitwise_and(mask, roi)
+    mask = cv2.morphologyEx(
+        mask, cv2.MORPH_CLOSE, np.ones((5, 5), dtype=np.uint8))
+    count, labels, stats, centroids = cv2.connectedComponentsWithStats(
+        mask, connectivity=8)
+    corridor_area = float((right - left) * (height - top))
+    candidates = []
+    for label in range(1, count):
+        x, y, box_width, box_height, area = (
+            int(value) for value in stats[label])
+        bottom = y + box_height
+        if area < 0.12 * corridor_area:
+            continue
+        if box_height < 0.25 * height or bottom < 0.95 * height:
+            continue
+        pixels = hsv[:, :, 1][labels == label]
+        values = hsv[:, :, 2][labels == label]
+        candidates.append(ObjectDetection(
+            center=tuple(float(value) for value in centroids[label]),
+            bbox=(x, y, box_width, box_height),
+            area=float(area),
+            confidence=0.95,
+            median_saturation=float(np.median(pixels)),
+            median_value=float(np.median(values)),
+        ))
+    return max(candidates, key=lambda item: item.area) if candidates else None
+
+
 def home_pose_holding(pose):
     """HOME for every joint except the currently loaded gripper servo."""
     home = list(config.HOME_POSE)
@@ -717,6 +766,14 @@ def _clearance_grasp_and_verify(
 
     retained_frame, _scene, retained = _reacquire(
         detector, selector, attempts=4)
+    if retained is None:
+        retained = _retained_corridor_candidate(retained_frame, _scene)
+        if retained is not None:
+            print(
+                "[sonar-reach] retention recovered from continuous "
+                "closed-jaw corridor evidence",
+                flush=True,
+            )
     shift = None
     if retained is not None:
         shift = float(np.linalg.norm(
