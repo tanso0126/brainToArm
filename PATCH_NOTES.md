@@ -3292,3 +3292,8 @@ and the trained model backend.
 - Loaded HOME: `[90,70,90,140,180,170]`.
 - The authoritative collision model accepts the complete interpolated route
   with 46.8 mm minimum clearance.
+- The loaded route was executed successfully. The persistent Uno session
+  reported final pose `[90,70,90,140,180,170]`, and the fresh wrist-camera
+  frame still showed the same blue object enclosed between the closed coloured
+  fingers. HOME return is therefore physically complete without dropping or
+  opening the gripper.
