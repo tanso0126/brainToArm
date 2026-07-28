@@ -539,6 +539,11 @@ brainToArm/
   fallback. Reuse is only valid for the same
   participant with the same electrode/REF/GND placement; raw EEG is not stored
   in this baseline file.
+  In the 3D studio, the target presentation opens one onset-locked ErrP epoch.
+  After basket placement, the UI keeps opening serialized review epochs for ten
+  seconds; normal 400 ms status refreshes no longer cancel an in-flight result.
+  A rejection in that review period retrieves the item, returns it to its saved
+  origin, and advances to the next candidate.
 
 - **`record_errp.py`** — Collects training data. A goal is fixed for the session,
   then the script drives the arm through

@@ -2769,3 +2769,34 @@ and the trained model backend.
   exact 50% threshold while authority and stride remain adaptive.
 - Added persistence coverage for automatic startup restore and UI render
   assertions for the fixed threshold and automatic application wording.
+
+## Patch 70 — keep ErrP recognition alive after simulated delivery
+
+### Root cause
+
+- The MuJoCo controller left its post-delivery `evaluating` phase after only two
+  seconds.
+- The browser started one 0.8-second ErrP request, but its effect depended on
+  the complete simulation status object. The normal 400 ms status refresh
+  changed that object, ran effect cleanup, and caused the eventual valid result
+  to be ignored.
+
+### Changes
+
+- Extended post-delivery review to ten seconds and exposed that duration in the
+  simulation status.
+- Replaced the fragile one-shot browser effect with serialized ErrP checks for
+  the full review phase. Its dependencies now use only stable decision identity
+  fields, so servo/frame/status updates cannot cancel the active decision.
+- Added a short deferred start to prevent React development-mode effect probing
+  from opening overlapping server epochs.
+- A detected late rejection uses the existing physical reverse path: recover
+  from the basket, return to the saved origin, remember the rejected object, and
+  continue with the next candidate.
+
+### Verification
+
+- Added a MuJoCo regression proving the controller uses a 1.6-second target
+  review and a ten-second post-delivery review.
+- Added dashboard source/render coverage for continuous basket review and the
+  operator-facing ten-second explanation.

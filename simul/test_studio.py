@@ -97,6 +97,20 @@ class MuJoCoStudioTests(unittest.TestCase):
         ) ** 0.5
         self.assertLess(basket_error, 7.0)
 
+    def test_delivery_keeps_a_ten_second_rejection_window(self):
+        self._accelerate()
+        waits = []
+
+        def record_window(seconds):
+            waits.append(seconds)
+            return self.studio._reject.is_set()
+
+        self.studio._wait_for_veto = record_window
+        self.studio.start()
+        status = self._wait_complete()
+        self.assertEqual(status["postDeliveryReviewSeconds"], 10.0)
+        self.assertEqual(waits, [1.6, 10.0])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

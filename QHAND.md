@@ -209,6 +209,12 @@ correct/error trials and training the `model` backend; the baseline heuristic is
 a diagnostic/demo detector and must not be reported as validated subject
 accuracy.
 
+The simulator keeps basket delivery in a ten-second review phase. During that
+phase it runs serialized 0.8-second CH8 ErrP epochs continuously, instead of
+checking only once. Dashboard status refreshes do not cancel an epoch result.
+A detected rejection therefore still retrieves the delivered object, returns it
+to its recorded origin, and selects the next non-rejected object.
+
 The calibration button uses its own full eight-second quality window, not the
 short two-second channel badge. It becomes enabled only when enough samples are
 present and the complete CH1·2·3·4·8 window is clean. If it stays disabled, stop

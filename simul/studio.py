@@ -63,6 +63,8 @@ SCAN_ROUTE = ((90, 110), (90, 102), (90, 94), (90, 86), (90, 78))
 MOTION_SERVO_STEP_DEG = 2.0
 MIN_SAFE_TOOL_X_M = 0.175
 MIN_AIR_TOOL_Z_M = 0.017
+TARGET_REVIEW_SECONDS = 1.6
+POST_DELIVERY_REVIEW_SECONDS = 10.0
 
 
 @dataclass
@@ -681,7 +683,7 @@ class MuJoCoStudio:
                 self._phase = "target"
                 self._add_event(
                     f"후보 제시: {target.label} · ErrP 판정 창", "move")
-                if self._wait_for_veto(1.6):
+                if self._wait_for_veto(TARGET_REVIEW_SECONDS):
                     self._return_item(target)
                     continue
 
@@ -704,8 +706,10 @@ class MuJoCoStudio:
                 self._last_delivered_id = target.id
                 self._phase = "evaluating"
                 self._add_event(
-                    f"{target.label}: 바구니 도착 · ErrP 판정 창", "success")
-                if self._wait_for_veto(2.0):
+                    f"{target.label}: 바구니 도착 · "
+                    f"{POST_DELIVERY_REVIEW_SECONDS:.0f}초 ErrP 연속 검토",
+                    "success")
+                if self._wait_for_veto(POST_DELIVERY_REVIEW_SECONDS):
                     self._return_item(target)
                     continue
                 self._phase = "completed"
@@ -919,6 +923,7 @@ class MuJoCoStudio:
                 "cycle": self._cycle,
                 "activeId": self._active_id,
                 "lastDeliveredId": self._last_delivered_id,
+                "postDeliveryReviewSeconds": POST_DELIVERY_REVIEW_SECONDS,
                 "rejectedIds": list(self._rejected),
                 "objects": objects,
                 "basket": {
