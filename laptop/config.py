@@ -171,7 +171,10 @@ EEG_HID_VID = 0x0F1F
 EEG_HID_PID = 0x0010
 EEG_HID_CHANNELS = 8
 EEG_HID_MAX_CHANNELS = 16
-EEG_HID_GAIN_INDEX = 6
+# Physical sweep with the current montage: indices 0–2 were rail-clean after
+# startup settling; index 3 (×0.7) already clipped 35–50%. Use the highest clean
+# setting and let the dashboard expose all 0–15 steps for later re-validation.
+EEG_HID_GAIN_INDEX = 2
 EEG_HID_SAMPLE_SELECTOR = 8  # D1WD10: 2**8 = 256 Hz
 EEG_HID_STALL_TIMEOUT_S = 2.0
 EEG_HID_ADC_UV_PER_COUNT = -38.14697265625  # ADC input only; not electrode input
@@ -188,7 +191,7 @@ EEG_FS = 256
 EEG_MIN_EPOCH_FRACTION = 0.80  # abort a decision if too many onset-locked samples are missing
 # Rest calibration tolerates brief motion artefacts, never sustained saturation.
 EEG_QUALITY_MAX_TRANSIENT_CLIPPING_PERCENT = 5.0
-EEG_QUALITY_MAX_STABLE_ADC_SPAN_FRACTION = 0.95
+EEG_QUALITY_MAX_STABLE_ADC_SPAN_FRACTION = 0.95  # raw ADC p-p, never filtered p-p
 EEG_CONFIG_VERIFIED = False    # transport works; set True only after montage/rate signal validation
 
 # Compatibility-source scaling: LXSDF ships a 12-bit ADC value.

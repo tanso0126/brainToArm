@@ -30,6 +30,8 @@ PGA_GAINS = (
     0.1, 0.2, 0.4, 0.7, 1.0, 1.36, 1.70, 2.55,
     3.40, 4.25, 5.67, 6.80, 8.50, 10.20, 11.90, 17.00,
 )
+COMMAND_SETTLE_SECONDS = 0.12
+STARTUP_DISCARD_SECONDS = 1.0
 
 # D1WD10 defines sampling frequency as 2**selector Hz.  PolyG-I uses 16
 # physical channels, whose documented maximum is 512 Hz (selector 9).
@@ -94,12 +96,18 @@ class PolyGIHID:
     """Exact-one-device session with deterministic start/stop lifecycle."""
 
     def __init__(self, channels=EEG_CHANNELS, max_channels=MAX_CHANNELS,
-                 gain_index=6, sample_selector=8, hid_module=None):
+                 gain_index=2, sample_selector=8, hid_module=None,
+                 command_settle_seconds=COMMAND_SETTLE_SECONDS,
+                 startup_discard_seconds=STARTUP_DISCARD_SECONDS):
         self.channels = channels
         self.max_channels = max_channels
         self.gain_index = gain_index
         self.sample_selector = sample_selector
         self._hid = hid if hid_module is None else hid_module
+        self.command_settle_seconds = float(command_settle_seconds)
+        self.startup_discard_seconds = float(startup_discard_seconds)
+        if self.command_settle_seconds < 0 or self.startup_discard_seconds < 0:
+            raise ValueError("PolyG-I settle/discard durations must be non-negative")
         self.device = None
         self.streaming = False
 
@@ -141,13 +149,24 @@ class PolyGIHID:
         # Exact LXSM-D1WD10 initialization order. Stop first so a process crash or
         # a prior acquisition cannot leave stale reports racing this new session.
         self._write(0x01, 0x00, 0x00)
+        time.sleep(self.command_settle_seconds)
         self._write(0x05, self.max_channels, 0x00)
+        time.sleep(self.command_settle_seconds)
         self._write(0x04, self.sample_selector, 0x00)
+        time.sleep(self.command_settle_seconds)
         # Command 0x0B sets one source group: arg1=gain, arg2=group. PolyG-I
         # source group 0 is EEG channels 1..8, leaving ECG/EMG/etc untouched.
         self._write(0x0B, self.gain_index, 0x00)
+        time.sleep(self.command_settle_seconds)
         self._write(0x01, 0x01, 0x00)
         self.streaming = True
+        # The physical unit emits a short transition while its analogue path
+        # settles after START. Those exact-rail rows are neither brain signal nor
+        # a valid rest baseline, so drain them before exposing the session.
+        deadline = time.monotonic() + self.startup_discard_seconds
+        while time.monotonic() < deadline:
+            if not self.read_report():
+                time.sleep(0.001)
 
     def read_report(self):
         if self.device is None:

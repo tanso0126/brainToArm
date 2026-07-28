@@ -61,6 +61,7 @@ type ErrpStatus = {
       state: "waiting" | "present" | "flat" | "saturated" | "unstable";
       rmsMv: number;
       peakToPeakMv: number;
+      rawPeakToPeakMv: number;
       clippingPercent: number;
       dcOffsetMv: number;
     };
@@ -68,6 +69,7 @@ type ErrpStatus = {
       state: "waiting" | "present" | "flat" | "saturated" | "unstable";
       rmsMv: number;
       peakToPeakMv: number;
+      rawPeakToPeakMv: number;
       clippingPercent: number;
       dcOffsetMv: number;
     }>;

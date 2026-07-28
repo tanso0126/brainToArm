@@ -39,6 +39,7 @@ type Quality = {
   state: QualityState;
   rmsMv: number;
   peakToPeakMv: number;
+  rawPeakToPeakMv: number;
   clippingPercent: number;
   dcOffsetMv: number;
 };
@@ -77,11 +78,13 @@ type DashboardStatus = {
     notchHz: number;
     notchQ: number;
     metricWindowSeconds: number;
+    commandSettleSeconds: number;
+    startupDiscardSeconds: number;
     rawRailCounts: [number, number];
     adcInputRangeMv: [number, number];
     calibrationMaxClippingPercent: number;
     calibrationMaxAdcSpanFraction: number;
-    calibrationMaxFilteredSpanMv: number;
+    calibrationMaxRawSpanMv: number;
     pgaGainIndex: number;
     pgaGain: number;
     electrodeUvCalibrated: boolean;
@@ -178,6 +181,7 @@ const EMPTY_QUALITY: Quality = {
   state: "waiting",
   rmsMv: 0,
   peakToPeakMv: 0,
+  rawPeakToPeakMv: 0,
   clippingPercent: 0,
   dcOffsetMv: 0,
 };
@@ -635,7 +639,7 @@ export default function Home() {
   const [windowSeconds, setWindowSeconds] = useState(5);
   const [fixedScale, setFixedScale] = useState(100);
   const [scaleMode, setScaleMode] = useState<ScaleMode>("fixed");
-  const [gainIndex, setGainIndex] = useState(6);
+  const [gainIndex, setGainIndex] = useState(2);
   const [renderDelayMs, setRenderDelayMs] = useState(450);
   const [displayPaused, setDisplayPaused] = useState(false);
   const [recordLabel, setRecordLabel] = useState("");
@@ -813,7 +817,7 @@ export default function Home() {
           </label>}
           <label>EEG PGA
             <select value={gainIndex} disabled={isRunning} onChange={(event) => setGainIndex(Number(event.target.value))}>
-              <option value={4}>×1.00</option><option value={5}>×1.36</option><option value={6}>×1.70</option><option value={7}>×2.55</option><option value={8}>×3.40</option><option value={9}>×4.25</option><option value={10}>×5.67</option>
+              <option value={0}>×0.10</option><option value={1}>×0.20</option><option value={2}>×0.40</option><option value={3}>×0.70</option><option value={4}>×1.00</option><option value={5}>×1.36</option><option value={6}>×1.70</option><option value={7}>×2.55</option><option value={8}>×3.40</option><option value={9}>×4.25</option><option value={10}>×5.67</option><option value={11}>×6.80</option><option value={12}>×8.50</option><option value={13}>×10.20</option><option value={14}>×11.90</option><option value={15}>×17.00</option>
             </select>
           </label>
           {!isRunning ? (
@@ -970,7 +974,7 @@ export default function Home() {
               </label>}
               <label>EEG PGA
                 <select value={gainIndex} disabled={isRunning} onChange={(event) => setGainIndex(Number(event.target.value))}>
-                  <option value={4}>index 4 · ×1.00</option><option value={5}>index 5 · ×1.36</option><option value={6}>index 6 · ×1.70</option><option value={7}>index 7 · ×2.55</option><option value={8}>index 8 · ×3.40</option><option value={9}>index 9 · ×4.25</option><option value={10}>index 10 · ×5.67</option><option value={11}>index 11 · ×6.80</option><option value={12}>index 12 · ×8.50</option><option value={13}>index 13 · ×10.20</option><option value={14}>index 14 · ×11.90</option><option value={15}>index 15 · ×17.00</option>
+                  <option value={0}>index 0 · ×0.10</option><option value={1}>index 1 · ×0.20</option><option value={2}>index 2 · ×0.40</option><option value={3}>index 3 · ×0.70</option><option value={4}>index 4 · ×1.00</option><option value={5}>index 5 · ×1.36</option><option value={6}>index 6 · ×1.70</option><option value={7}>index 7 · ×2.55</option><option value={8}>index 8 · ×3.40</option><option value={9}>index 9 · ×4.25</option><option value={10}>index 10 · ×5.67</option><option value={11}>index 11 · ×6.80</option><option value={12}>index 12 · ×8.50</option><option value={13}>index 13 · ×10.20</option><option value={14}>index 14 · ×11.90</option><option value={15}>index 15 · ×17.00</option>
                 </select>
               </label>
               <button className={`secondary-button ${displayPaused ? "active" : ""}`} onClick={toggleDisplayPause} disabled={!isRunning}>
@@ -1032,7 +1036,7 @@ export default function Home() {
             </div>
             {!calibrationWindow?.ready && <p className="baseline-store-note warning">{calibrationWindowLabel(calibrationWindow)}. 샘플 수는 안정도 점수가 아니며, 포화는 마음 상태가 아니라 전극·REF/GND·입력 범위 문제입니다.</p>}
             {savedBaseline?.available && <p className={`baseline-store-note ${savedBaseline.compatible ? "" : "warning"}`}>{savedBaseline.compatible ? `${savedBaseline.createdAt ? new Date(savedBaseline.createdAt).toLocaleString("ko-KR") : "이전 세션"} 기준 · PGA index ${savedBaseline.gainIndex ?? "—"} · 같은 피험자/전극 배치에서만 사용` : savedBaseline.reason}</p>}
-            <p className="fine-print">2초 Welch 창을 1초마다 갱신합니다. 원시 rail {status?.signal.rawRailCounts?.[0] ?? -32768}/{status?.signal.rawRailCounts?.[1] ?? 32766} (ADC 입력 약 ±1.25 V) 점유율은 최대 {status?.signal.calibrationMaxClippingPercent ?? 5}%까지, 필터 p-p는 최대 {(status?.signal.calibrationMaxFilteredSpanMv ?? 2375).toFixed(0)} mV까지 허용합니다. TAR 상승은 로봇 가중치·ErrP 임계값·반영 간격을 높이고, TAR 하락은 인간/ErrP 반영을 높입니다.</p>
+            <p className="fine-print">시작 후 {(status?.signal.startupDiscardSeconds ?? 1).toFixed(1)}초 전이 구간은 폐기합니다. 원시 rail {status?.signal.rawRailCounts?.[0] ?? -32768}/{status?.signal.rawRailCounts?.[1] ?? 32766} (ADC 입력 약 ±1.25 V) 점유율은 최대 {status?.signal.calibrationMaxClippingPercent ?? 5}%까지, 원시 p-p는 최대 {(status?.signal.calibrationMaxRawSpanMv ?? 2375).toFixed(0)} mV까지 허용합니다. 필터 p-p는 진단값일 뿐 ADC 포화 판정에 사용하지 않습니다.</p>
           </article>
 
           <article className="panel quality-panel">
@@ -1042,7 +1046,7 @@ export default function Home() {
                 <button className={`quality-row ${selectedChannel === index ? "selected" : ""}`} key={index} onClick={() => setSelectedChannel(index)}>
                   <span className="channel-color" style={{ background: CHANNEL_COLORS[index] }} />
                   <strong>CH {index + 1}</strong>
-                  <small><span>RMS {item.rmsMv.toFixed(3)} · p-p {item.peakToPeakMv.toFixed(3)} mV</span><span>clip {item.clippingPercent.toFixed(3)}% · raw DC {item.dcOffsetMv.toFixed(3)} mV</span></small>
+                  <small><span>filtered RMS {item.rmsMv.toFixed(3)} · p-p {item.peakToPeakMv.toFixed(3)} mV</span><span>raw p-p {item.rawPeakToPeakMv.toFixed(3)} · DC {item.dcOffsetMv.toFixed(3)} mV · rail {item.clippingPercent.toFixed(3)}%</span></small>
                   <span className={`quality-state ${item.state}`}>{qualityLabel(item.state)}</span>
                 </button>
               ))}

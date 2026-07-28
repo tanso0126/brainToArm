@@ -210,7 +210,7 @@ accuracy.
 The calibration button uses its own full eight-second quality window, not the
 short two-second channel badge. It becomes enabled only when enough samples are
 present and the complete CH1·2·3·4·8 window is clean. If it stays disabled, stop
-acquisition, lower PGA (start with ×1.00), reconnect the indicated channels plus
+acquisition, lower PGA (the current rail-clean default is ×0.40), reconnect the indicated channels plus
 reference/ground, restart, and wait for a new clean eight-second window. Do not
 bypass saturation: it cannot produce defensible ErrP or TAR baselines.
 

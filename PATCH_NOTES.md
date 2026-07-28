@@ -2658,3 +2658,53 @@ and the trained model backend.
   ErrP and TAR baseline exactly matches the accepted calibration.
 - Dashboard render coverage checks the saved-baseline action, endpoint, and
   sample-count explanation.
+
+## Patch 67 — separate TeleScan OVER from raw ADC rail and restore low PGA steps
+
+### Diagnosis
+
+- The operator reported no `OVER` indication even though the dashboard blocked
+  every required channel. A direct three-second HID capture proved that the
+  dashboard had not invented the rail values: at the UI's supposed minimum
+  ×1.00 setting, roughly half the samples were exactly signed-count `-32768` or
+  `+32766`.
+- Static disassembly of the installed official `LXSM-D1WD10.dll` at
+  `0x10001950..0x1000199e` independently confirmed the decoder:
+  `(high - 0x80) * 256 + (low & 0xFE)`. The byte order and marker-bit removal
+  were therefore correct. The device/TeleScan `OVER` indication must not be
+  presented as synonymous with this host-computed raw rail occupancy.
+- The UI had hidden PGA indices 0–3 and incorrectly called index 4 (×1.00) the
+  minimum. The D1WD10 table actually provides ×0.10, ×0.20, ×0.40, and ×0.70.
+- The official manual requires at least 0.1 seconds after channel-count,
+  sampling, and PGA commands before another command. The HID path sent every
+  command back-to-back. START also produced a repeatable short rail transition.
+- The secondary `unstable` gate compared filtered IIR p-p with the raw ADC
+  input span. Filter ringing can exceed the raw range, so that comparison could
+  falsely block rail-clean data.
+
+### Changes
+
+- Added 0.12-second settling between STOP/channel/sampling/PGA commands and
+  drains the first 1.0 second after START before exposing samples or starting
+  the session clock.
+- Restored all 16 PGA choices to both EEG controls. A post-settle physical
+  sweep measured rail 0.00% on all eight channels at indices 0, 1, and 2;
+  index 3 clipped about 35–50% and index 4 about 38–56%. The default is now
+  index 2 (×0.40), the highest rail-clean setting in the current montage.
+- ADC span rejection now uses raw ADC p-p. Filtered RMS/p-p remains visible as
+  a separate diagnostic and is never compared with the ADC hardware range.
+  The API/UI report exact raw rail occupancy and raw p-p explicitly.
+- Corrected the standalone detector's startup report so it prints its actual
+  channel count, sample selector, PGA index, and gain instead of stale index-6/
+  selector-9 text.
+
+### Verification
+
+- Added regression coverage proving filtered overshoot cannot cause raw ADC
+  instability, while a near-full-scale raw span still fails.
+- The physical gain sweep and official DLL decoder comparison are recorded
+  above. With the final service at ×0.40, the live API measured 255.9 Hz,
+  collected 2,047/1,638 rest-window samples, reported 0.000% rail on every
+  required channel, no blocking channels, and `ready=true`.
+- Full Python pipeline, compilation, Ruff, dashboard lint/build/render tests,
+  and a production-browser console check pass.

@@ -10,7 +10,7 @@ import statistics
 import sys
 import time
 
-from polyg_hid import PolyGIHID, enumerate_devices
+from polyg_hid import PGA_GAINS, PolyGIHID, enumerate_devices
 
 try:
     import serial
@@ -34,7 +34,11 @@ def probe_hid(seconds):
     arrivals = []
     with PolyGIHID() as device:
         device.start()
-        print("  stream=STARTED (mode=0, PID/gain=0x10/6, sample selector=9)")
+        print(
+            "  stream=STARTED "
+            f"(16 physical channels, gain index {device.gain_index} "
+            f"×{PGA_GAINS[device.gain_index]:.2f}, "
+            f"sample selector {device.sample_selector})")
         started = time.monotonic()
         deadline = started + seconds
         while time.monotonic() < deadline:

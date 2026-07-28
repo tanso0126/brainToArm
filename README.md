@@ -733,6 +733,14 @@ the participant is insufficiently relaxed. A successfully accepted baseline is
 saved automatically; use **저장 안정 기준 불러오기** after restarting acquisition
 to reuse it under the exact compatible setup.
 
+The dashboard exposes every D1WD10 PGA step from ×0.10 through ×17.00. The
+current physical montage was swept after the vendor-required command settling
+and a one-second startup drain: ×0.10, ×0.20, and ×0.40 had zero exact rail
+codes on all eight channels, while ×0.70 and above clipped heavily. Therefore
+the checked-in default is the highest observed rail-clean step, ×0.40. The
+quality gate compares the ADC limit only with raw ADC p-p; filtered p-p remains
+a diagnostic because causal IIR output can overshoot the raw range.
+
 ---
 
 ## 9. Run it right now with zero hardware

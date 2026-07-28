@@ -147,15 +147,19 @@ def test_polyg_hid_protocol():
         def device():
             return fake_device
 
-    with PolyGIHID(hid_module=FakeHID) as device:
+    with PolyGIHID(
+            hid_module=FakeHID, command_settle_seconds=0,
+            startup_discard_seconds=0) as device:
         device.start()
     expected = [
         command_report(1, 0, 0), command_report(5, 16, 0),
-        command_report(4, 8, 0), command_report(11, 6, 0),
+        command_report(4, 8, 0), command_report(11, 2, 0),
         command_report(1, 1, 0), command_report(1, 0, 0),
     ]
     check(fake_device.writes == expected,
           "initialization and cleanup reproduce the exact vendor command sequence")
+    check(config.EEG_HID_GAIN_INDEX == 2 and PGA_GAINS[2] == 0.4,
+          "default PGA is the highest rail-clean setting from the physical sweep")
 
 
 def test_eeg_dashboard_helpers():
@@ -178,6 +182,14 @@ def test_eeg_dashboard_helpers():
         "sustained rail occupancy still blocks calibration")
     check(analyze_signal_quality([-1.0, 0.5, 1.2, -0.4] * 16, [0] * 64)["state"] == "present",
           "varying unclipped channel is labeled signal-present")
+    check(analyze_signal_quality(
+        [3000.0, -3000.0] * 32, [0] * 64,
+        [100.0, -100.0] * 32)["state"] == "present",
+        "filtered IIR overshoot is not compared against the raw ADC span")
+    check(analyze_signal_quality(
+        [1.0, -1.0] * 32, [0] * 64,
+        [1200.0, -1200.0] * 32)["state"] == "unstable",
+        "near-full-scale raw ADC span still blocks calibration")
 
     processor = EEGSignalProcessor(fs=256, channels=8)
     rows = []

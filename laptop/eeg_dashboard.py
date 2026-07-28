@@ -37,11 +37,13 @@ import config
 from cognitive_load import AutonomyAllocator, CognitiveLoadEstimator
 from polyg_hid import (
     ADC_VOLTS_PER_COUNT,
+    COMMAND_SETTLE_SECONDS,
     MAX_CHANNELS,
     PGA_GAINS,
     PID,
     REPORT_BYTES,
     ROWS_PER_REPORT,
+    STARTUP_DISCARD_SECONDS,
     VID,
     PolyGIHID,
     enumerate_devices,
@@ -83,7 +85,8 @@ def analyze_signal_quality(values, raw_counts=None, raw_adc_mv=None):
     """Return exact two-second-window metrics, never electrode impedance."""
     if not values:
         return {"state": "waiting", "rmsMv": 0.0, "peakToPeakMv": 0.0,
-                "clippingPercent": 0.0, "dcOffsetMv": 0.0}
+                "rawPeakToPeakMv": 0.0, "clippingPercent": 0.0,
+                "dcOffsetMv": 0.0}
     rms = (sum(value * value for value in values) / len(values)) ** 0.5
     peak_to_peak = max(values) - min(values)
     counts = raw_counts or []
@@ -91,11 +94,15 @@ def analyze_signal_quality(values, raw_counts=None, raw_adc_mv=None):
         value <= ADC_RAIL_COUNTS[0] or value >= ADC_RAIL_COUNTS[1]
         for value in counts)
                 / len(counts) if counts else 0.0)
-    dc_offset = statistics.fmean(raw_adc_mv) if raw_adc_mv else 0.0
+    raw_values = raw_adc_mv or []
+    dc_offset = statistics.fmean(raw_values) if raw_values else 0.0
+    raw_peak_to_peak = (
+        max(raw_values) - min(raw_values) if raw_values else 0.0)
     effective_lsb_mv = abs(ADC_VOLTS_PER_COUNT * 2 * 1000.0)
     if clipping > MAX_TRANSIENT_CLIPPING_PERCENT:
         state = "saturated"
-    elif peak_to_peak >= ADC_FULL_SPAN_MV * MAX_STABLE_ADC_SPAN_FRACTION:
+    elif (raw_values and raw_peak_to_peak
+          >= ADC_FULL_SPAN_MV * MAX_STABLE_ADC_SPAN_FRACTION):
         state = "unstable"
     elif peak_to_peak <= effective_lsb_mv * 2:
         state = "flat"
@@ -105,6 +112,7 @@ def analyze_signal_quality(values, raw_counts=None, raw_adc_mv=None):
         "state": state,
         "rmsMv": round(rms, 6),
         "peakToPeakMv": round(peak_to_peak, 6),
+        "rawPeakToPeakMv": round(raw_peak_to_peak, 6),
         "clippingPercent": round(clipping, 3),
         "dcOffsetMv": round(dc_offset, 6),
     }
@@ -612,7 +620,8 @@ class EEGDashboardService:
                 bad_channels.append(
                     f"CH{channel + 1}={quality['state']} "
                     f"(clip {quality['clippingPercent']:.3f}%, "
-                    f"p-p {quality['peakToPeakMv']:.3f} mV)")
+                    f"raw p-p {quality['rawPeakToPeakMv']:.3f} mV, "
+                    f"filtered p-p {quality['peakToPeakMv']:.3f} mV)")
         if bad_channels:
             raise RuntimeError(
                 f"ErrP+TAR 최근 {seconds:.0f}초 통합 보정 불가: "
@@ -922,13 +931,15 @@ class EEGDashboardService:
                     "notchHz": NOTCH_HZ,
                     "notchQ": NOTCH_Q,
                     "metricWindowSeconds": 2.0,
+                    "commandSettleSeconds": COMMAND_SETTLE_SECONDS,
+                    "startupDiscardSeconds": STARTUP_DISCARD_SECONDS,
                     "rawRailCounts": list(ADC_RAIL_COUNTS),
                     "adcInputRangeMv": list(ADC_INPUT_RANGE_MV),
                     "calibrationMaxClippingPercent": (
                         MAX_TRANSIENT_CLIPPING_PERCENT),
                     "calibrationMaxAdcSpanFraction": (
                         MAX_STABLE_ADC_SPAN_FRACTION),
-                    "calibrationMaxFilteredSpanMv": (
+                    "calibrationMaxRawSpanMv": (
                         ADC_FULL_SPAN_MV * MAX_STABLE_ADC_SPAN_FRACTION),
                     "pgaGainIndex": self._gain_index,
                     "pgaGain": PGA_GAINS[self._gain_index],
