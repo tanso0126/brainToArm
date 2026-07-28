@@ -3404,3 +3404,26 @@ and the trained model backend.
   servo command.
 - Added tests distinguishing the known successful forward/close family from the
   rejected folded-body family.
+
+## Patch 91 — solve wrist aim and arm translation as one physical motion
+
+### Physical finding
+
+- At the verified forward pose, the first coupled 2/3/4 solution was
+  `[111,80,177]`: 19.6 mm camera-ray progress, 33.5 mm collision clearance,
+  and only 8.4 mm temporary fingertip retraction.
+- The controller then overwrote motor 4 independently to 168°. Because motor 4
+  rotates the whole distal hand rather than only the camera, that overwrite
+  would have pulled the fingertip inward by 45.8 mm and reduced modeled
+  clearance to 9.0 mm. The Patch 90 invariant rejected it before motion.
+
+### Changes
+
+- Removed the independent motor-4 overwrite. The already existing resolved
+  solver now supplies the sole 2/3/4 command, so shoulder and elbow compensate
+  every wrist aim correction in the same candidate pose.
+- Set the forward-envelope tolerance to 15 mm: enough for the measured 8.4 mm
+  coupled pitch transient, while still rejecting both the 45.8 mm one-step
+  wrist overwrite and the 166 mm inward-folding branch.
+- Extended regression tests with all three measured poses: coupled-safe,
+  wrist-overwrite-rejected, and known-close-safe.

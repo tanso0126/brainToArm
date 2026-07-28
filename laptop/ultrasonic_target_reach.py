@@ -78,7 +78,11 @@ LOADED_HOME_REASSERT_TEMPLATE = [90, 90, 90, 150, 180, 170]
 # Unlike HOME with only motor 4 lowered, its camera ray and open fingers both
 # face the forward work surface while retaining generous body clearance.
 APPROACH_OBSERVATION_TEMPLATE = [90, 107, 84, 178, 90, 170]
-MAX_APPROACH_INWARD_DRIFT_MM = 5.0
+# The coupled camera-ray solve can temporarily pull the long finger endpoint
+# inward by about 8 mm while shoulder/elbow compensate a pitch correction. The
+# bad independent-wrist branch pulled it inward by 46 mm in one step and 166 mm
+# cumulatively. Preserve the valid small coupling while excluding that fold.
+MAX_APPROACH_INWARD_DRIFT_MM = 15.0
 SEARCH_WRIST_SEQUENCE = (140, 150, 160, 170, 180)
 SEARCH_SELECTION_MIN_WRIST = 170
 VIVID_MIN_SATURATION = 70
@@ -778,9 +782,10 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
         if plan is None:
             raise RuntimeError("no bounded 2/3/4 step remains")
 
+        # ``plan_resolved_step`` solves motors 2/3/4 together. Never overwrite
+        # motor 4 afterward: on this arm it rotates the entire distal hand, so a
+        # camera-only correction would also pull the fingers toward the base.
         next_pose = list(plan["pose"])
-        next_pose[config.J_WRIST] = tracking_wrist_target(
-            pose[config.J_WRIST], vertical_error)
         if not approach_stays_forward(approach_start_x_mm, next_pose):
             raise RuntimeError(
                 "approach rejected: candidate would fold the fingertip "

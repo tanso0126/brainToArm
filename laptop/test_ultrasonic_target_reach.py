@@ -104,11 +104,15 @@ class ApproachStopTests(unittest.TestCase):
 
     def test_approach_cannot_fold_back_toward_body(self):
         forward = [90, 107, 84, 178, 90, 170]
+        coupled = [90, 111, 80, 177, 90, 170]
+        wrist_overwrite = [90, 111, 80, 168, 90, 170]
         known_close = [90, 124, 66, 179, 90, 170]
         folded = [90, 80, 131, 144, 90, 170]
 
         from ultrasonic_target_reach import fingertip_forward_x_mm
         start_x = fingertip_forward_x_mm(forward)
+        self.assertTrue(approach_stays_forward(start_x, coupled))
+        self.assertFalse(approach_stays_forward(start_x, wrist_overwrite))
         self.assertTrue(approach_stays_forward(start_x, known_close))
         self.assertFalse(approach_stays_forward(start_x, folded))
 
