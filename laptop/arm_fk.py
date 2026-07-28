@@ -73,7 +73,7 @@ def _rotz(a):
 
 @dataclass(frozen=True)
 class ArmGeometry:
-    """Calibrated joint centres and mounted-camera centre in base coordinates."""
+    """Calibrated joint centres and frame rotations in base coordinates."""
 
     shoulder: np.ndarray
     elbow: np.ndarray
@@ -82,6 +82,7 @@ class ArmGeometry:
     tool: np.ndarray
     camera: np.ndarray
     wrist_rotation: np.ndarray
+    forearm_rotation: np.ndarray
 
 
 def geometry(servo: Iterable[float]) -> ArmGeometry:
@@ -103,14 +104,16 @@ def geometry(servo: Iterable[float]) -> ArmGeometry:
     # cumulative planar orientation is a3 (about y); wrist roll adds about x.
     shoulder = np.array([0.0, 0.0, SHOULDER_HEIGHT_M])
     elbow = shoulder + R_base @ _roty(a1) @ np.array([UPPER_M, 0, 0])
-    wristp = elbow + R_base @ _roty(a2) @ np.array([FORE_M, 0, 0])
+    R_forearm = R_base @ _roty(a2)
+    wristp = elbow + R_forearm @ np.array([FORE_M, 0, 0])
     wristroll = wristp + R_base @ _roty(a3) @ np.array([WRISTROLL_M, 0, 0])
     R_wrist = R_base @ _roty(a3) @ _rotx(roll)
     tool = wristroll + R_wrist @ np.array([HAND_M, 0, TOOL_DZ_M])
     # Measured/CAD seed for the webcam centre.  The collision envelope around
     # this point is deliberately much larger than the uncertainty in the mount.
     camera = wristroll + R_wrist @ np.array([0.015, 0.0, 0.075])
-    return ArmGeometry(shoulder, elbow, wristp, wristroll, tool, camera, R_wrist)
+    return ArmGeometry(
+        shoulder, elbow, wristp, wristroll, tool, camera, R_wrist, R_forearm)
 
 
 def _chain(servo: Iterable[float]):
@@ -140,6 +143,18 @@ def wrist_pitch_position(servo: Iterable[float]) -> np.ndarray:
     pitch, which is essential for separating LOOK from REACH.
     """
     return geometry(servo).wrist_pitch.copy()
+
+
+def forearm_pose(servo: Iterable[float]) -> Tuple[np.ndarray, np.ndarray]:
+    """Return the frame carrying the wrist camera and ultrasonic sensor.
+
+    On the physical build both sensors are attached above the motor-4 pivot.
+    They therefore follow shoulder+elbow (the forearm), but do not follow
+    motor-4 gripper pitch or motor-6 roll.  Treating them as part of the tool
+    frame creates a false depth change whenever only the gripper is rotated.
+    """
+    chain = geometry(servo)
+    return chain.forearm_rotation.copy(), chain.wrist_pitch.copy()
 
 
 def wrist_matrix(servo: Iterable[float]) -> np.ndarray:

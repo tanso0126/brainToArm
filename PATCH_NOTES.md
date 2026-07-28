@@ -2896,3 +2896,36 @@ and the trained model backend.
 - Added a session regression proving a distance request performs no arm move.
 - Added preflight validation that sensor pins are distinct from each other and
   all servo pins, and that range/sample timing settings are internally valid.
+
+## Patch 74 — reject ultrasonic multipath and model the real sensor mount
+
+### Problem found
+
+- The newly mounted HC-SR04 returned several repeatable echo clusters at one
+  stationary pose. A plain median could therefore describe neither the object
+  nor the floor and was unsafe to use as a motion target.
+- The camera and ultrasonic sensor are attached above the motor-4 pivot. They
+  follow shoulder and elbow, but not gripper pitch or wrist roll; the existing
+  tool-frame camera seed was not a valid sensor depth frame.
+- The operator physically corrected the sensor angle, invalidating all earlier
+  range observations. No pre-adjustment value is retained as calibration.
+
+### Changes
+
+- Added a read-only robust range profiler. It retains every echo/timeout, selects
+  the densest 8 mm cluster, and reports median, MAD, valid fraction, dominant
+  support and a fail-closed stability reason.
+- Added an explicit forearm pose to the calibrated FK. Motor 4 and motor 6 no
+  longer create fictitious motion of a forearm-mounted sensor.
+- Added a planar ultrasonic extrinsic model and a robust empty-floor fitter for
+  sensor x/z offset and beam pitch. Calibration requires at least four distinct
+  stable poses and at least eight degrees of forearm-angle span.
+- Added versioned JSON save/load support for the fitted mount. A range becomes a
+  3-D point only through this calibrated ray; raw distance alone is never
+  treated as object identity.
+
+### Verification
+
+- Added regressions for dominant-cluster selection, competing-reflector
+  rejection, timeout rejection, motor-4/motor-6 frame independence, synthetic
+  mount recovery with an outlier, and insufficient calibration-angle rejection.
