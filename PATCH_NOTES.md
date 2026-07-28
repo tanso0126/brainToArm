@@ -3427,3 +3427,29 @@ and the trained model backend.
   wrist overwrite and the 166 mm inward-folding branch.
 - Extended regression tests with all three measured poses: coupled-safe,
   wrist-overwrite-rejected, and known-close-safe.
+
+## Patch 92 — connect the guarded floor approach to automatic grasp
+
+### Physical finding
+
+- The first coupled step executed as planned at 33.5 mm clearance. The second
+  candidate `[90,120,73,175,open,170]` retained the same visual target, had
+  17.4 mm camera-ray progress, 12.0 mm fingertip height, and 7.0 mm conservative
+  model clearance. Its fingertip was 18.0 mm inward of the observation start,
+  only 3 mm beyond Patch 91's initially estimated envelope.
+- This is the intended last safe descent pose: one further approach would enter
+  the explicit 10 mm floor guard, while the existing 12 mm fixed-reach lift
+  takes the fingers into the reproduced pre-close height.
+
+### Changes
+
+- Expanded the forward branch envelope to the measured 25 mm bound. It accepts
+  the 18 mm floor-approach transient but still rejects the 45.8 mm independent
+  wrist error and the 166 mm folded-body branch.
+- When a proposed next transition would cross the 10 mm floor guard, an
+  authorized full grasp run now starts the existing clearance-lift, final image
+  gate, close, verification lift, and loaded-HOME sequence from the current
+  safe pose. Previously this pre-transition guard returned a status without
+  ever invoking grasp.
+- Added the measured floor-approach pose to the forward-envelope regression
+  test.

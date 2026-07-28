@@ -78,11 +78,11 @@ LOADED_HOME_REASSERT_TEMPLATE = [90, 90, 90, 150, 180, 170]
 # Unlike HOME with only motor 4 lowered, its camera ray and open fingers both
 # face the forward work surface while retaining generous body clearance.
 APPROACH_OBSERVATION_TEMPLATE = [90, 107, 84, 178, 90, 170]
-# The coupled camera-ray solve can temporarily pull the long finger endpoint
-# inward by about 8 mm while shoulder/elbow compensate a pitch correction. The
-# bad independent-wrist branch pulled it inward by 46 mm in one step and 166 mm
-# cumulatively. Preserve the valid small coupling while excluding that fold.
-MAX_APPROACH_INWARD_DRIFT_MM = 15.0
+# The reproduced coupled descent reaches 18 mm inward drift at 12 mm fingertip
+# height before its clearance lift. The bad independent-wrist branch pulled it
+# inward by 46 mm in one step and 166 mm cumulatively. Preserve the measured
+# floor-approach family while excluding that fold.
+MAX_APPROACH_INWARD_DRIFT_MM = 25.0
 SEARCH_WRIST_SEQUENCE = (140, 150, 160, 170, 180)
 SEARCH_SELECTION_MIN_WRIST = 170
 VIVID_MIN_SATURATION = 70
@@ -794,6 +794,14 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
         swept_floor_clearance = transition_fingertip_floor_clearance_mm(
             pose, next_pose)
         if swept_floor_clearance <= FINGERTIP_FLOOR_STOP_MM:
+            if execute and allow_grasp:
+                print(
+                    "[sonar-reach] next approach would enter the 10mm floor "
+                    "guard; grasping from the current safe pose",
+                    flush=True,
+                )
+                return _clearance_grasp_and_verify(
+                    client, mover, safety, detector, selector, pose, distance)
             return {
                 "state": "floor-clearance-stop", "pose": pose,
                 "distance_mm": distance,
