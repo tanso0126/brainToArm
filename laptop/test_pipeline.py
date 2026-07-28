@@ -457,16 +457,17 @@ def test_cognitive_load_and_autonomy():
     high_allocation = allocator.allocate(high_state)
     low_allocation = allocator.allocate(low_state)
     check(rest_allocation.robot_weight == config.AUTONOMY_ROBOT_BASE
-          and rest_allocation.errp_apply_stride == 1,
-          "rest/deadband keeps balanced authority and every ErrP checkpoint")
+          and rest_allocation.errp_apply_stride == 1
+          and rest_allocation.errp_threshold == config.ERRP_THRESHOLD,
+          "rest keeps balanced authority, every checkpoint, and 50% threshold")
     check(high_allocation.robot_weight > config.AUTONOMY_ROBOT_BASE
-          and high_allocation.errp_threshold > config.ERRP_THRESHOLD
+          and high_allocation.errp_threshold == config.ERRP_THRESHOLD
           and high_allocation.errp_apply_stride > 1,
-          "higher TAR shifts authority toward robot and reduces ErrP application")
+          "higher TAR shifts robot authority and cadence, not the 50% threshold")
     check(low_allocation.robot_weight < config.AUTONOMY_ROBOT_BASE
-          and low_allocation.errp_threshold < config.ERRP_THRESHOLD
+          and low_allocation.errp_threshold == config.ERRP_THRESHOLD
           and low_allocation.errp_apply_stride == 1,
-          "lower TAR shifts authority toward human and applies every ErrP checkpoint")
+          "lower TAR shifts human authority while retaining the 50% threshold")
     invalid_state = high_estimator.update(
         [[0.0] * config.EEG_CHANNELS
          for _ in range(int(config.COG_WINDOW_S * config.EEG_FS))])
@@ -530,10 +531,12 @@ def test_dashboard_integrates_tar_allocation():
 
             install_window(restored, _synth_load_window(
                 theta_amplitude=4.0, alpha_amplitude=8.0, seconds=2.0))
-            loaded = restored.load_saved_baseline()
+            loaded = restored._auto_load_saved_baseline()
             check(loaded["source"] == "saved"
                   and restored.status()["cognitiveLoad"]["baselineReady"],
-                  "a restarted dashboard restores saved ErrP and TAR baselines")
+                  "acquisition-start policy automatically restores saved baselines")
+            check(restored.saved_baseline_status()["autoLoadEnabled"],
+                  "saved-baseline status exposes automatic startup restore")
             check(math.isclose(
                     loaded["restTar"],
                     calibrated["cognitiveLoad"]["restTar"],

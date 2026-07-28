@@ -283,6 +283,7 @@ class EEGDashboardService:
             self._thread = threading.Thread(
                 target=self._capture_loop, name="polyg-dashboard-capture", daemon=True)
             self._thread.start()
+        self._auto_load_saved_baseline()
         return self.status()
 
     def stop(self):
@@ -489,6 +490,7 @@ class EEGDashboardService:
             return {
                 "available": False,
                 "compatible": False,
+                "autoLoadEnabled": config.EEG_AUTO_LOAD_BASELINE,
                 "reason": "저장된 안정 기준이 없습니다",
                 "createdAt": None,
                 "path": self._baseline_path_label(),
@@ -500,6 +502,7 @@ class EEGDashboardService:
             return {
                 "available": True,
                 "compatible": not reason,
+                "autoLoadEnabled": config.EEG_AUTO_LOAD_BASELINE,
                 "reason": reason,
                 "createdAt": payload.get("createdAt"),
                 "path": self._baseline_path_label(),
@@ -523,10 +526,25 @@ class EEGDashboardService:
             return {
                 "available": True,
                 "compatible": False,
+                "autoLoadEnabled": config.EEG_AUTO_LOAD_BASELINE,
                 "reason": f"저장 기준을 읽을 수 없습니다: {exc}",
                 "createdAt": None,
                 "path": self._baseline_path_label(),
             }
+
+    def _auto_load_saved_baseline(self):
+        """Restore a safe saved rest baseline without making start fragile."""
+        if not config.EEG_AUTO_LOAD_BASELINE:
+            return None
+        saved = self.saved_baseline_status()
+        if not saved["available"] or not saved["compatible"]:
+            return None
+        try:
+            return self.load_saved_baseline()
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+            # A stale or concurrently replaced convenience file must never keep
+            # the physical acquisition from starting.
+            return None
 
     def _save_baseline(self, load_state):
         created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")

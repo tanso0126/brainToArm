@@ -2740,3 +2740,32 @@ and the trained model backend.
 
 - The allocator regression now proves a 75% response immediately vetoes a
   checkpoint that TAR scheduling would otherwise leave observation-only.
+
+## Patch 69 — fix ordinary ErrP at 50% and auto-restore the rest baseline
+
+### Gap found
+
+- TAR could raise the ordinary ErrP threshold from 50% to 65%. This made a
+  rejection with the same probability mean different things at different
+  workload levels.
+- A compatible, previously accepted stable baseline was persisted but still
+  required pressing a load button after every acquisition restart.
+
+### Changes
+
+- Fixed the ordinary ErrP decision threshold at 50%. TAR still changes the
+  robot/human authority weights and ordinary application stride, but no longer
+  changes the probability threshold.
+- Preserved `P(error) >= 75%` as an immediate veto regardless of stride.
+- Acquisition startup automatically restores the saved integrated ErrP/TAR
+  baseline when its full hardware and signal-processing signature matches.
+  Missing, malformed, or incompatible files do not break acquisition startup.
+- Kept manual loading as a fallback and made the automatic behavior explicit in
+  both EEG views. The same-participant/electrode/REF/GND warning remains.
+
+### Verification
+
+- Updated allocator coverage to prove high, resting, and low TAR all retain the
+  exact 50% threshold while authority and stride remain adaptive.
+- Added persistence coverage for automatic startup restore and UI render
+  assertions for the fixed threshold and automatic application wording.

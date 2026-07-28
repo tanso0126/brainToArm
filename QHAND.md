@@ -180,14 +180,13 @@ separately every second from a two-second Welch window: mean theta power
 is `(current TAR - rest TAR) / rest TAR`, then smoothed by an EMA.
 
 The web simulation now uses the same `AutonomyAllocator` as the standalone robot
-orchestrator. Higher relative TAR increases robot weight, the ErrP action
-threshold, and the action-application stride. Lower TAR shifts weight toward the
-human and applies every checkpoint. CH8 ErrP probability is still calculated at
-every action checkpoint; a skipped checkpoint means observation-only, not that
-the EEG was ignored. A very strong ErrP remains an immediate override.
-The immediate override is `P(error) >= 0.75`; it bypasses both the adaptive
-threshold and the TAR-derived application stride. Ordinary threshold crossings
-still follow the displayed stride.
+orchestrator. Higher relative TAR increases robot weight and the ordinary ErrP
+action-application stride. Lower TAR shifts weight toward the human and applies
+every checkpoint. The ordinary ErrP threshold is fixed at `P(error) >= 0.50`;
+TAR does not change it. CH8 ErrP probability is still calculated at every action
+checkpoint; a skipped checkpoint means observation-only, not that the EEG was
+ignored. The immediate override is `P(error) >= 0.75`; it bypasses the
+TAR-derived application stride.
 
 The default `baseline` backend is not a trained ErrP classifier. The eight-second
 button measures CH8 resting noise σ and the CH1–4/CH8 resting TAR. For each
@@ -202,7 +201,7 @@ decision it:
    approximately z=3.3.
 
 The embedded panel shows TAR, rest-relative change, robot/human weights, action
-stride, CH8 probability, adaptive threshold, and whether the latest decision was
+stride, CH8 probability, fixed 50% threshold, and whether the latest decision was
 applied or only observed. Flat/saturated required channels, insufficient samples,
 or an uncalibrated session produces an explicit error instead of a silent
 non-detection. Reliable participant use still requires collecting labeled
@@ -221,9 +220,10 @@ The displayed `samples/requiredSamples` pair is a quantity gate, not a calmness
 score. A value such as `2030/1638` is already sufficient; when the button remains
 disabled, use the listed blocking channels, state, and `clip %` to diagnose the
 signal path. The accepted aggregate baseline is automatically written to the
-ignored local `data/eeg_baselines/latest.json`. On a later acquisition, press
-**저장 안정 기준 불러오기** to restore it. Loading is refused if device/PGA/rate/
-channel/filter/algorithm settings differ, and the operator must additionally
+ignored local `data/eeg_baselines/latest.json`. A later acquisition automatically
+restores it when the compatibility signature matches; the manual
+**저장 안정 기준 불러오기** action remains as a fallback. Loading is refused if
+device/PGA/rate/channel/filter/algorithm settings differ, and the operator must additionally
 ensure the same participant and electrode/REF/GND placement. The file contains
 baseline statistics, not raw EEG.
 

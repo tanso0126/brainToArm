@@ -161,6 +161,7 @@ type DashboardStatus = {
   savedBaseline: {
     available: boolean;
     compatible: boolean;
+    autoLoadEnabled: boolean;
     reason: string;
     createdAt: string | null;
     path: string;
@@ -1024,7 +1025,7 @@ export default function Home() {
               <div><span>휴식 대비</span><strong>{loadStatus?.smoothedRelativeTar != null ? `${loadStatus.smoothedRelativeTar >= 0 ? "+" : ""}${(loadStatus.smoothedRelativeTar * 100).toFixed(1)}%` : "—"}</strong></div>
               <div><span>결정 가중치</span><strong>로봇 {((loadStatus?.robotWeight ?? 0.2) * 100).toFixed(0)} · 인간 {((loadStatus?.humanWeight ?? 0.8) * 100).toFixed(0)}</strong></div>
               <div><span>ErrP 행동 반영</span><strong>보통 매 {loadStatus?.errpApplyStride ?? 1}번째 · 강한 ≥{((loadStatus?.strongErrpOverrideThreshold ?? 0.75) * 100).toFixed(0)}% 즉시</strong></div>
-              <div><span>적응 임계값</span><strong>{((loadStatus?.errpThreshold ?? 0.5) * 100).toFixed(0)}%</strong></div>
+              <div><span>고정 ErrP 기준</span><strong>{((loadStatus?.errpThreshold ?? 0.5) * 100).toFixed(0)}%</strong></div>
             </div>
             <div className="baseline-actions">
               <button className="secondary-button load-calibrate" disabled={!isRunning || busy || !calibrationWindow?.ready} onClick={() => perform("/api/errp/calibrate", { seconds: 8 })}>
@@ -1035,7 +1036,8 @@ export default function Home() {
               </button>}
             </div>
             {!calibrationWindow?.ready && <p className="baseline-store-note warning">{calibrationWindowLabel(calibrationWindow)}. 샘플 수는 안정도 점수가 아니며, 포화는 마음 상태가 아니라 전극·REF/GND·입력 범위 문제입니다.</p>}
-            {savedBaseline?.available && <p className={`baseline-store-note ${savedBaseline.compatible ? "" : "warning"}`}>{savedBaseline.compatible ? `${savedBaseline.createdAt ? new Date(savedBaseline.createdAt).toLocaleString("ko-KR") : "이전 세션"} 기준 · PGA index ${savedBaseline.gainIndex ?? "—"} · 같은 피험자/전극 배치에서만 사용` : savedBaseline.reason}</p>}
+            {savedBaseline?.available && <p className={`baseline-store-note ${savedBaseline.compatible ? "" : "warning"}`}>{savedBaseline.compatible ? `${savedBaseline.createdAt ? new Date(savedBaseline.createdAt).toLocaleString("ko-KR") : "이전 세션"} 기준 · 측정 시작 시 자동 적용 · PGA index ${savedBaseline.gainIndex ?? "—"} · 같은 피험자/전극 배치에서만 사용` : savedBaseline.reason}</p>}
+            <p className="fine-print">보통 ErrP 기준은 50% 고정입니다. TAR는 로봇/인간 가중치와 보통 ErrP 적용 간격만 조절하며, 강한 ErrP는 즉시 반영합니다.</p>
             <p className="fine-print">시작 후 {(status?.signal.startupDiscardSeconds ?? 1).toFixed(1)}초 전이 구간은 폐기합니다. 원시 rail {status?.signal.rawRailCounts?.[0] ?? -32768}/{status?.signal.rawRailCounts?.[1] ?? 32766} (ADC 입력 약 ±1.25 V) 점유율은 최대 {status?.signal.calibrationMaxClippingPercent ?? 5}%까지, 원시 p-p는 최대 {(status?.signal.calibrationMaxRawSpanMv ?? 2375).toFixed(0)} mV까지 허용합니다. 필터 p-p는 진단값일 뿐 ADC 포화 판정에 사용하지 않습니다.</p>
           </article>
 

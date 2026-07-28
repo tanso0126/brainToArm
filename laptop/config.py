@@ -217,7 +217,8 @@ ERRP_USE_CAR = False        # preserve the single CH8 waveform; CAR needs other 
 ERRP_WINDOW_S = 0.8        # epoch length after action onset
 ERRP_BASELINE_S = 0.2      # pre-onset baseline for correction
 ERRP_BAND = (1.0, 10.0)    # ErrP bandpass (Hz)
-ERRP_THRESHOLD = 0.5       # decision threshold (tune with real data)
+ERRP_THRESHOLD = 0.5       # ordinary decision threshold, fixed at 50%
+EEG_AUTO_LOAD_BASELINE = True  # restore an exact-compatible saved rest baseline
 
 # Continuous cognitive load: TAR = mean(theta power CH1..CH4) / alpha power CH8.
 # Normalize within participant/session as (current TAR - resting TAR) / resting TAR.
@@ -242,7 +243,9 @@ AUTONOMY_TAR_GAIN = 0.50
 AUTONOMY_TAR_DEADBAND = 0.10
 AUTONOMY_RELATIVE_MIN = -0.60
 AUTONOMY_RELATIVE_MAX = 1.50
-AUTONOMY_ERRP_THRESHOLD_GAIN = 0.50
+# TAR changes authority and ordinary application cadence, not the user's
+# rejection threshold. A probability of 50% therefore has one stable meaning.
+AUTONOMY_ERRP_THRESHOLD_GAIN = 0.0
 AUTONOMY_STRIDE_TAR_STEP = 0.25
 AUTONOMY_MAX_ERRP_STRIDE = 3
 # A strong, time-locked human veto always wins over TAR scheduling. False stops

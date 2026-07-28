@@ -39,6 +39,8 @@ test("starter preview is removed and localhost API is explicit", async () => {
   assert.match(page, /const quantum = magnitude \/ 10/);
   assert.match(page, /CH1–4 θ \/ CH8 α/);
   assert.match(page, /저장 안정 기준 불러오기/);
+  assert.match(page, /측정 시작 시 자동 적용/);
+  assert.match(page, /보통 ErrP 기준은 50% 고정/);
   assert.match(page, /샘플 수는 안정도 점수가 아니며/);
   assert.match(page, /\/api\/baseline\/load/);
   assert.match(page, /index 0 · ×0\.10/);

@@ -124,6 +124,7 @@ type LoadStatus = {
 type SavedBaseline = {
   available: boolean;
   compatible: boolean;
+  autoLoadEnabled: boolean;
   reason: string;
   createdAt: string | null;
   path: string;
@@ -759,7 +760,7 @@ function SimulationLab({
                 </>}
                 <button onClick={calibrateErrp} disabled={!apiOnline || !eegRunning || errpBusy || !calibrationWindow?.ready}>{errpBusy ? "처리 중…" : calibrationWindow?.ready ? "최근 8초로 통합 보정·저장" : "신호 확인 후 보정"}</button>
                 {savedBaseline?.available && <button onClick={loadSavedBaseline} disabled={!apiOnline || !eegRunning || errpBusy || !savedBaseline.compatible || errpReady}>저장 안정 기준 불러오기</button>}
-                {savedBaseline?.available && <small>{savedBaseline.compatible ? `${savedBaseline.createdAt ? new Date(savedBaseline.createdAt).toLocaleString("ko-KR") : "이전"} · PGA index ${savedBaseline.gainIndex ?? "—"} · 같은 피험자/전극 배치 전용` : savedBaseline.reason}</small>}
+                {savedBaseline?.available && <small>{savedBaseline.compatible ? `${savedBaseline.createdAt ? new Date(savedBaseline.createdAt).toLocaleString("ko-KR") : "이전"} · 측정 시작 시 자동 적용 · PGA index ${savedBaseline.gainIndex ?? "—"} · 같은 피험자/전극 배치 전용` : savedBaseline.reason}</small>}
                 {!calibrationWindow?.ready && <small>샘플 수는 안정도 점수가 아닙니다. 데이터가 충분한데 차단되면 전극·REF/GND·포화 상태를 확인하세요.</small>}
                 {errpError && <p className="sim-errp-error"><CircleAlert size={13} />{errpError}</p>}
                 {errpStatus?.lastDecision ? (
@@ -772,7 +773,7 @@ function SimulationLab({
                     <strong>{errpStatus.lastDecision.zScore?.toFixed(2) ?? "모델 판정"}</strong>
                   </div>
                 ) : null}
-                <small>ErrP는 각 행동 판정창에서 CH8로 계속 계산합니다. TAR가 높으면 로봇 가중치와 적용 간격이 커지고, 낮으면 인간/ErrP 반영이 커집니다. 매우 강한 ErrP는 간격과 무관하게 즉시 반영합니다.</small>
+                <small>보통 ErrP 기준은 50% 고정입니다. ErrP는 각 행동 판정창에서 CH8로 계속 계산하며, TAR가 높으면 로봇 가중치와 적용 간격이 커지고 낮으면 인간/ErrP 반영이 커집니다. 매우 강한 ErrP는 간격과 무관하게 즉시 반영합니다.</small>
               </div>
             )}
           </article>

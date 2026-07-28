@@ -526,16 +526,17 @@ brainToArm/
   session rest baseline: `(current TAR - rest TAR) / rest TAR`. An EMA prevents
   one noisy window from changing authority abruptly, and a ±10% rest deadband
   prevents baseline jitter from changing checkpoint density. Higher normalized TAR
-  raises robot weight and the ErrP veto threshold and spaces out application
-  checkpoints; lower TAR gives the human/ErrP more weight. ErrP probability is
-  still calculated at every action event, and a very strong response remains an
-  override. `P(error) >= 0.75` is an immediate veto regardless of TAR stride;
-  ordinary threshold crossings retain the adaptive checkpoint schedule.
+  raises robot weight and spaces out ordinary ErrP application checkpoints;
+  lower TAR gives the human/ErrP more weight. The ordinary ErrP threshold stays
+  fixed at `P(error) >= 0.50`, so its meaning does not drift with workload. ErrP
+  probability is still calculated at every action event, and `P(error) >= 0.75`
+  is an immediate veto regardless of TAR stride.
   Invalid/flat PSD windows fail toward minimum robot authority. Once a
   clean rest window is accepted, the aggregate CH8 noise and CH1–4/CH8 power
   baseline is atomically saved under ignored local `data/eeg_baselines/`. A later
-  session can explicitly restore it only when the device, PGA, sampling, channel,
-  filter, ErrP, and TAR signature matches. Reuse is only valid for the same
+  session automatically restores it when the device, PGA, sampling, channel,
+  filter, ErrP, and TAR signature matches. The manual load action remains a
+  fallback. Reuse is only valid for the same
   participant with the same electrode/REF/GND placement; raw EEG is not stored
   in this baseline file.
 
@@ -732,8 +733,8 @@ already arrived; it does not need to decrease. If calibration is still blocked,
 the interface lists the actual channel state and clipping percentage. Sustained
 ADC-rail saturation is an electrode/reference/input problem, not evidence that
 the participant is insufficiently relaxed. A successfully accepted baseline is
-saved automatically; use **저장 안정 기준 불러오기** after restarting acquisition
-to reuse it under the exact compatible setup.
+saved automatically and restored when acquisition starts under the exact
+compatible setup. **저장 안정 기준 불러오기** remains as a manual fallback.
 
 The dashboard exposes every D1WD10 PGA step from ×0.10 through ×17.00. The
 current physical montage was swept after the vendor-required command settling
