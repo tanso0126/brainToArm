@@ -3201,3 +3201,31 @@ and the trained model backend.
   batches formed during the old eight-second deadline. Unstable sonar now
   holds the current pose and retries indefinitely; it no longer terminates the
   autonomous approach or requires a person to restart it.
+- During the next live run the centred object crossed the open-finger row and
+  then left the bottom of the wrist-camera frame at 97.5 mm sonar distance and
+  roughly 20 mm modeled clearance. The root cause was not unavoidable
+  occlusion: motors 2/3 translated while motor 4 ran out of corrective range
+  around the incorrectly assumed 50%-height acoustic aim point.
+- The sonar is mounted below the camera, so its grasp-distance ray projects
+  near 65% of image height. The controller now aims the selected object at that
+  lower point, jointly solving motors 2/3/4 on every translation. This gives
+  motor 4 correction headroom instead of pinning it at 180°.
+- Closing now has a separate final gripper-frame check after the 46 mm stop:
+  object-centre lateral error must be within 30% of the measured opening and
+  the object base must lie 15–90 px above the finger-marker row. Camera and
+  sonar guide the descent, while the actual coloured fingers authorize closing
+  only when they geometrically straddle the object.
+- Removed blind `LAST LOCK` continuation. If the selected object leaves the
+  frame, the controller collision-checks and returns one move to the last pose
+  where it was actually observed, then reacquires and recalculates. It never
+  advances from a stale target position or switches identities.
+- Far-field sonar is now explicitly advisory. While the object is more than
+  110 px above the finger row, the controller takes only five quick echoes and
+  never waits for cross-batch agreement. Near the fingers it takes one
+  12-sample dominant-cluster observation; an unstable profile is ignored for
+  stopping and cannot pause the arm.
+- Increased Cartesian commands to 20 mm far and 15 mm near, with a 12° bounded
+  joint search. Approach moves now rely on the Uno firmware's existing
+  degree-by-degree slew directly instead of adding slow 3° host-side chunks
+  and repeated settling delays. The same full swept collision check still runs
+  before every command.

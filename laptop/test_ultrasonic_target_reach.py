@@ -1,8 +1,8 @@
 import unittest
-from unittest.mock import patch
+from types import SimpleNamespace
 
 from ultrasonic_target_reach import (
-    _wait_for_stable_sonar,
+    _final_grasp_gate,
     adaptive_advance_mm,
     approach_stop_decision,
     fingertip_floor_clearance_mm,
@@ -24,9 +24,9 @@ class ApproachStopTests(unittest.TestCase):
             approach_stop_decision(40.0, 8.0).action, "floor")
 
     def test_adaptive_step_never_falls_below_ten_mm(self):
-        self.assertEqual(adaptive_advance_mm(220), 15.0)
-        self.assertEqual(adaptive_advance_mm(150), 10.0)
-        self.assertEqual(adaptive_advance_mm(110), 10.0)
+        self.assertEqual(adaptive_advance_mm(220), 20.0)
+        self.assertEqual(adaptive_advance_mm(150), 15.0)
+        self.assertEqual(adaptive_advance_mm(110), 15.0)
 
     def test_fingertip_clearance_uses_distal_model_point(self):
         pose = [90, 107, 84, 178, 90, 170]
@@ -40,21 +40,16 @@ class ApproachStopTests(unittest.TestCase):
         self.assertLessEqual(swept, fingertip_floor_clearance_mm(high))
         self.assertLessEqual(swept, fingertip_floor_clearance_mm(low) + 0.1)
 
-    @patch("ultrasonic_target_reach.time.sleep")
-    @patch("ultrasonic_target_reach.wait_for_stable_profile")
-    def test_unstable_sonar_retries_without_ending_approach(
-            self, stable_profile, _sleep):
-        expected = (object(), ("attempt",))
-        stable_profile.side_effect = [TimeoutError("multipath"), expected]
-        logs = []
+    def test_final_close_requires_object_between_physical_fingers(self):
+        scene = SimpleNamespace(gripper=SimpleNamespace(
+            center=(640.0, 690.0), opening_px=300.0))
+        aligned = SimpleNamespace(
+            center=(650.0, 500.0), bbox=(610, 400, 80, 240))
+        overshot = SimpleNamespace(
+            center=(650.0, 650.0), bbox=(610, 520, 80, 190))
 
-        result = _wait_for_stable_sonar(
-            object(), logger=lambda message, **_kwargs: logs.append(message))
-
-        self.assertIs(result, expected)
-        self.assertEqual(stable_profile.call_count, 2)
-        self.assertIn("holding pose and retrying", logs[0])
-
+        self.assertTrue(_final_grasp_gate(scene, aligned)[0])
+        self.assertFalse(_final_grasp_gate(scene, overshot)[0])
 
 if __name__ == "__main__":
     unittest.main()

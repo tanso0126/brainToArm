@@ -8,10 +8,10 @@ table plane or require an absolute sonar/world transform.
 Every physical step is:
 
 1. reacquire the same visual instance and keep it near the camera/sonar axis;
-2. require a temporally stable ultrasonic echo;
-3. plan one adaptive 15/10/5 mm motor-2/3/4 step with the existing controller;
+2. take one short ultrasonic observation without blocking far-field motion;
+3. plan one adaptive 20/15 mm motor-2/3/4 step with the existing controller;
 4. collision-check the complete swept transition;
-5. move, reacquire, and require the echo distance to decrease.
+5. send one firmware-slewed move and immediately repeat.
 
 The sonar face is physically behind the finger contact plane.  With an object
 inserted as deeply as the fingers permit, 180 live echoes formed a dominant
@@ -24,7 +24,6 @@ same object but never ends an otherwise valid approach.
 from dataclasses import dataclass
 from pathlib import Path
 import argparse
-import time
 
 import numpy as np
 
@@ -35,13 +34,11 @@ from arm_session import ArmSessionClient
 from floor_grasp import WristSceneDetector
 from floor_servo import FloorServo, _fresh_frame
 from look_reach import (
-    AIM_ONLY_THRESHOLD_PX,
     LookReachTargetSelector,
     acquire_initial_target,
-    plan_aim_step,
     plan_resolved_step,
 )
-from ultrasonic_depth import wait_for_stable_profile
+from ultrasonic_depth import acquire_profile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -50,7 +47,10 @@ PREVIEW = ROOT / "data" / "vision" / "ultrasonic_target_reach_latest.jpg"
 # Camera and HC-SR04 are mounted as one bracket.  The optical/acoustic boresight
 # is near image centre after the operator's physical alignment.
 SONAR_AIM_X_RATIO = 0.50
-SONAR_AIM_Y_RATIO = 0.50
+# The sonar sits below the camera. A target on the acoustic axis therefore
+# projects below optical image centre at grasp distance. The measured deepest
+# insertion frames place it around 65% image height, not 50%.
+SONAR_AIM_Y_RATIO = 0.65
 MAX_AIM_X_ERROR_PX = 90.0
 
 # The deepest physically inserted object produced a stable 36 mm dominant echo
@@ -60,9 +60,13 @@ SONAR_STOP_MARGIN_MM = 10.0
 STOP_RANGE_MM = MEASURED_DEEPEST_OBJECT_RANGE_MM + SONAR_STOP_MARGIN_MM
 FINGERTIP_FLOOR_STOP_MM = 10.0
 FAR_ROW_GAP_PX = 180.0
-FAR_ADVANCE_MM = 15.0
-MID_ADVANCE_MM = 10.0
-APPROACH_MAX_JOINT_STEP_DEG = 8
+SONAR_NEAR_ROW_GAP_PX = 110.0
+FINAL_JAW_GAP_MIN_PX = 15.0
+FINAL_JAW_GAP_MAX_PX = 90.0
+FINAL_JAW_HORIZONTAL_FRACTION = 0.30
+FAR_ADVANCE_MM = 20.0
+MID_ADVANCE_MM = 15.0
+APPROACH_MAX_JOINT_STEP_DEG = 12
 # The explicit fingertip-floor gate below is authoritative. This lower planner
 # bound prevents an unrelated tool-centre clamp from ending the approach early.
 MIN_TOOL_CENTER_Z_M = 0.010
@@ -134,34 +138,48 @@ def _reacquire(detector, selector, attempts=3):
     return frame, scene, None
 
 
-def _wait_for_stable_sonar(client, logger=print):
-    """Wait in place through multipath instead of ending autonomous approach."""
-    cycle = 0
-    while True:
-        cycle += 1
-        try:
-            return wait_for_stable_profile(client, timeout_s=8.0)
-        except TimeoutError as exc:
-            logger(
-                f"[sonar-reach] unstable echo cycle {cycle}; "
-                f"holding pose and retrying ({exc})",
-                flush=True,
-            )
-            time.sleep(0.25)
+def _observe_sonar(client, near):
+    """Take one bounded observation; never hold far-field motion for sonar."""
+    if near:
+        profile = acquire_profile(
+            client, samples=12, interval_s=0.035,
+            min_valid_fraction=0.60, min_support_fraction=0.55,
+            min_cluster_samples=6)
+    else:
+        profile = acquire_profile(
+            client, samples=5, interval_s=0.020,
+            min_valid_fraction=0.40, min_support_fraction=0.60,
+            min_cluster_samples=3)
+    if profile.stable and profile.distance_mm is not None:
+        return float(profile.distance_mm), profile
+    return float("inf"), profile
 
 
-def _draw_preview(frame, scene, candidate, pose, distance_mm, step, decision):
+def _fast_approach_move(client, target, settle_s=0.18):
+    """Use the Uno's own degree-by-degree slew without extra 3° host chunks."""
+    return client.request({
+        "command": "move",
+        "pose": [int(round(value)) for value in target],
+        "require_camera": True,
+        "settle_s": float(settle_s),
+    })
+
+
+def _draw_preview(frame, scene, candidate, pose, distance_mm, step, decision,
+                  target_visible=True):
     import cv2
 
     image = frame.copy()
-    x, y, width, height = candidate.bbox
-    cv2.rectangle(image, (x, y), (x + width, y + height), (0, 220, 255), 3)
     aim = (int(round(SONAR_AIM_X_RATIO * image.shape[1])),
            int(round(SONAR_AIM_Y_RATIO * image.shape[0])))
     cv2.drawMarker(image, aim, (255, 255, 255),
                    cv2.MARKER_CROSS, 34, 2)
-    cv2.line(image, tuple(int(round(value)) for value in candidate.center),
-             aim, (0, 220, 255), 2)
+    if target_visible:
+        x, y, width, height = candidate.bbox
+        cv2.rectangle(
+            image, (x, y), (x + width, y + height), (0, 220, 255), 3)
+        cv2.line(image, tuple(int(round(value)) for value in candidate.center),
+                 aim, (0, 220, 255), 2)
     gripper = getattr(scene, "gripper", None)
     if gripper is not None:
         cv2.drawMarker(
@@ -169,7 +187,8 @@ def _draw_preview(frame, scene, candidate, pose, distance_mm, step, decision):
             (255, 255, 0), cv2.MARKER_CROSS, 34, 2)
     text = (
         f"step {step}  sonar {distance_mm:.1f} mm  "
-        f"pose {pose[1]}/{pose[2]}/{pose[3]}  {decision.action}")
+        f"pose {pose[1]}/{pose[2]}/{pose[3]}  {decision.action}"
+        f"{'' if target_visible else '  LAST LOCK'}")
     cv2.putText(image, text, (18, 32), cv2.FONT_HERSHEY_SIMPLEX,
                 0.65, (20, 20, 20), 4, cv2.LINE_AA)
     cv2.putText(image, text, (18, 32), cv2.FONT_HERSHEY_SIMPLEX,
@@ -201,6 +220,26 @@ def _jaw_gate(scene, candidate):
     return ready, reason
 
 
+def _final_grasp_gate(scene, candidate):
+    """Require the object body, not merely its direction, between the fingers."""
+    gripper = getattr(scene, "gripper", None)
+    if gripper is None:
+        return False, "final finger markers unavailable"
+    horizontal = abs(float(candidate.center[0]) - float(gripper.center[0]))
+    allowed = FINAL_JAW_HORIZONTAL_FRACTION * float(gripper.opening_px)
+    gap = float(gripper.center[1]) - float(
+        candidate.bbox[1] + candidate.bbox[3])
+    if horizontal > allowed:
+        return False, (
+            f"final object offset {horizontal:.0f}px > {allowed:.0f}px")
+    if not FINAL_JAW_GAP_MIN_PX <= gap <= FINAL_JAW_GAP_MAX_PX:
+        return False, (
+            f"final jaw-row gap {gap:.0f}px outside "
+            f"{FINAL_JAW_GAP_MIN_PX:.0f}..{FINAL_JAW_GAP_MAX_PX:.0f}px")
+    return True, (
+        f"final grasp aligned: offset {horizontal:.0f}px, gap {gap:.0f}px")
+
+
 def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
         detector=None, selector=None):
     client = client or ArmSessionClient()
@@ -214,12 +253,37 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
         detector, target_selector=selector, pose=pose)
     if candidate is None:
         return {"state": "no-target", "moved": False}
+    jaw_ready, jaw_reason, row_gap = _jaw_metrics(scene, candidate)
+    if row_gap is None:
+        raise RuntimeError(jaw_reason)
+    last_visible_pose = list(pose)
 
     for step in range(int(max_steps)):
-        frame, scene, candidate = _reacquire(detector, selector)
-        if candidate is None:
-            raise RuntimeError("locked target lost; no blind approach")
+        frame, observed_scene, observed_candidate = _reacquire(
+            detector, selector)
+        target_visible = observed_candidate is not None
+        if target_visible:
+            scene, candidate = observed_scene, observed_candidate
+        else:
+            pose = list(client.request({"command": "status"})["pose"])
+            if not execute:
+                return {
+                    "state": "target-recovery-needed", "pose": pose,
+                    "preview": str(PREVIEW),
+                }
+            report = safety.transition_report(pose, last_visible_pose)
+            if not report.safe:
+                raise RuntimeError(
+                    "target recovery rejected: " + report.explain())
+            print(
+                f"[sonar-reach] target left frame; returning "
+                f"{pose[1:4]} -> {last_visible_pose[1:4]} for re-aim",
+                flush=True,
+            )
+            _fast_approach_move(client, last_visible_pose, settle_s=0.30)
+            continue
         pose = list(client.request({"command": "status"})["pose"])
+        last_visible_pose = list(pose)
         aim_x = SONAR_AIM_X_RATIO * frame.shape[1]
         aim_y = SONAR_AIM_Y_RATIO * frame.shape[0]
         x_error = float(candidate.center[0]) - aim_x
@@ -228,20 +292,23 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
                 f"target {x_error:+.0f}px from sonar x axis; "
                 "base/lateral alignment required")
 
-        profile, attempts = _wait_for_stable_sonar(client)
-        distance = float(profile.distance_mm)
         jaw_ready, jaw_reason, row_gap = _jaw_metrics(scene, candidate)
         if row_gap is None:
             raise RuntimeError(jaw_reason)
+        sonar_near = float(row_gap) <= SONAR_NEAR_ROW_GAP_PX
+        distance, profile = _observe_sonar(client, near=sonar_near)
         floor_clearance = fingertip_floor_clearance_mm(pose)
         decision = approach_stop_decision(distance, floor_clearance)
         _draw_preview(
-            frame, scene, candidate, pose, distance, step, decision)
+            frame, scene, candidate, pose, distance, step, decision,
+            target_visible=target_visible)
         print(
             f"[sonar-reach] step={step:02d} target="
             f"({candidate.center[0]:.0f},{candidate.center[1]:.0f}) "
-            f"range={distance:.1f}mm spread={profile.batch_spread_mm:.1f}mm "
-            f"attempts={len(attempts)} decision={decision.action} "
+            f"visible={target_visible} "
+            f"range={distance:.1f}mm sonar-stable={profile.stable} "
+            f"sonar-mode={'near' if sonar_near else 'quick'} "
+            f"decision={decision.action} "
             f"jaw={jaw_reason}", flush=True)
 
         if decision.action == "floor":
@@ -252,10 +319,12 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
                 "preview": str(PREVIEW),
             }
         if decision.action == "sonar":
-            if not execute or not allow_grasp or not jaw_ready:
+            final_aligned, final_reason = _final_grasp_gate(scene, candidate)
+            print(f"[sonar-reach] {final_reason}", flush=True)
+            if not execute or not allow_grasp or not final_aligned:
                 return {
                     "state": (
-                        "sonar-stop-ready" if jaw_ready
+                        "sonar-stop-ready" if final_aligned
                         else "sonar-stop-image-disagrees"),
                     "pose": pose, "distance_mm": distance,
                     "fingertip_floor_clearance_mm": floor_clearance,
@@ -273,17 +342,12 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
                 "distance_mm": distance, "preview": str(PREVIEW)}
 
         vertical_error = float(candidate.center[1]) - aim_y
-        plan = None
-        if abs(vertical_error) > AIM_ONLY_THRESHOLD_PX:
-            plan = plan_aim_step(
-                pose, vertical_error, MIN_TOOL_CENTER_Z_M)
-        if plan is None:
-            advance_mm = adaptive_advance_mm(row_gap)
-            plan = plan_resolved_step(
-                pose, vertical_error, frame.shape[0],
-                advance_mm=advance_mm,
-                min_tool_z_m=MIN_TOOL_CENTER_Z_M,
-                max_joint_step=APPROACH_MAX_JOINT_STEP_DEG)
+        advance_mm = adaptive_advance_mm(row_gap)
+        plan = plan_resolved_step(
+            pose, vertical_error, frame.shape[0],
+            advance_mm=advance_mm,
+            min_tool_z_m=MIN_TOOL_CENTER_Z_M,
+            max_joint_step=APPROACH_MAX_JOINT_STEP_DEG)
         if plan is None:
             raise RuntimeError("no bounded 2/3/4 step remains")
 
@@ -310,8 +374,7 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
             return {
                 "state": "planned", "pose": next_pose,
                 "distance_mm": distance, "preview": str(PREVIEW)}
-        mover.slow_move(next_pose, final_settle=0.35)
-        time.sleep(0.10)
+        _fast_approach_move(client, next_pose)
 
     return {
         "state": "step-limit",
