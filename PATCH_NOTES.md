@@ -3185,6 +3185,9 @@ and the trained model backend.
   valid approach.
 - The camera continues locking and steering toward the same object. It is used
   after a sonar stop only to authorize closing; it cannot stop translation.
+- Removed the remaining frame-to-frame object-area shrink abort after a live
+  8.7 mm approach proved that segmentation scale can fluctuate despite a
+  continuously locked target. Image area is no longer an implicit third stop.
 - Removed the ineffective 5 mm final command. Approach commands are 15 mm in
   the far image band and 10 mm everywhere else, with autonomous re-observation
   between moves.

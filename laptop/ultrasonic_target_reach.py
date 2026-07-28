@@ -198,8 +198,6 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
         detector, target_selector=selector, pose=pose)
     if candidate is None:
         return {"state": "no-target", "moved": False}
-    initial_area = float(candidate.area)
-    previous_area = initial_area
 
     for step in range(int(max_steps)):
         frame, scene, candidate = _reacquire(detector, selector)
@@ -287,9 +285,6 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
         if not report.safe:
             raise RuntimeError(
                 "approach rejected: " + report.explain())
-        if float(candidate.area) < previous_area * 0.90:
-            raise RuntimeError("locked target shrank; approach sign is wrong")
-        previous_area = float(candidate.area)
         print(
             f"[sonar-reach] pose234 {pose[1:4]} -> {next_pose[1:4]} "
             f"commanded-advance={adaptive_advance_mm(row_gap):.0f}mm "
