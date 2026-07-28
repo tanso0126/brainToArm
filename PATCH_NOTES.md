@@ -3033,3 +3033,23 @@ and the trained model backend.
   sleep alone can no longer authorize depth use.
 - Added a regression where the first 120/140 mm attempt is rejected and the
   following 145/145 mm attempt is accepted.
+
+## Patch 79 — reject numerically neat but physically impossible sonar fits
+
+### Physical result
+
+- Five individually stable observations produced a low 2.7 mm residual, but
+  the fitted motor-4 scale and sensor z offset landed exactly on their allowed
+  boundaries (`-0.2` and `-200 mm`).
+- This means the stable acoustic return was not the assumed tabletop ray. A
+  least-squares residual alone cannot distinguish a coherent obstacle/self
+  reflection from the intended plane.
+
+### Changes
+
+- Calibration quality now also requires every fitted parameter to remain at
+  least 2% of its search span away from a bound.
+- Removed the rejected runtime calibration immediately; no consumer can load
+  the physically impossible transform.
+- Added a regression using the measured 155–180° data that must fail the new
+  boundary-quality gate despite its small residual.

@@ -286,17 +286,28 @@ def fit_floor_mount(samples: Sequence[FloorCalibrationSample],
     inlier_residuals = residuals[inlier_indices]
     rms = float(np.sqrt(np.mean(np.square(inlier_residuals))))
     inlier_max = float(np.max(np.abs(inlier_residuals)))
+    lower = np.asarray(bounds[0], dtype=float)
+    upper = np.asarray(bounds[1], dtype=float)
+    span = upper - lower
+    boundary_fraction = np.minimum(
+        (result.x - lower) / span, (upper - result.x) / span)
+    boundary_clear = bool(np.all(boundary_fraction >= 0.02))
     quality_ok = (
         bool(result.success)
         and len(inlier_indices) >= 5
         and rms <= 5.0
         and inlier_max <= 10.0
+        and boundary_clear
     )
     return {
         "mount": mount,
         "rms_mm": rms,
         "max_abs_error_mm": float(np.max(np.abs(residuals))),
         "max_inlier_error_mm": inlier_max,
+        "parameter_boundary_clear": boundary_clear,
+        "parameter_boundary_fraction": [
+            float(value) for value in boundary_fraction
+        ],
         "residuals_mm": [float(value) for value in residuals],
         "inlier_indices": inlier_indices,
         "excluded_indices": [

@@ -135,6 +135,18 @@ class SonarGeometryTests(unittest.TestCase):
                 save_calibration(
                     Path(directory) / "bad.json", result, [])
 
+    def test_boundary_hugging_fit_is_low_quality(self):
+        samples = [
+            FloorCalibrationSample(
+                (90, 100, 100, wrist, 90, 170), distance)
+            for wrist, distance in (
+                (155, 162.0), (160, 161.5), (170, 160.5),
+                (175, 158.0), (180, 149.25))
+        ]
+        result = fit_floor_mount(samples)
+        self.assertFalse(result["parameter_boundary_clear"])
+        self.assertFalse(result["quality_ok"])
+
 
 if __name__ == "__main__":
     unittest.main()
