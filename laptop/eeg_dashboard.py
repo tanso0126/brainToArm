@@ -34,6 +34,7 @@ import numpy as np
 from scipy.signal import butter, iirnotch, lfilter, lfilter_zi, sosfilt, sosfilt_zi
 
 import config
+from cognitive_load import AutonomyAllocator, CognitiveLoadEstimator
 from polyg_hid import (
     ADC_VOLTS_PER_COUNT,
     MAX_CHANNELS,
@@ -165,6 +166,11 @@ class EEGDashboardService:
         self._errp_lock = threading.Lock()
         self._errp_baseline_ready = False
         self._errp_last = None
+        self._load_estimator = CognitiveLoadEstimator()
+        self._autonomy_allocator = AutonomyAllocator()
+        self._load_baseline_ready = False
+        self._load_state = None
+        self._load_last_update_mono = None
         self._simulation = None
 
     @property
@@ -234,6 +240,15 @@ class EEGDashboardService:
             self._processor = EEGSignalProcessor(config.EEG_FS, CHANNELS)
             self._gain_index = gain_index
             self._sample_selector = sample_selector
+            # Rest baselines belong to one participant/acquisition session.
+            self._errp_detector = ErrPDetector(backend=config.ERRP_BACKEND)
+            self._errp_baseline_ready = False
+            self._errp_last = None
+            self._load_estimator = CognitiveLoadEstimator()
+            self._autonomy_allocator = AutonomyAllocator()
+            self._load_baseline_ready = False
+            self._load_state = None
+            self._load_last_update_mono = None
             self._thread = threading.Thread(
                 target=self._capture_loop, name="polyg-dashboard-capture", daemon=True)
             self._thread.start()
@@ -382,12 +397,12 @@ class EEGDashboardService:
         return {"marker": label, "accepted": True}
 
     def calibrate_errp(self, seconds=None):
-        """Learn session noise from recent resting EEG without moving the arm."""
+        """Calibrate ErrP noise and resting TAR from one clean rest window."""
         seconds = float(config.COG_REST_S if seconds is None else seconds)
         seconds = max(2.0, min(seconds, 30.0))
         with self._lock:
             if not self._running:
-                raise RuntimeError("ErrP 휴식 보정 전에 EEG 측정을 시작하세요")
+                raise RuntimeError("ErrP+TAR 휴식 보정 전에 EEG 측정을 시작하세요")
             now = time.monotonic()
             recent = [item for item in self._rows if item[1] >= now - seconds]
             window = [item[4] for item in recent]
@@ -396,22 +411,35 @@ class EEGDashboardService:
             raise RuntimeError(
                 f"휴식 데이터가 부족합니다 ({len(window)}/{required} samples). "
                 f"눈을 편하게 두고 {seconds:.0f}초 후 다시 누르세요")
-        for channel in config.ERRP_CHANNELS:
+        required_channels = sorted(set(
+            config.ERRP_CHANNELS
+            + config.COG_THETA_CHANNELS
+            + config.COG_ALPHA_CHANNELS))
+        bad_channels = []
+        for channel in required_channels:
             quality = analyze_signal_quality(
                 [item[4][channel] for item in recent],
                 [item[2][channel] for item in recent],
                 [item[3][channel] for item in recent],
             )
             if quality["state"] != "present":
-                raise RuntimeError(
-                    f"ErrP CH{channel + 1} 최근 {seconds:.0f}초 상태가 "
-                    f"{quality['state']}입니다 "
-                    f"(clipping {quality['clippingPercent']:.3f}%, "
-                    f"p-p {quality['peakToPeakMv']:.3f} mV). "
-                    "전극 접촉·움직임·PGA를 확인하고 깨끗한 8초를 다시 확보하세요")
+                bad_channels.append(
+                    f"CH{channel + 1}={quality['state']} "
+                    f"(clip {quality['clippingPercent']:.3f}%, "
+                    f"p-p {quality['peakToPeakMv']:.3f} mV)")
+        if bad_channels:
+            raise RuntimeError(
+                f"ErrP+TAR 최근 {seconds:.0f}초 통합 보정 불가: "
+                + ", ".join(bad_channels)
+                + ". CH1·2·3·4·8/REF/GND 접촉·움직임·PGA를 확인하고 "
+                  "깨끗한 8초를 다시 확보하세요")
+        load_state = self._load_estimator.calibrate(window)
         self._errp_detector.update_baseline(window)
         with self._lock:
             self._errp_baseline_ready = True
+            self._load_baseline_ready = True
+            self._load_state = load_state
+            self._load_last_update_mono = time.monotonic()
         return {
             "ready": True,
             "samples": len(window),
@@ -420,6 +448,62 @@ class EEGDashboardService:
                 channel + 1 for channel in config.ERRP_CHANNELS],
             "baselineStdMv": round(
                 float(self._errp_detector.baseline_std or 0.0), 6),
+            "cognitiveLoad": {
+                "ready": True,
+                "thetaChannels": [
+                    channel + 1 for channel in config.COG_THETA_CHANNELS],
+                "alphaChannels": [
+                    channel + 1 for channel in config.COG_ALPHA_CHANNELS],
+                "restTar": float(load_state.rest_tar),
+            },
+        }
+
+    def _refresh_cognitive_load_locked(self, now):
+        if not self._running or not self._load_baseline_ready:
+            return
+        if (self._load_last_update_mono is not None
+                and now - self._load_last_update_mono < config.COG_UPDATE_S):
+            return
+        cutoff = now - config.COG_WINDOW_S
+        window = [item[4] for item in self._rows if item[1] >= cutoff]
+        self._load_state = self._load_estimator.update(window)
+        self._load_last_update_mono = now
+
+    def _cognitive_load_status_locked(self):
+        state = self._load_state
+        allocation = self._autonomy_allocator.allocate(
+            state if self._load_baseline_ready else None)
+        return {
+            "baselineReady": self._load_baseline_ready,
+            "thetaChannels": [
+                channel + 1 for channel in config.COG_THETA_CHANNELS],
+            "alphaChannels": [
+                channel + 1 for channel in config.COG_ALPHA_CHANNELS],
+            "thetaBandHz": list(config.COG_THETA_BAND),
+            "alphaBandHz": list(config.COG_ALPHA_BAND),
+            "windowSeconds": config.COG_WINDOW_S,
+            "updateSeconds": config.COG_UPDATE_S,
+            "restTar": float(state.rest_tar) if state is not None else None,
+            "tar": float(state.tar) if state is not None else None,
+            "relativeTar": (
+                float(state.relative_tar) if state is not None else None),
+            "smoothedRelativeTar": (
+                float(state.smoothed_relative_tar)
+                if state is not None else None),
+            "thetaPowers": (
+                [float(value) for value in state.theta_powers]
+                if state is not None else []),
+            "alphaPowers": (
+                [float(value) for value in state.alpha_powers]
+                if state is not None else []),
+            "valid": bool(state.valid) if state is not None else False,
+            "reason": state.reason if state is not None else "휴식 보정 필요",
+            "robotWeight": float(allocation.robot_weight),
+            "humanWeight": float(allocation.human_weight),
+            "errpThreshold": float(allocation.errp_threshold),
+            "errpApplyStride": int(allocation.errp_apply_stride),
+            "strongErrpOverrideThreshold": (
+                config.AUTONOMY_ERRP_OVERRIDE_THRESHOLD),
         }
 
     def check_errp(self, marker="SIM_DECISION"):
@@ -437,7 +521,9 @@ class EEGDashboardService:
                 if not self._running:
                     raise RuntimeError("PolyG-I 측정이 실행 중이 아닙니다")
                 if not self._errp_baseline_ready:
-                    raise RuntimeError("먼저 ErrP 휴식 보정을 완료하세요")
+                    raise RuntimeError("먼저 ErrP+TAR 통합 휴식 보정을 완료하세요")
+                if not self._load_baseline_ready:
+                    raise RuntimeError("인지 부하 TAR 휴식 기준이 없습니다")
                 onset = time.monotonic()
                 if self._record_file is not None:
                     self._pending_marker = str(marker or "SIM_DECISION")[:80]
@@ -462,14 +548,28 @@ class EEGDashboardService:
                         f"ErrP CH{channel + 1} epoch가 평탄하여 판정을 적용하지 않습니다")
             diagnostics = self._errp_detector.diagnose(epoch)
             probability = float(diagnostics["probability"])
+            with self._lock:
+                self._refresh_cognitive_load_locked(deadline)
+                load_state = self._load_state
+            decision = self._autonomy_allocator.decide(probability, load_state)
+            allocation = decision.allocation
             result = {
-                "isError": probability >= config.ERRP_THRESHOLD,
+                "isError": decision.veto,
+                "rawDetected": probability >= config.ERRP_THRESHOLD,
                 "probability": round(probability, 4),
-                "threshold": config.ERRP_THRESHOLD,
+                "threshold": round(float(decision.threshold), 4),
+                "applied": decision.applied,
+                "override": decision.override,
                 "samples": len(epoch),
                 "marker": str(marker or "SIM_DECISION"),
                 "channels": [channel + 1 for channel in config.ERRP_CHANNELS],
                 "bandHz": list(config.ERRP_BAND),
+                "robotWeight": round(float(allocation.robot_weight), 4),
+                "humanWeight": round(float(allocation.human_weight), 4),
+                "errpApplyStride": allocation.errp_apply_stride,
+                "relativeTar": (
+                    round(float(load_state.smoothed_relative_tar), 6)
+                    if load_state is not None else None),
                 "negativeDeflectionMv": (
                     round(float(diagnostics["negativeDeflection"]), 6)
                     if diagnostics["negativeDeflection"] is not None else None),
@@ -557,17 +657,39 @@ class EEGDashboardService:
             errp_required = int(
                 errp_seconds * config.EEG_FS
                 * config.EEG_MIN_EPOCH_FRACTION)
+            calibration_channels = sorted(set(
+                config.ERRP_CHANNELS
+                + config.COG_THETA_CHANNELS
+                + config.COG_ALPHA_CHANNELS))
+            calibration_qualities = {
+                str(channel + 1): analyze_signal_quality(
+                    [item[4][channel] for item in errp_recent],
+                    [item[2][channel] for item in errp_recent],
+                    [item[3][channel] for item in errp_recent],
+                )
+                for channel in calibration_channels
+            }
+            blocking_channels = [
+                channel for channel, quality in calibration_qualities.items()
+                if quality["state"] != "present"
+            ]
             calibration_window = {
                 "seconds": errp_seconds,
                 "samples": len(errp_recent),
                 "requiredSamples": errp_required,
                 "quality": errp_quality,
+                "channelQualities": calibration_qualities,
+                "requiredChannels": [
+                    channel + 1 for channel in calibration_channels],
+                "blockingChannels": blocking_channels,
                 "ready": (
                     running
                     and len(errp_recent) >= errp_required
-                    and errp_quality["state"] == "present"
+                    and not blocking_channels
                 ),
             }
+            self._refresh_cognitive_load_locked(now)
+            cognitive_load = self._cognitive_load_status_locked()
             recording = self.recording_status_locked()
             last_age = now - self._last_report_mono if self._last_report_mono else None
             return {
@@ -625,6 +747,7 @@ class EEGDashboardService:
                     "calibrationWindow": calibration_window,
                     "lastDecision": self._errp_last,
                 },
+                "cognitiveLoad": cognitive_load,
                 "quality": qualities,
             }
 

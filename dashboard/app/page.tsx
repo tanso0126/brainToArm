@@ -3,6 +3,7 @@
 import {
   Activity,
   AlertTriangle,
+  Brain,
   CircleStop,
   Download,
   Gauge,
@@ -100,26 +101,59 @@ type DashboardStatus = {
       samples: number;
       requiredSamples: number;
       quality: Quality;
+      channelQualities: Record<string, Quality>;
+      requiredChannels: number[];
+      blockingChannels: string[];
       ready: boolean;
     };
     lastDecision: {
       isError: boolean;
+      rawDetected: boolean;
       probability: number;
       threshold: number;
+      applied: boolean;
+      override: boolean;
       samples: number;
       marker: string;
       channels: number[];
       bandHz: [number, number];
+      robotWeight: number;
+      humanWeight: number;
+      errpApplyStride: number;
+      relativeTar: number | null;
       negativeDeflectionMv: number | null;
       baselineStdMv: number | null;
       zScore: number | null;
     } | null;
+  };
+  cognitiveLoad: {
+    baselineReady: boolean;
+    thetaChannels: number[];
+    alphaChannels: number[];
+    thetaBandHz: [number, number];
+    alphaBandHz: [number, number];
+    windowSeconds: number;
+    updateSeconds: number;
+    restTar: number | null;
+    tar: number | null;
+    relativeTar: number | null;
+    smoothedRelativeTar: number | null;
+    thetaPowers: number[];
+    alphaPowers: number[];
+    valid: boolean;
+    reason: string;
+    robotWeight: number;
+    humanWeight: number;
+    errpThreshold: number;
+    errpApplyStride: number;
+    strongErrpOverrideThreshold: number;
   };
   quality: Quality[];
 };
 
 type SampleRow = { sequence: number; elapsed: number; values: number[] };
 type Recording = { filename: string; bytes: number; modifiedAt: string; downloadUrl: string };
+type ScaleMode = "fixed" | "auto";
 
 const EMPTY_QUALITY: Quality = {
   state: "waiting",
@@ -155,6 +189,21 @@ function apiError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function niceScale(value: number) {
+  const safe = Math.max(0.001, Number.isFinite(value) ? value : 0.001);
+  const magnitude = 10 ** Math.floor(Math.log10(safe));
+  const normalized = safe / magnitude;
+  const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return step * magnitude;
+}
+
+function formatAxisScale(value: number) {
+  if (value >= 100) return value.toFixed(0);
+  if (value >= 10) return value.toFixed(1);
+  if (value >= 1) return value.toFixed(2);
+  return value.toFixed(3);
+}
+
 async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -172,6 +221,7 @@ function WaveformCanvas({
   selected,
   windowSeconds,
   fixedScale,
+  scaleMode,
   renderDelayMs,
   paused,
 }: {
@@ -180,17 +230,27 @@ function WaveformCanvas({
   selected: number;
   windowSeconds: number;
   fixedScale: number;
+  scaleMode: ScaleMode;
   renderDelayMs: number;
   paused: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const settingsRef = useRef({ visible, selected, windowSeconds, fixedScale, renderDelayMs, paused });
+  const settingsRef = useRef({ visible, selected, windowSeconds, fixedScale, scaleMode, renderDelayMs, paused });
+  const autoScalesRef = useRef<number[]>(Array(8).fill(0.001));
+  const lastAutoScaleAtRef = useRef(0);
   const playheadRef = useRef<number | null>(null);
   const previousFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
-    settingsRef.current = { visible, selected, windowSeconds, fixedScale, renderDelayMs, paused };
-  }, [visible, selected, windowSeconds, fixedScale, renderDelayMs, paused]);
+    settingsRef.current = { visible, selected, windowSeconds, fixedScale, scaleMode, renderDelayMs, paused };
+  }, [visible, selected, windowSeconds, fixedScale, scaleMode, renderDelayMs, paused]);
+
+  useEffect(() => {
+    if (scaleMode === "auto") {
+      autoScalesRef.current = Array(8).fill(0.001);
+      lastAutoScaleAtRef.current = 0;
+    }
+  }, [scaleMode]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -251,10 +311,42 @@ function WaveformCanvas({
         return;
       }
 
+      if (settings.scaleMode === "auto"
+          && frameTime - lastAutoScaleAtRef.current >= 400
+          && currentRows.length) {
+        const autoEnd = currentRows[currentRows.length - 1].elapsed
+          - settings.renderDelayMs / 1000;
+        const autoStart = autoEnd - settings.windowSeconds;
+        const autoRows = currentRows.filter(
+          (row) => row.elapsed >= autoStart && row.elapsed <= autoEnd);
+        shown.forEach((channel) => {
+          const magnitudes = autoRows
+            .map((row) => Math.abs(row.values[channel]))
+            .filter(Number.isFinite)
+            .sort((a, b) => a - b);
+          if (!magnitudes.length) return;
+          const percentile = magnitudes[
+            Math.min(magnitudes.length - 1, Math.floor(magnitudes.length * 0.98))];
+          const target = niceScale(percentile * 1.15);
+          const previous = autoScalesRef.current[channel];
+          // Expand immediately to avoid clipping. Contract only when the useful
+          // signal occupies less than half the lane, preventing axis chatter.
+          autoScalesRef.current[channel] = target >= previous
+            ? target
+            : target <= previous * 0.5
+              ? niceScale(Math.max(target, previous * 0.5))
+              : previous;
+        });
+        lastAutoScaleAtRef.current = frameTime;
+      }
+
       const laneHeight = plotHeight / shown.length;
       shown.forEach((channel, lane) => {
         const mid = top + laneHeight * (lane + 0.5);
         const amplitude = laneHeight * 0.4;
+        const channelScale = settings.scaleMode === "auto"
+          ? autoScalesRef.current[channel]
+          : settings.fixedScale;
         ctx.strokeStyle = channel === settings.selected ? "rgba(103, 232, 197, .22)" : "rgba(133, 168, 158, .08)";
         ctx.beginPath();
         ctx.moveTo(left, mid);
@@ -267,9 +359,9 @@ function WaveformCanvas({
         ctx.fillStyle = "#607870";
         ctx.font = "8px var(--font-geist-mono)";
         ctx.textAlign = "right";
-        ctx.fillText(`+${settings.fixedScale.toFixed(2)}`, left - 5, mid - amplitude + 3);
+        ctx.fillText(`+${formatAxisScale(channelScale)}`, left - 5, mid - amplitude + 3);
         ctx.fillText("0", left - 5, mid + 3);
-        ctx.fillText(`−${settings.fixedScale.toFixed(2)}`, left - 5, mid + amplitude + 3);
+        ctx.fillText(`−${formatAxisScale(channelScale)}`, left - 5, mid + amplitude + 3);
       });
       ctx.fillStyle = "#78928a";
       ctx.font = "8px var(--font-geist-mono)";
@@ -323,7 +415,9 @@ function WaveformCanvas({
       shown.forEach((channel, lane) => {
         if (points.length < 2) return;
         const values = points.map((row) => row.values[channel]);
-        const scale = settings.fixedScale;
+        const scale = settings.scaleMode === "auto"
+          ? autoScalesRef.current[channel]
+          : settings.fixedScale;
         const mid = top + laneHeight * (lane + 0.5);
         const amplitude = laneHeight * 0.39;
         ctx.strokeStyle = CHANNEL_COLORS[channel];
@@ -360,7 +454,7 @@ function WaveformCanvas({
     return () => cancelAnimationFrame(animationFrame);
   }, [rowsRef]);
 
-  return <canvas ref={canvasRef} className="waveform-canvas" role="img" aria-label="고정 축 8채널 EEG 실시간 필터 파형" />;
+  return <canvas ref={canvasRef} className="waveform-canvas" role="img" aria-label={`${scaleMode === "auto" ? "채널별 자동 축" : "공통 고정 축"} 8채널 EEG 실시간 필터 파형`} />;
 }
 
 function calculateSpectrum(rows: SampleRow[], channel: number, fs: number) {
@@ -503,6 +597,7 @@ export default function Home() {
   const [visible, setVisible] = useState(() => Array(8).fill(true));
   const [windowSeconds, setWindowSeconds] = useState(5);
   const [fixedScale, setFixedScale] = useState(100);
+  const [scaleMode, setScaleMode] = useState<ScaleMode>("fixed");
   const [gainIndex, setGainIndex] = useState(6);
   const [renderDelayMs, setRenderDelayMs] = useState(450);
   const [displayPaused, setDisplayPaused] = useState(false);
@@ -523,6 +618,9 @@ export default function Home() {
       const next = await apiRequest<DashboardStatus>("/api/status");
       setStatus(next);
       setApiOnline(true);
+      if (next.acquisition.running) {
+        setGainIndex(next.signal.pgaGainIndex);
+      }
       if (sessionRef.current !== next.acquisition.sessionId) {
         sessionRef.current = next.acquisition.sessionId;
         sequenceRef.current = 0;
@@ -655,6 +753,7 @@ export default function Home() {
   const isRecording = Boolean(status?.recording.active);
   const deviceReady = Boolean(status?.device.available);
   const calibrationWindow = status?.errp.calibrationWindow;
+  const loadStatus = status?.cognitiveLoad;
   const simulationEegPanel = useMemo(() => (
     <article className="sim-card sim-eeg-live-card">
       <div className="sim-card-head">
@@ -664,11 +763,16 @@ export default function Home() {
         </div>
         <div className="sim-eeg-live-actions">
           <span className={`sim-live ${isRunning ? "" : "stopped"}`}><i />{isRunning ? `${fs.toFixed(1)} Hz` : "STOPPED"}</span>
-          <label>공통 Y축
+          <label>Y축 방식
+            <select value={scaleMode} onChange={(event) => setScaleMode(event.target.value as ScaleMode)}>
+              <option value="fixed">공통 고정</option><option value="auto">채널별 자동</option>
+            </select>
+          </label>
+          {scaleMode === "fixed" && <label>공통 Y축
             <select value={fixedScale} onChange={(event) => setFixedScale(Number(event.target.value))}>
               <option value={0.1}>±0.10 mV</option><option value={0.25}>±0.25 mV</option><option value={0.5}>±0.50 mV</option><option value={1}>±1.00 mV</option><option value={2.5}>±2.50 mV</option><option value={5}>±5.00 mV</option><option value={10}>±10.00 mV</option><option value={25}>±25.00 mV</option><option value={50}>±50.00 mV</option><option value={100}>±100.00 mV</option><option value={250}>±250.00 mV</option><option value={500}>±500.00 mV</option><option value={1000}>±1000.00 mV</option>
             </select>
-          </label>
+          </label>}
           <label>EEG PGA
             <select value={gainIndex} disabled={isRunning} onChange={(event) => setGainIndex(Number(event.target.value))}>
               <option value={4}>×1.00</option><option value={5}>×1.36</option><option value={6}>×1.70</option><option value={7}>×2.55</option><option value={8}>×3.40</option><option value={9}>×4.25</option><option value={10}>×5.67</option>
@@ -691,14 +795,15 @@ export default function Home() {
         selected={7}
         windowSeconds={5}
         fixedScale={fixedScale}
+        scaleMode={scaleMode}
         renderDelayMs={renderDelayMs}
         paused={displayPaused}
       />
       <div className="sim-eeg-live-meta">
         <span><b>ErrP 입력</b> CH8 단독 · 1–10 Hz</span>
-        <span><b>CH8 최근 8초</b> {qualityLabel(calibrationWindow?.quality.state ?? "waiting")}</span>
-        <span><b>휴식 보정</b> {status?.errp.baselineReady ? `완료 · σ ${status.errp.baselineStdMv?.toFixed(4) ?? "—"} mV` : calibrationWindow?.ready ? "지금 가능" : `${calibrationWindow?.samples ?? 0}/${calibrationWindow?.requiredSamples ?? 1638} samples`}</span>
-        <span><b>최근 판정</b> {status?.errp.lastDecision ? `P(error) ${(status.errp.lastDecision.probability * 100).toFixed(1)}%` : "없음"}</span>
+        <span><b>TAR</b> {loadStatus?.tar != null ? `${loadStatus.tar.toFixed(3)} · Δ ${((loadStatus.smoothedRelativeTar ?? 0) * 100).toFixed(1)}%` : "휴식 보정 필요"}</span>
+        <span><b>자율성</b> 로봇 {((loadStatus?.robotWeight ?? 0.5) * 100).toFixed(0)}% · 인간 {((loadStatus?.humanWeight ?? 0.5) * 100).toFixed(0)}%</span>
+        <span><b>ErrP 반영</b> {loadStatus?.baselineReady ? `매 ${loadStatus.errpApplyStride}번째 · 기준 ${(loadStatus.errpThreshold * 100).toFixed(0)}%` : calibrationWindow?.ready ? "통합 보정 가능" : `대기 ${calibrationWindow?.samples ?? 0}/${calibrationWindow?.requiredSamples ?? 1638}`}</span>
       </div>
     </article>
   ), [
@@ -711,9 +816,10 @@ export default function Home() {
     fs,
     gainIndex,
     isRunning,
+    loadStatus,
     perform,
     renderDelayMs,
-    status,
+    scaleMode,
   ]);
 
   return (
@@ -767,6 +873,7 @@ export default function Home() {
           eegRunning={isRunning}
           apiOnline={apiOnline}
           errpStatus={status?.errp ?? null}
+          loadStatus={loadStatus ?? null}
           eegPanel={simulationEegPanel}
         />
       ) : (
@@ -799,7 +906,7 @@ export default function Home() {
           <div className="panel-header waveform-header">
             <div>
               <p className="panel-kicker"><span className={isRunning ? "live-dot" : "idle-dot"} />EEG 0.5–45 HZ · NOTCH 60 HZ</p>
-              <h2>실시간 EEG 파형 · 공통 고정 축</h2>
+              <h2>실시간 EEG 파형 · {scaleMode === "auto" ? "채널별 자동 축" : "공통 고정 축"}</h2>
             </div>
             <div className="toolbar">
               <label>렌더링
@@ -812,11 +919,16 @@ export default function Home() {
                   <option value={2}>2초</option><option value={5}>5초</option><option value={10}>10초</option>
                 </select>
               </label>
-              <label>공통 Y축
+              <label>Y축 방식
+                <select value={scaleMode} onChange={(event) => setScaleMode(event.target.value as ScaleMode)}>
+                  <option value="fixed">공통 고정</option><option value="auto">채널별 자동</option>
+                </select>
+              </label>
+              {scaleMode === "fixed" && <label>공통 Y축
                 <select value={fixedScale} onChange={(event) => setFixedScale(Number(event.target.value))}>
                   <option value={0.1}>±0.10 mV</option><option value={0.25}>±0.25 mV</option><option value={0.5}>±0.50 mV</option><option value={1}>±1.00 mV</option><option value={2.5}>±2.50 mV</option><option value={5}>±5.00 mV</option><option value={10}>±10.00 mV</option><option value={25}>±25.00 mV</option><option value={50}>±50.00 mV</option><option value={100}>±100.00 mV</option><option value={250}>±250.00 mV</option><option value={500}>±500.00 mV</option><option value={1000}>±1000.00 mV</option><option value={2500}>±2500.00 mV</option><option value={5000}>±5000.00 mV</option>
                 </select>
-              </label>
+              </label>}
               <label>EEG PGA
                 <select value={gainIndex} disabled={isRunning} onChange={(event) => setGainIndex(Number(event.target.value))}>
                   <option value={4}>index 4 · ×1.00</option><option value={5}>index 5 · ×1.36</option><option value={6}>index 6 · ×1.70</option><option value={7}>index 7 · ×2.55</option><option value={8}>index 8 · ×3.40</option><option value={9}>index 9 · ×4.25</option><option value={10}>index 10 · ×5.67</option><option value={11}>index 11 · ×6.80</option><option value={12}>index 12 · ×8.50</option><option value={13}>index 13 · ×10.20</option><option value={14}>index 14 · ×11.90</option><option value={15}>index 15 · ×17.00</option>
@@ -827,7 +939,7 @@ export default function Home() {
               </button>
             </div>
           </div>
-          <WaveformCanvas rowsRef={liveRowsRef} visible={visible} selected={selectedChannel} windowSeconds={windowSeconds} fixedScale={fixedScale} renderDelayMs={renderDelayMs} paused={displayPaused} />
+          <WaveformCanvas rowsRef={liveRowsRef} visible={visible} selected={selectedChannel} windowSeconds={windowSeconds} fixedScale={fixedScale} scaleMode={scaleMode} renderDelayMs={renderDelayMs} paused={displayPaused} />
           <div className="channel-controls" aria-label="채널 표시 설정">
             {visible.map((on, index) => (
               <div className={`channel-control ${selectedChannel === index ? "selected" : ""}`} key={index}>
@@ -838,7 +950,7 @@ export default function Home() {
               </div>
             ))}
           </div>
-          <p className="data-note"><Sparkles size={13} />모든 채널은 같은 고정 Y축과 0 mV 기준선을 씁니다. 값은 D1WD10 전압계수로 환산한 ADC 입력 mV이며, 실시간 4차 0.5–45 Hz band-pass + 60 Hz notch 결과입니다.</p>
+          <p className="data-note"><Sparkles size={13} />{scaleMode === "auto" ? "채널별 자동 축은 각 표시창의 98백분위 절대 진폭에 여유를 더해 따로 정하며, 현재 ±범위를 채널 옆에 표시합니다." : "공통 고정 축은 모든 채널을 같은 Y축과 0 mV 기준으로 비교합니다."} 값은 D1WD10 전압계수로 환산한 ADC 입력 mV이며, 실시간 4차 0.5–45 Hz band-pass + 60 Hz notch 결과입니다.</p>
         </article>
 
         <aside className="analysis-column">
@@ -856,6 +968,25 @@ export default function Home() {
               ))}
             </div>
             <p className="fine-print">256점 Hann 창 · one-sided PSD(mV²/Hz) · 고정 −80~40 dB축. 밴드는 0.5–45 Hz 총 파워 대비 비율이며 진단 지표가 아닙니다.</p>
+          </article>
+
+          <article className="panel load-panel">
+            <div className="panel-header compact">
+              <div><p className="panel-kicker">CONTINUOUS TAR · CH1–4 θ / CH8 α</p><h2>인지 부하와 자율성</h2></div>
+              <span className={`quality-badge ${loadStatus?.valid ? "present" : "waiting"}`}>{loadStatus?.baselineReady ? loadStatus.valid ? "계산 중" : "보수 모드" : "보정 필요"}</span>
+            </div>
+            <div className="load-grid">
+              <div><span>현재 TAR</span><strong>{loadStatus?.tar?.toFixed(4) ?? "—"}</strong></div>
+              <div><span>휴식 TAR</span><strong>{loadStatus?.restTar?.toFixed(4) ?? "—"}</strong></div>
+              <div><span>휴식 대비</span><strong>{loadStatus?.smoothedRelativeTar != null ? `${loadStatus.smoothedRelativeTar >= 0 ? "+" : ""}${(loadStatus.smoothedRelativeTar * 100).toFixed(1)}%` : "—"}</strong></div>
+              <div><span>결정 가중치</span><strong>로봇 {((loadStatus?.robotWeight ?? 0.2) * 100).toFixed(0)} · 인간 {((loadStatus?.humanWeight ?? 0.8) * 100).toFixed(0)}</strong></div>
+              <div><span>ErrP 행동 반영</span><strong>매 {loadStatus?.errpApplyStride ?? 1}번째</strong></div>
+              <div><span>적응 임계값</span><strong>{((loadStatus?.errpThreshold ?? 0.5) * 100).toFixed(0)}%</strong></div>
+            </div>
+            <button className="secondary-button load-calibrate" disabled={!isRunning || busy || !calibrationWindow?.ready} onClick={() => perform("/api/errp/calibrate", { seconds: 8 })}>
+              <Brain size={14} />{loadStatus?.baselineReady ? "ErrP + TAR 다시 보정" : calibrationWindow?.ready ? "깨끗한 8초로 ErrP + TAR 보정" : `CH1·2·3·4·8 대기 · ${calibrationWindow?.samples ?? 0}/${calibrationWindow?.requiredSamples ?? 1638}`}
+            </button>
+            <p className="fine-print">2초 Welch 창을 1초마다 갱신합니다. TAR 상승은 로봇 가중치·ErrP 임계값·반영 간격을 높이고, TAR 하락은 인간/ErrP 반영을 높입니다. ErrP 확률 자체는 모든 행동 판정창에서 계속 계산합니다.</p>
           </article>
 
           <article className="panel quality-panel">

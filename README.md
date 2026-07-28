@@ -705,13 +705,17 @@ The launcher opens `http://localhost:3000` and serves the device API only on
 stream and UI deterministically. CSV files are kept under the ignored local
 `recordings/` directory and can be downloaded from the interface.
 
-Every channel uses the same user-selected, fixed Y-axis and a visible 0 mV line;
-there is no moving auto-scale or per-window recentering. The live path applies a
-stateful 60 Hz notch and 4th-order 0.5–45 Hz band-pass. The D1WD10 coefficient
-supports accurate **ADC-input mV**, but not electrode-input μV: the fixed analog
-front-end gain is not published or independently calibrated. RMS, peak-to-peak,
-DC offset and clipping are measurements, but they are not electrode impedance or
-clinical interpretations.
+The waveform offers two explicit scale modes. **Common fixed** keeps every
+channel on one user-selected Y-axis for strict cross-channel amplitude
+comparison. **Per-channel auto** uses each displayed channel's 98th-percentile
+absolute amplitude plus headroom, prints that channel's current ±mV range, and
+contracts only after the signal occupies less than half its lane to avoid axis
+chatter. Both retain a visible 0 mV line. The live path applies a stateful 60 Hz
+notch and 4th-order 0.5–45 Hz band-pass. The D1WD10 coefficient supports accurate
+**ADC-input mV**, but not electrode-input μV: the fixed analog front-end gain is
+not published or independently calibrated. RMS, peak-to-peak, DC offset and
+clipping are measurements, but they are not electrode impedance or clinical
+interpretations.
 
 ---
 

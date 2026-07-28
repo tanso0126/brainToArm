@@ -62,20 +62,59 @@ type ErrpStatus = {
       clippingPercent: number;
       dcOffsetMv: number;
     };
+    channelQualities: Record<string, {
+      state: "waiting" | "present" | "flat" | "saturated" | "unstable";
+      rmsMv: number;
+      peakToPeakMv: number;
+      clippingPercent: number;
+      dcOffsetMv: number;
+    }>;
+    requiredChannels: number[];
+    blockingChannels: string[];
     ready: boolean;
   };
   lastDecision: {
     isError: boolean;
+    rawDetected: boolean;
     probability: number;
     threshold: number;
+    applied: boolean;
+    override: boolean;
     samples: number;
     marker: string;
     channels: number[];
     bandHz: [number, number];
+    robotWeight: number;
+    humanWeight: number;
+    errpApplyStride: number;
+    relativeTar: number | null;
     negativeDeflectionMv: number | null;
     baselineStdMv: number | null;
     zScore: number | null;
   } | null;
+};
+
+type LoadStatus = {
+  baselineReady: boolean;
+  thetaChannels: number[];
+  alphaChannels: number[];
+  thetaBandHz: [number, number];
+  alphaBandHz: [number, number];
+  windowSeconds: number;
+  updateSeconds: number;
+  restTar: number | null;
+  tar: number | null;
+  relativeTar: number | null;
+  smoothedRelativeTar: number | null;
+  thetaPowers: number[];
+  alphaPowers: number[];
+  valid: boolean;
+  reason: string;
+  robotWeight: number;
+  humanWeight: number;
+  errpThreshold: number;
+  errpApplyStride: number;
+  strongErrpOverrideThreshold: number;
 };
 
 type SimObject = {
@@ -286,11 +325,13 @@ function SimulationLab({
   eegRunning,
   apiOnline,
   errpStatus,
+  loadStatus,
   eegPanel,
 }: {
   eegRunning: boolean;
   apiOnline: boolean;
   errpStatus: ErrpStatus | null;
+  loadStatus: LoadStatus | null;
   eegPanel: ReactNode;
 }) {
   const [status, setStatus] = useState<SimulationStatus | null>(null);
@@ -305,7 +346,9 @@ function SimulationLab({
   const decisionKey = useRef("");
   const overviewImageRef = useRef<HTMLImageElement>(null);
   const wristImageRef = useRef<HTMLImageElement>(null);
-  const errpReady = Boolean(errpStatus?.baselineReady || localErrpReady);
+  const errpReady = Boolean(
+    (errpStatus?.baselineReady && loadStatus?.baselineReady)
+    || localErrpReady);
   const calibrationWindow = errpStatus?.calibrationWindow;
 
   const refreshStatus = useCallback(async () => {
@@ -656,19 +699,27 @@ function SimulationLab({
               <div className={`sim-eeg-box ${errpReady ? "ready" : ""}`}>
                 <div><span><Activity size={15} />PolyG-I</span><strong>{apiOnline && eegRunning ? "측정 중" : "준비 안 됨"}</strong></div>
                 <div><span><Zap size={15} />판정 입력</span><strong>CH8 단독 · 1–10 Hz</strong></div>
-                <div><span><Zap size={15} />최근 8초 품질</span><strong>{calibrationWindow?.quality.state ?? "waiting"} · clip {calibrationWindow?.quality.clippingPercent.toFixed(2) ?? "0.00"}%</strong></div>
-                <div><span><Zap size={15} />휴식 기준</span><strong>{errpReady ? "보정 완료" : "보정 필요"}</strong></div>
-                <button onClick={calibrateErrp} disabled={!apiOnline || !eegRunning || errpBusy || !calibrationWindow?.ready}>{errpBusy ? "판정 중…" : calibrationWindow?.ready ? "최근 8초로 ErrP 보정" : `깨끗한 보정창 대기 · ${calibrationWindow?.samples ?? 0}/${calibrationWindow?.requiredSamples ?? 1638}`}</button>
+                <div><span><Zap size={15} />연속 TAR</span><strong>θ CH1–4 / α CH8</strong></div>
+                <div><span><Zap size={15} />최근 8초 품질</span><strong>{calibrationWindow?.blockingChannels?.length ? `문제 CH ${calibrationWindow.blockingChannels.join(", ")}` : calibrationWindow?.ready ? "CH1·2·3·4·8 정상" : `${calibrationWindow?.samples ?? 0}/${calibrationWindow?.requiredSamples ?? 1638}`}</strong></div>
+                <div><span><Zap size={15} />휴식 기준</span><strong>{errpReady ? "ErrP + TAR 완료" : "통합 보정 필요"}</strong></div>
+                {loadStatus?.baselineReady && <>
+                  <div><span><Brain size={15} />TAR / 휴식 대비</span><strong>{loadStatus.tar?.toFixed(3) ?? "—"} / {loadStatus.smoothedRelativeTar != null ? `${loadStatus.smoothedRelativeTar >= 0 ? "+" : ""}${(loadStatus.smoothedRelativeTar * 100).toFixed(1)}%` : "—"}</strong></div>
+                  <div><span><Brain size={15} />자율성 가중치</span><strong>로봇 {(loadStatus.robotWeight * 100).toFixed(0)} · 인간 {(loadStatus.humanWeight * 100).toFixed(0)}</strong></div>
+                  <div><span><Zap size={15} />ErrP 행동 반영</span><strong>매 {loadStatus.errpApplyStride}번째 · {(loadStatus.errpThreshold * 100).toFixed(0)}%</strong></div>
+                </>}
+                <button onClick={calibrateErrp} disabled={!apiOnline || !eegRunning || errpBusy || !calibrationWindow?.ready}>{errpBusy ? "판정 중…" : calibrationWindow?.ready ? "최근 8초로 ErrP + TAR 통합 보정" : `깨끗한 통합 보정창 대기 · ${calibrationWindow?.samples ?? 0}/${calibrationWindow?.requiredSamples ?? 1638}`}</button>
                 {errpError && <p className="sim-errp-error"><CircleAlert size={13} />{errpError}</p>}
                 {errpStatus?.lastDecision ? (
                   <div className={`sim-errp-decision ${errpStatus.lastDecision.isError ? "detected" : ""}`}>
                     <span>최근 P(error)</span>
                     <strong>{(errpStatus.lastDecision.probability * 100).toFixed(1)}% / 기준 {(errpStatus.lastDecision.threshold * 100).toFixed(0)}%</strong>
+                    <span>행동 반영</span>
+                    <strong>{errpStatus.lastDecision.override ? "강한 ErrP 즉시 반영" : errpStatus.lastDecision.applied ? "이번 판정 반영" : `관측만 · 매 ${errpStatus.lastDecision.errpApplyStride}번째`}</strong>
                     <span>CH8 z-score</span>
                     <strong>{errpStatus.lastDecision.zScore?.toFixed(2) ?? "모델 판정"}</strong>
                   </div>
                 ) : null}
-                <small>후보 제시/트레이 도착을 onset으로 삼아 직전 0.2초 + 이후 0.8초를 자릅니다. 이후 0–0.6초 구간에서 가장 강한 150 ms 음의 편위를 찾습니다.</small>
+                <small>ErrP는 각 행동 판정창에서 CH8로 계속 계산합니다. TAR가 높으면 로봇 가중치와 적용 간격이 커지고, 낮으면 인간/ErrP 반영이 커집니다. 매우 강한 ErrP는 간격과 무관하게 즉시 반영합니다.</small>
               </div>
             )}
           </article>

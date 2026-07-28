@@ -33,7 +33,9 @@ test("starter preview is removed and localhost API is explicit", async () => {
   assert.match(page, /http:\/\/127\.0\.0\.1:8765/);
   assert.match(page, /mV_ADC_filtered/);
   assert.match(page, /공통 고정 축/);
-  assert.doesNotMatch(page, /채널별 자동/);
+  assert.match(page, /채널별 자동 축/);
+  assert.match(page, /98백분위 절대 진폭/);
+  assert.match(page, /CH1–4 θ \/ CH8 α/);
   assert.match(page, /requestAnimationFrame/);
   assert.match(page, /부드럽게 · 0\.45초/);
   assert.match(page, /SimulationLab/);

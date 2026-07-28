@@ -8,6 +8,7 @@ Exercises the real code paths (no mocks of the units under test):
   - ErrP detector separates a synthetic error epoch from a clean epoch.
 """
 import math
+import time
 import config
 from lxsdf import LXSDFParser, build_packet
 import kinematics
@@ -16,7 +17,9 @@ from eeg_bridge import EEGBridge
 from cognitive_load import AutonomyAllocator, CognitiveLoadEstimator
 from polyg_hid import (
     ADC_VOLTS_PER_COUNT, PolyGIHID, command_report, counts_to_adc_mv, decode_report)
-from eeg_dashboard import EEGSignalProcessor, analyze_signal_quality, sanitize_recording_name
+from eeg_dashboard import (
+    EEGDashboardService, EEGSignalProcessor, analyze_signal_quality,
+    sanitize_recording_name)
 from wrist_vision import (
     LATEST_PREVIEW_PATH, LATEST_RAW_PATH, WristDetector, frame_quality)
 from wrist_search import PlanarSearchSafety, WristSearcher
@@ -454,6 +457,48 @@ def test_cognitive_load_and_autonomy():
           "high-load ErrP is still calculated but only scheduled checkpoints apply")
     check(override.veto and override.override and override.applied,
           "very strong ErrP remains a load-independent veto")
+
+
+def test_dashboard_integrates_tar_allocation():
+    print("[dashboard-load] one rest window drives live TAR + autonomy status")
+    service = EEGDashboardService(enumerate_fn=lambda: [])
+
+    def install_window(window):
+        now = time.monotonic()
+        first = now - (len(window) - 1) / config.EEG_FS
+        service._rows.clear()
+        for index, values in enumerate(window):
+            counts = [int(round(value * 100)) for value in values]
+            service._rows.append((
+                index + 1,
+                first + index / config.EEG_FS,
+                counts,
+                list(values),
+                list(values),
+            ))
+        service._running = True
+        service._started_mono = first
+        service._last_report_mono = now
+
+    try:
+        install_window(_synth_load_window(
+            theta_amplitude=4.0, alpha_amplitude=8.0, seconds=8.0))
+        calibrated = service.calibrate_errp(seconds=8.0)
+        check(calibrated["cognitiveLoad"]["thetaChannels"] == [1, 2, 3, 4]
+              and calibrated["cognitiveLoad"]["alphaChannels"] == [8],
+              "dashboard rest calibration uses theta CH1-4 and alpha CH8")
+
+        install_window(_synth_load_window(
+            theta_amplitude=8.0, alpha_amplitude=4.0, seconds=4.0))
+        service._load_last_update_mono = 0.0
+        payload = service.status()["cognitiveLoad"]
+        check(payload["smoothedRelativeTar"] > 0,
+              "dashboard publishes positive rest-relative TAR under higher load")
+        check(payload["robotWeight"] > config.AUTONOMY_ROBOT_BASE
+              and payload["errpApplyStride"] > 1,
+              "web simulation receives robot-biased adaptive allocation")
+    finally:
+        service.close()
 
 
 def test_errp():
@@ -1092,6 +1137,7 @@ if __name__ == "__main__":
     test_planar_pick_calibration_and_detection()
     test_validate_handles_short_arrays()
     test_cognitive_load_and_autonomy()
+    test_dashboard_integrates_tar_allocation()
     test_errp()
     test_errp_model_metadata()
     test_eeg_packet_timestamps()

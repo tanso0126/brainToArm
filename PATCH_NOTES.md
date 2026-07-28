@@ -2537,3 +2537,49 @@ and the trained model backend.
 - Dashboard build, rendered-shell tests, and lint pass without warnings.
 - MuJoCo renderer cache passed 80 concurrent frame requests without the earlier
   AGX limit; the studio physics suite continues to pass.
+
+## Patch 64 — connect continuous TAR autonomy and restore per-channel auto scale
+
+### Gap found
+
+- The standalone robot orchestrator already calculated mean theta power from
+  CH1–CH4, alpha power from CH8, rest-relative TAR, and adaptive autonomy.
+  The web simulation still used a fixed ErrP threshold and therefore did not
+  apply that continuous cognitive-load policy.
+- The live plot exposed only a common fixed Y-axis even though an optional
+  per-channel auto view is useful for inspecting channels with very different
+  amplitudes.
+
+### Changes
+
+- The dashboard now calibrates CH8 ErrP noise and resting TAR from the same clean
+  eight-second window. CH1, CH2, CH3, CH4, and CH8 must all be signal-present;
+  the API and UI list exactly which channels block calibration.
+- Added continuous two-second Welch TAR updates at one-second intervals:
+  `mean(theta power CH1–CH4) / alpha power CH8`, normalized as
+  `(current - rest) / rest` and smoothed by the existing EMA.
+- Connected the dashboard/simulation ErrP endpoint to `AutonomyAllocator`.
+  ErrP is calculated from CH8 at every action checkpoint. Higher TAR raises
+  robot weight, the adaptive ErrP threshold, and the application stride; lower
+  TAR raises human/ErrP authority. Skipped stride checkpoints remain
+  observation-only, and very strong ErrP remains an immediate override.
+- Exposed current/rest TAR, rest-relative change, robot/human weights, adaptive
+  threshold, application stride, and applied-versus-observed decisions in both
+  the simulation and EEG monitor.
+- Rest baselines are invalidated whenever acquisition restarts, preventing a
+  prior participant/session baseline from leaking into a new session.
+- Added an explicit **common fixed / per-channel auto** Y-axis selector to both
+  simultaneous and full EEG views. Auto mode uses a per-channel 98th-percentile
+  absolute amplitude with headroom, visible numeric ±mV labels, immediate
+  expansion, and hysteretic contraction to prevent axis chatter.
+- While acquisition is running, the PGA selector is synchronized from the
+  device API instead of retaining the UI's initial default and displaying the
+  wrong active gain.
+
+### Verification
+
+- Added a hardware-free dashboard integration test proving the shared rest
+  window uses theta CH1–CH4 and alpha CH8, publishes positive relative TAR for a
+  high-load window, and sends robot-biased allocation to the web simulation.
+- Full Python pipeline, Python compilation, Ruff, dashboard lint, production
+  build, and rendered-shell tests pass.
