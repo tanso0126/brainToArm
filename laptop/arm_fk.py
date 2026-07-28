@@ -173,7 +173,8 @@ def forearm_pose(servo: Iterable[float]) -> Tuple[np.ndarray, np.ndarray]:
     return chain.forearm_rotation.copy(), chain.wrist_pitch.copy()
 
 
-def sensor_pose(servo: Iterable[float]) -> Tuple[np.ndarray, np.ndarray]:
+def sensor_pose(servo: Iterable[float],
+                pitch_scale=None) -> Tuple[np.ndarray, np.ndarray]:
     """Return the camera/sonar bracket frame at the motor-4 pivot.
 
     A controlled physical test changed only motor 4 from 180 to 160 degrees:
@@ -182,7 +183,16 @@ def sensor_pose(servo: Iterable[float]) -> Tuple[np.ndarray, np.ndarray]:
     motor-4 pitch, but excludes motor-6 roll.
     """
     chain = geometry(servo)
-    return chain.wrist_pitch_rotation.copy(), chain.wrist_pitch.copy()
+    if pitch_scale is None:
+        return chain.wrist_pitch_rotation.copy(), chain.wrist_pitch.copy()
+    servo = [float(value) for value in servo]
+    base_rotation = _rotz(math.radians(servo[0] - 90.0))
+    forearm_angle = math.radians(
+        shoulder_joint_deg(servo[1]) + elbow_joint_deg(servo[2]))
+    wrist_angle = math.radians(
+        float(pitch_scale) * (servo[3] - 180.0))
+    return (base_rotation @ _roty(forearm_angle + wrist_angle),
+            chain.wrist_pitch.copy())
 
 
 def wrist_matrix(servo: Iterable[float]) -> np.ndarray:

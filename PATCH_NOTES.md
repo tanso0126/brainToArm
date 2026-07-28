@@ -2984,3 +2984,31 @@ and the trained model backend.
   pitch changes.
 - Replaced the old invariance test with a regression proving motor 4 changes the
   sensor ray while motor 6 and gripper opening do not.
+
+## Patch 77 — require temporal sonar stability and fit wrist scale
+
+### Further measurement problem
+
+- A single burst at the same 180° pose looked internally tight but its dominant
+  distance changed from about 145 to 135 to 128 mm across separate visits.
+  Burst-level MAD alone therefore did not reject slow reflector switching.
+- The simulation-derived motor-4 conversion of 1 servo degree to 1.5 link
+  degrees has not been physically validated for the camera/sonar bracket.
+
+### Changes
+
+- Added a repeated profile that requires every independent burst to be stable
+  and their medians to agree within 5 mm.
+- Added motor-4 pitch scale as a fitted ultrasonic parameter instead of fixing
+  the simulation ratio.
+- Raised the calibration minimum to five distinct observations and added
+  explicit quality gates: at least five inliers, RMS no more than 5 mm and
+  maximum inlier error no more than 10 mm.
+- Low-quality results now raise before any calibration JSON is written.
+
+### Verification
+
+- Added a temporal reflector-switch regression using three individually tight
+  145/135/128 mm batches.
+- Synthetic fitting now recovers a non-default wrist scale, and a regression
+  proves a low-quality result cannot be saved.
