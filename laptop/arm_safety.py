@@ -38,6 +38,7 @@ HAND_RADIUS_M = 0.040
 CAMERA_RADIUS_M = 0.060
 MODEL_MARGIN_M = 0.012
 MIN_TOOL_Z_M = -0.003
+MIN_FINGER_CLEARANCE_M = 0.005
 TRAJECTORY_STEP_DEG = 0.5
 
 
@@ -170,7 +171,7 @@ class PhysicalArmSafety:
 
         distal = (
             ("wrist", g.wrist_pitch, g.wrist_roll, WRIST_RADIUS_M),
-            ("hand", g.wrist_roll, g.tool, HAND_RADIUS_M),
+            ("hand", g.wrist_roll, g.finger_tip, HAND_RADIUS_M),
         )
         for name, start, end, radius in distal:
             distance = _segment_cylinder_distance(
@@ -208,7 +209,10 @@ class PhysicalArmSafety:
             check("table", clearance, f"{name} envelope reaches below table")
         minimum_tool_z_m = self.table_z_m + MIN_TOOL_Z_M
         check("tool-through-table", float(g.tool[2]) - minimum_tool_z_m,
-              "fingertip centre is commanded below calibrated floor tolerance")
+              "grasp centre is commanded below calibrated floor tolerance")
+        minimum_finger_z_m = self.table_z_m + MIN_FINGER_CLEARANCE_M
+        check("finger-table", float(g.finger_tip[2]) - minimum_finger_z_m,
+              "physical finger endpoint lacks normal-motion table clearance")
         check("camera-table",
               float(g.camera[2]) - self.table_z_m
               - CAMERA_RADIUS_M - self.margin_m,
@@ -217,7 +221,7 @@ class PhysicalArmSafety:
         # Non-adjacent self-collision.  Adjacent links share their joint by
         # design and are therefore intentionally excluded.
         upper_hand = _segment_distance(
-            g.shoulder, g.elbow, g.wrist_roll, g.tool)
+            g.shoulder, g.elbow, g.wrist_roll, g.finger_tip)
         check("self-upper-hand",
               upper_hand - UPPER_RADIUS_M - HAND_RADIUS_M - self.margin_m,
               "gripper/hand folds into upper arm")

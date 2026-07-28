@@ -115,8 +115,11 @@ PLANAR_GRIP_CLOSE_STEP = 10
 # ---- Wrist-camera floor plane (physically reproduced 2026-07-25) ----
 # The arm and objects share the same rigid floor, so depth is represented by a
 # robot-relative floor curve instead of inferred from target pixel size. The
-# reference elbow=90 poses reuse the successful physical planar grasp: shoulder
-# 124 is a clear hover and shoulder 142 reaches the floor/grasp level. Near that
+# The former shoulder=124 "hover" was physically observed with a taped fingertip
+# already touching the table on 2026-07-28.  Shoulder=110 is the first recovered
+# pose with visible clearance.  The old grasp curve remains disabled by the
+# physical safety interlock until it is recalibrated with the full finger length.
+# Near the
 # pose, the measured side-view Jacobian was shoulder +1° => +11 px vertical and
 # elbow +1° => +6 px vertical. Compensating those components gives a horizontal
 # ground path d(shoulder)/d(elbow) = -6/11.
@@ -124,7 +127,7 @@ FLOOR_BASE_ANGLE = 90
 FLOOR_WRIST_PITCH = 180
 FLOOR_WRIST_ROLL = 170
 FLOOR_REFERENCE_ELBOW = 90
-FLOOR_HOVER_SHOULDER = 124
+FLOOR_HOVER_SHOULDER = 110
 FLOOR_GRASP_SHOULDER = 142
 FLOOR_SHOULDER_PER_ELBOW = -6.0 / 11.0
 FLOOR_ELBOW_RANGE = (78, 110)

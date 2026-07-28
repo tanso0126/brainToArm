@@ -26,6 +26,11 @@ import numpy as np
 UPPER_M = 0.241767
 FORE_M = 0.1725
 HAND_M = 0.090
+# ``tool`` is the CAD/simulation grasp centre.  The assembled parallel fingers
+# extend substantially farther than that virtual point.  This measured
+# conservative extension is used by the physical collision interlock without
+# changing the controller's historical tool-coordinate contract.
+FINGER_EXTENSION_M = 0.055
 TOOL_DZ_M = -0.008
 WRISTROLL_M = 0.045
 SHOULDER_HEIGHT_M = 0.210
@@ -80,6 +85,7 @@ class ArmGeometry:
     wrist_pitch: np.ndarray
     wrist_roll: np.ndarray
     tool: np.ndarray
+    finger_tip: np.ndarray
     camera: np.ndarray
     wrist_rotation: np.ndarray
     forearm_rotation: np.ndarray
@@ -109,11 +115,14 @@ def geometry(servo: Iterable[float]) -> ArmGeometry:
     wristroll = wristp + R_base @ _roty(a3) @ np.array([WRISTROLL_M, 0, 0])
     R_wrist = R_base @ _roty(a3) @ _rotx(roll)
     tool = wristroll + R_wrist @ np.array([HAND_M, 0, TOOL_DZ_M])
+    finger_tip = wristroll + R_wrist @ np.array(
+        [HAND_M + FINGER_EXTENSION_M, 0, TOOL_DZ_M])
     # Measured/CAD seed for the webcam centre.  The collision envelope around
     # this point is deliberately much larger than the uncertainty in the mount.
     camera = wristroll + R_wrist @ np.array([0.015, 0.0, 0.075])
     return ArmGeometry(
-        shoulder, elbow, wristp, wristroll, tool, camera, R_wrist, R_forearm)
+        shoulder, elbow, wristp, wristroll, tool, finger_tip, camera,
+        R_wrist, R_forearm)
 
 
 def _chain(servo: Iterable[float]):
@@ -133,6 +142,11 @@ def wrist_pose(servo: Iterable[float]) -> Tuple[np.ndarray, np.ndarray]:
 def tool_position(servo: Iterable[float]) -> np.ndarray:
     """Tool-center position in the base frame (metres)."""
     return _chain(servo)[2]
+
+
+def finger_tip_position(servo: Iterable[float]) -> np.ndarray:
+    """Physical distal finger endpoint used for collision/table clearance."""
+    return geometry(servo).finger_tip.copy()
 
 
 def wrist_pitch_position(servo: Iterable[float]) -> np.ndarray:

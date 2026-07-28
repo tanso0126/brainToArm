@@ -2929,3 +2929,34 @@ and the trained model backend.
 - Added regressions for dominant-cluster selection, competing-reflector
   rejection, timeout rejection, motor-4/motor-6 frame independence, synthetic
   mount recovery with an outlier, and insufficient calibration-angle rejection.
+
+## Patch 75 — include the physical finger tips in the safety interlock
+
+### Incident and root cause
+
+- At the old `[90,124,90,180,90,170]` pose the blue taped finger was visibly
+  touching the table. A requested close therefore loaded the gripper against
+  the floor instead of providing the intended free-space self-echo test.
+- The collision model reported 43.9 mm clearance because its `tool` endpoint was
+  the CAD/simulation grasp centre. The assembled fingers extend about 55 mm
+  farther and that distal geometry was absent from table, housing and
+  self-collision checks.
+
+### Immediate recovery
+
+- Reopened the gripper and raised only motor 2 from 124 to 110, avoiding any
+  pull toward the robot housing. The live wrist image then showed table
+  clearance.
+
+### Changes
+
+- Preserved the historical grasp-centre coordinate for controller compatibility
+  and added a separate conservative physical finger endpoint 55 mm farther
+  along the hand axis.
+- Extended housing, mast and self-collision segments through the real finger
+  endpoint and require 5 mm normal-motion table clearance.
+- Reclassified the old 124 pose and deeper 142 pose as table collisions. The
+  default open floor hover is now the recovered shoulder=110 pose; the old
+  grasp curve stays blocked until physical recalibration.
+- Added a regression that specifically requires both previously accepted
+  contact poses to fail with `finger-table`.

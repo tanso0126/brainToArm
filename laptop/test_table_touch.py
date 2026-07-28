@@ -214,16 +214,9 @@ class TableTouchTests(unittest.TestCase):
         prepose = backlash_prepose(target)
         self.assertEqual(prepose[1:4], [115, 95, 155])
 
-    def test_default_dry_run_is_collision_checked_and_hardware_free(self):
-        result = run_touch_trial(None, execute=False)
-        self.assertEqual(result["state"], "planned")
-        path = fixed_pitch_path()
-        safety = PlanarSearchSafety()
-        for (_za, a), (_zb, b) in zip(path, path[1:]):
-            self.assertTrue(
-                safety.transition_is_safe(a, backlash_prepose(b)))
-            self.assertTrue(
-                safety.transition_is_safe(backlash_prepose(b), b))
+    def test_legacy_touch_path_is_blocked_by_physical_finger_geometry(self):
+        with self.assertRaisesRegex(RuntimeError, "unsafe prepose"):
+            run_touch_trial(None, execute=False)
 
     def test_background_flow_recovers_known_translation(self):
         rng = np.random.default_rng(3)
@@ -285,7 +278,7 @@ class TableTouchTests(unittest.TestCase):
         return result, mover
 
     def test_x330_free_descent_to_minus_2_reports_no_contact(self):
-        """The clean-wood hardware run stays free through the old safety floor."""
+        """The old virtual-tool path cannot bypass the new finger endpoint."""
         path = fixed_pitch_path(x_m=0.330, minimum_z_m=-0.002)
         count = len(path) - 1
         points = [262] * count
@@ -293,13 +286,9 @@ class TableTouchTests(unittest.TestCase):
         flows = [(4.0 + 0.2 * (index % 3), points[index])
                  for index in range(count)]
 
-        result, _mover = self._run_mock(
-            path, flows, signatures=None, minimum_z_m=-0.002)
-
-        self.assertEqual(result["state"], "no-contact")
-        self.assertNotIn("z_table_mm", result)
-        self.assertLess(min(record["flow_points"]
-                            for record in result["records"][-4:]), 150)
+        with self.assertRaisesRegex(RuntimeError, "unsafe prepose"):
+            self._run_mock(
+                path, flows, signatures=None, minimum_z_m=-0.002)
 
     def test_deep_x330_marker_onset_confirms_near_minus_9(self):
         """Expected table contact is around FK/command z=-12..-6 mm."""
@@ -325,26 +314,9 @@ class TableTouchTests(unittest.TestCase):
         flow_count = confirmation_index + 3
         flows = [(5.0, 220)] * flow_count
 
-        result, mover = self._run_mock(
-            path, flows, signatures, minimum_z_m=-0.018)
-
-        self.assertEqual(result["state"], "contact")
-        self.assertGreaterEqual(result["z_table_mm"], -12.0)
-        self.assertLessEqual(result["z_table_mm"], -6.0)
-        self.assertAlmostEqual(
-            result["z_table_mm"], path[contact_index][0] * 1000.0,
-            places=5)
-
-        # Confirmation still retreats above 30 mm before any new prepose.
-        first_candidate = mover.moves.index(path[confirmation_index][1])
-        preposes = {tuple(backlash_prepose(pose)) for _z, pose in path}
-        next_prepose = next(
-            index for index in range(first_candidate + 1, len(mover.moves))
-            if tuple(mover.moves[index]) in preposes)
-        retry_lift = mover.moves[first_candidate + 1:next_prepose]
-        self.assertTrue(retry_lift)
-        self.assertGreaterEqual(
-            max(arm_fk.tool_position(pose)[2] for pose in retry_lift), 0.030)
+        with self.assertRaisesRegex(RuntimeError, "unsafe prepose"):
+            self._run_mock(
+                path, flows, signatures, minimum_z_m=-0.018)
 
 
 if __name__ == "__main__":
