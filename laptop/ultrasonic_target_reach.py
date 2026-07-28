@@ -300,6 +300,41 @@ def _preclose_needs_fine_lift(scene, candidate):
     return horizontal <= allowed and gap > FINAL_JAW_GAP_MAX_PX
 
 
+def _best_final_grasp_candidate(scene, locked):
+    """Use the deepest valid nested mask of the already locked object.
+
+    FastSAM can emit the same two-colour object as a short coloured-body mask
+    and as a complete body+cap mask. Tracking favours centre continuity, which
+    is useful in motion but can pick the short mask for the final extent test.
+    At close time only, inspect horizontally overlapping masks and retain the
+    deepest one that independently passes the strict jaw gate.
+    """
+    if locked is None:
+        return None
+    lx, _ly, lwidth, _lheight = locked.bbox
+    lleft, lright = float(lx), float(lx + lwidth)
+    valid = []
+    for item in getattr(scene, "ranked", ()):
+        ileft = float(item.bbox[0])
+        iright = float(item.bbox[0] + item.bbox[2])
+        overlap = max(0.0, min(lright, iright) - max(lleft, ileft))
+        shared_fraction = overlap / max(
+            1.0, min(lright - lleft, iright - ileft))
+        if shared_fraction < 0.60:
+            continue
+        if abs(float(item.center[0]) - float(locked.center[0])) > 60.0:
+            continue
+        allowed, _reason = _final_grasp_gate(scene, item)
+        if allowed:
+            valid.append(item)
+    if not valid:
+        return locked
+    return max(valid, key=lambda item: (
+        float(item.bbox[1] + item.bbox[3]),
+        float(item.area),
+    ))
+
+
 def _vertical_lift_pose(pose, lift_mm):
     """Raise at fixed forward reach and pitch so the fingers do not sweep."""
     geometry = arm_fk.geometry(pose)
@@ -635,6 +670,7 @@ def _clearance_grasp_and_verify(
             "state": "preclose-target-lost", "pose": preclose,
             "distance_mm": distance_mm,
         }
+    candidate = _best_final_grasp_candidate(scene, candidate)
     if _preclose_needs_fine_lift(scene, candidate):
         adjusted = _vertical_lift_pose(preclose, PRE_CLOSE_FINE_LIFT_MM)
         report = safety.transition_report(preclose, adjusted)
@@ -655,6 +691,7 @@ def _clearance_grasp_and_verify(
                 "state": "fine-lift-target-lost", "pose": preclose,
                 "distance_mm": distance_mm,
             }
+        candidate = _best_final_grasp_candidate(scene, candidate)
     aligned, reason = _final_grasp_gate(scene, candidate)
     print(f"[sonar-reach] after clearance lift: {reason}", flush=True)
     if not aligned:

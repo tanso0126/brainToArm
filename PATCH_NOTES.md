@@ -3505,3 +3505,30 @@ and the trained model backend.
   gripper open.
 - Added tests proving the fine lift is requested for vertical gap only and
   cannot compensate a lateral misalignment.
+
+## Patch 95 — measure the complete locked object at final close
+
+### Physical finding
+
+- After the fine lift the live image visibly showed the blue/white object
+  between the open fingers, but the tracked partial mask reported a 138 px gap.
+  Re-running the same live frame exposed FastSAM's nested representations:
+  a complete mask `(532,183,105,537)` with gap -26 px and a deterministic vivid
+  component `(533,302,103,315)` with gap 77 px. Both pass the verified
+  `-35..90 px` close range; the failed tracker had selected only a shorter
+  coloured sub-mask.
+- This was an object-extent measurement error, not evidence that the arm needed
+  another approach or a looser close threshold.
+
+### Changes
+
+- At the final stationary close gate, inspect only scene masks that overlap at
+  least 60% of the locked object's horizontal span, remain within 60 px of its
+  centre, and independently pass the existing strict jaw gate.
+- Use the deepest valid nested mask for the final extent measurement. Motion
+  tracking itself remains centre-continuity based, so this stationary
+  correction cannot switch to a different lateral object during approach.
+- Run this complete-mask selection both before deciding on the one fine lift
+  and after its reacquisition.
+- Added a regression test with the measured partial, complete, and unrelated
+  masks, proving only the complete mask of the locked object is selected.

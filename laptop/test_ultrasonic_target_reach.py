@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 
 from ultrasonic_target_reach import (
+    _best_final_grasp_candidate,
     _final_grasp_gate,
     _preclose_needs_fine_lift,
     _retained_image_gate,
@@ -92,6 +93,27 @@ class ApproachStopTests(unittest.TestCase):
         self.assertFalse(_preclose_needs_fine_lift(
             scene, laterally_wrong))
         self.assertFalse(_preclose_needs_fine_lift(scene, ready))
+
+    def test_final_gate_uses_complete_nested_mask_of_same_object(self):
+        partial = SimpleNamespace(
+            center=(586.0, 420.0), bbox=(535, 310, 102, 246),
+            area=18000.0)
+        complete = SimpleNamespace(
+            center=(584.0, 450.0), bbox=(532, 183, 105, 537),
+            area=56000.0)
+        unrelated = SimpleNamespace(
+            center=(760.0, 450.0), bbox=(720, 183, 80, 537),
+            area=43000.0)
+        scene = SimpleNamespace(
+            gripper=SimpleNamespace(
+                center=(625.0, 694.0), opening_px=291.0),
+            ranked=[partial, complete, unrelated],
+        )
+
+        selected = _best_final_grasp_candidate(scene, partial)
+
+        self.assertIs(selected, complete)
+        self.assertTrue(_final_grasp_gate(scene, selected)[0])
 
     def test_motor_four_uses_measured_pixel_error_with_large_headroom(self):
         self.assertEqual(tracking_wrist_target(178, -60), 168)
