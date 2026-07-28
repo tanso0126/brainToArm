@@ -3122,3 +3122,32 @@ and the trained model backend.
   the window must make at least 3 mm net depth progress.
 - Added regressions for both a genuinely stalled five-value sequence and the
   measured locally noisy but globally correct approach.
+
+## Patch 83 — use servo-scale approach steps and stop at the physical jaw plane
+
+### Physical finding
+
+- The measured sonar sequence plateaued near 132 mm while the direct camera
+  jaw-row gap fell from 183 px to 72 px and the object entered the open jaws.
+  The ultrasonic face is mounted behind the finger contact plane, so treating a
+  small absolute echo or echo plateau as the final grasp coordinate was wrong.
+- A requested 5 mm Cartesian step can quantize to only a tiny servo change.
+  This made the far approach unnecessarily slow without adding collision
+  protection; the swept trajectory interlock already checks every transition.
+
+### Changes
+
+- Approach distance is now adaptive: 15 mm while the object is more than 180 px
+  from the finger row, 10 mm from 120–180 px, and 5 mm only in the final band.
+  The resolved-rate search may use up to 8° per joint so the larger Cartesian
+  command produces meaningful physical motion.
+- Added a fused progress policy. A stable ultrasonic batch is still mandatory,
+  but a falling jaw-row gap may override an ambiguous acoustic plateau. If the
+  stable image shows the object inside the open jaws, the controller stops at
+  that positive sonar distance instead of trying to drive the sensor toward
+  zero.
+- Sonar-near with no object in the jaw corridor, simultaneous visual/acoustic
+  stall, lost markers, target loss and any swept collision remain hard stops.
+- Added regression coverage for all three adaptive step bands, the measured
+  132 mm plateau with strong visual progress, positive-distance jaw readiness,
+  and sonar/image disagreement.

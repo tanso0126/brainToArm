@@ -9,13 +9,15 @@ Every physical step is:
 
 1. reacquire the same visual instance and keep it near the camera/sonar axis;
 2. require a temporally stable ultrasonic echo;
-3. plan one bounded ~5 mm motor-2/3/4 step with the existing controller;
+3. plan one adaptive 15/10/5 mm motor-2/3/4 step with the existing controller;
 4. collision-check the complete swept transition;
 5. move, reacquire, and require the echo distance to decrease.
 
-The gripper may close only when *both* sonar standoff and the direct coloured
-finger/object image gate agree.  A range increase, unstable echo, lost target,
-shrinking target, stale camera, or collision report stops before another move.
+The sonar face is physically behind the finger contact plane, so a zero or even
+small sonar reading is not a sensible grasp target.  The final stop instead
+fuses a stable echo, the direct coloured finger/object image gate, and the
+full-arm collision model.  Far from the hand the controller advances boldly;
+near the fingers the image gate wins before a floor or object collision.
 """
 
 from dataclasses import dataclass
@@ -57,6 +59,13 @@ STOP_RANGE_MM = 78.0
 MAX_RANGE_INCREASE_MM = 6.0
 RANGE_TREND_WINDOW = 5
 MIN_WINDOW_DROP_MM = 3.0
+MIN_VISUAL_WINDOW_DROP_PX = 18.0
+FAR_ROW_GAP_PX = 180.0
+MID_ROW_GAP_PX = 120.0
+FAR_ADVANCE_MM = 15.0
+MID_ADVANCE_MM = 10.0
+NEAR_ADVANCE_MM = 5.0
+APPROACH_MAX_JOINT_STEP_DEG = 8
 MIN_TOOL_CENTER_Z_M = 0.058
 MAX_STEPS = 24
 
@@ -100,6 +109,45 @@ def update_range_progress(history, distance_mm, previous_was_approach):
     return updated, range_progress_decision(updated)
 
 
+def adaptive_advance_mm(row_gap_px):
+    """Make servo-scale moves while preserving a small final correction band."""
+    gap = float(row_gap_px)
+    if gap > FAR_ROW_GAP_PX:
+        return FAR_ADVANCE_MM
+    if gap > MID_ROW_GAP_PX:
+        return MID_ADVANCE_MM
+    return NEAR_ADVANCE_MM
+
+
+def fused_progress_decision(range_history, row_gap_history, jaw_ready):
+    """Fuse acoustic and visual progress without treating either as depth truth.
+
+    A stable sonar batch is required by the caller on every observation.  The
+    absolute echo can remain positive or plateau because the transducers sit
+    behind the finger contact plane and may see a background reflector.
+    """
+    if jaw_ready:
+        return RangeDecision(
+            "ready", "object is inside jaws with a stable sonar observation")
+
+    acoustic = range_progress_decision(range_history)
+    gaps = [float(value) for value in row_gap_history]
+    if acoustic.action == "near":
+        return RangeDecision(
+            "stop", "sonar is near but object is not inside the jaw gate")
+    if acoustic.action != "stop":
+        return acoustic
+
+    visual_drop = 0.0
+    if len(gaps) >= RANGE_TREND_WINDOW:
+        visual_drop = gaps[-RANGE_TREND_WINDOW] - gaps[-1]
+    if visual_drop >= MIN_VISUAL_WINDOW_DROP_PX:
+        return RangeDecision(
+            "continue",
+            f"sonar is ambiguous but jaw-row gap fell {visual_drop:.0f}px")
+    return acoustic
+
+
 def _reacquire(detector, selector, attempts=3):
     frame = scene = candidate = None
     for _ in range(attempts):
@@ -139,18 +187,27 @@ def _draw_preview(frame, scene, candidate, pose, distance_mm, step, decision):
     cv2.imwrite(str(PREVIEW), image)
 
 
-def _jaw_gate(scene, candidate):
+def _jaw_metrics(scene, candidate):
     gripper = getattr(scene, "gripper", None)
     if gripper is None:
-        return False, "finger markers unavailable"
+        return False, "finger markers unavailable", None
     horizontal = abs(float(candidate.center[0]) - float(gripper.center[0]))
     gap = float(gripper.center[1]) - float(
         candidate.bbox[1] + candidate.bbox[3])
     if horizontal > 0.42 * float(gripper.opening_px):
-        return False, f"object outside open-jaw corridor ({horizontal:.0f}px)"
+        return (
+            False,
+            f"object outside open-jaw corridor ({horizontal:.0f}px)",
+            gap,
+        )
     if gap > 100.0:
-        return False, f"object has not reached finger row (gap {gap:.0f}px)"
-    return True, f"inside jaws; row gap {gap:.0f}px"
+        return False, f"object has not reached finger row (gap {gap:.0f}px)", gap
+    return True, f"inside jaws; row gap {gap:.0f}px", gap
+
+
+def _jaw_gate(scene, candidate):
+    ready, reason, _gap = _jaw_metrics(scene, candidate)
+    return ready, reason
 
 
 def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
@@ -169,6 +226,7 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
     initial_area = float(candidate.area)
     previous_area = initial_area
     range_history = []
+    row_gap_history = []
     previous_was_approach = False
 
     for step in range(int(max_steps)):
@@ -186,9 +244,19 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
 
         profile, attempts = wait_for_stable_profile(client, timeout_s=8.0)
         distance = float(profile.distance_mm)
-        range_history, decision = update_range_progress(
+        range_history, _acoustic_decision = update_range_progress(
             range_history, distance, previous_was_approach)
-        jaw_ready, jaw_reason = _jaw_gate(scene, candidate)
+        jaw_ready, jaw_reason, row_gap = _jaw_metrics(scene, candidate)
+        if row_gap is None:
+            raise RuntimeError(jaw_reason)
+        if previous_was_approach or not row_gap_history:
+            row_gap_history.append(float(row_gap))
+        else:
+            # An aim-only wrist rotation changes the image projection.  As with
+            # sonar, begin a new comparable visual trend after the re-aim.
+            row_gap_history = [float(row_gap)]
+        decision = fused_progress_decision(
+            range_history, row_gap_history, jaw_ready)
         _draw_preview(
             frame, scene, candidate, pose, distance, step, decision)
         print(
@@ -200,10 +268,7 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
 
         if decision.action == "stop":
             raise RuntimeError(decision.reason)
-        if decision.action == "near":
-            if not jaw_ready:
-                raise RuntimeError(
-                    f"sonar is near but image gate disagrees: {jaw_reason}")
+        if decision.action == "ready":
             if not execute or not allow_grasp:
                 return {
                     "state": "sonar-jaw-ready", "pose": pose,
@@ -225,9 +290,12 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
             plan = plan_aim_step(
                 pose, vertical_error, MIN_TOOL_CENTER_Z_M)
         if plan is None:
+            advance_mm = adaptive_advance_mm(row_gap)
             plan = plan_resolved_step(
                 pose, vertical_error, frame.shape[0],
-                min_tool_z_m=MIN_TOOL_CENTER_Z_M)
+                advance_mm=advance_mm,
+                min_tool_z_m=MIN_TOOL_CENTER_Z_M,
+                max_joint_step=APPROACH_MAX_JOINT_STEP_DEG)
         if plan is None:
             raise RuntimeError("no bounded 2/3/4 step remains")
 
@@ -241,6 +309,7 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
         previous_area = float(candidate.area)
         print(
             f"[sonar-reach] pose234 {pose[1:4]} -> {next_pose[1:4]} "
+            f"commanded-advance={adaptive_advance_mm(row_gap):.0f}mm "
             f"visual-progress={plan['progress_mm']:.2f}mm "
             f"clearance={report.minimum_clearance_mm:.1f}mm", flush=True)
         if not execute:
