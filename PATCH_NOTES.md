@@ -3104,3 +3104,21 @@ and the trained model backend.
   Monotonic distance checks compare only genuine translational approach steps.
 - Added a regression proving 142→151.8 mm after re-aiming becomes a fresh
   baseline instead of a false reverse-motion fault.
+
+## Patch 82 — evaluate sonar progress over the servo-jitter envelope
+
+### Physical finding
+
+- Five subsequent approach observations were
+  `152.0, 148.8, 141.2, 144.2, 142.0 mm`.
+- The complete trend moved 10 mm closer and the visual object/finger-row gap
+  fell from 199 to 171 px, but the former two-step rule stopped on a local
+  3 mm rebound caused by servo/beam jitter.
+
+### Changes
+
+- Retained the immediate stop for a range increase greater than 6 mm.
+- Replaced the over-sensitive two-step stall test with a five-observation trend:
+  the window must make at least 3 mm net depth progress.
+- Added regressions for both a genuinely stalled five-value sequence and the
+  measured locally noisy but globally correct approach.

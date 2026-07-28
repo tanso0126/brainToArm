@@ -20,10 +20,16 @@ class RangeProgressTests(unittest.TestCase):
         self.assertEqual(decision.action, "stop")
         self.assertIn("increased", decision.reason)
 
-    def test_two_steps_without_depth_progress_stop(self):
-        decision = range_progress_decision([130.0, 129.7, 129.0])
+    def test_long_window_without_depth_progress_stops(self):
+        decision = range_progress_decision(
+            [130.0, 129.7, 129.0, 129.5, 129.0])
         self.assertEqual(decision.action, "stop")
         self.assertIn("too small", decision.reason)
+
+    def test_local_jitter_does_not_override_good_long_trend(self):
+        decision = range_progress_decision(
+            [152.0, 148.8, 141.2, 144.2, 142.0])
+        self.assertEqual(decision.action, "continue")
 
     def test_aim_only_rotation_resets_range_baseline(self):
         history, decision = update_range_progress(

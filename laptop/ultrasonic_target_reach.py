@@ -55,7 +55,8 @@ MAX_AIM_X_ERROR_PX = 90.0
 # local sensor-to-hand standoff, not a table-coordinate calibration.
 STOP_RANGE_MM = 78.0
 MAX_RANGE_INCREASE_MM = 6.0
-MIN_TWO_STEP_DROP_MM = 1.5
+RANGE_TREND_WINDOW = 5
+MIN_WINDOW_DROP_MM = 3.0
 MIN_TOOL_CENTER_Z_M = 0.058
 MAX_STEPS = 24
 
@@ -68,7 +69,8 @@ class RangeDecision:
 
 def range_progress_decision(history, stop_range_mm=STOP_RANGE_MM,
                             max_increase_mm=MAX_RANGE_INCREASE_MM,
-                            min_two_step_drop_mm=MIN_TWO_STEP_DROP_MM):
+                            trend_window=RANGE_TREND_WINDOW,
+                            min_window_drop_mm=MIN_WINDOW_DROP_MM):
     """Fail-closed range policy, independent of cameras and hardware."""
     values = [float(value) for value in history]
     if not values:
@@ -80,11 +82,12 @@ def range_progress_decision(history, stop_range_mm=STOP_RANGE_MM,
     if len(values) >= 2 and current > values[-2] + max_increase_mm:
         return RangeDecision(
             "stop", f"range increased {values[-2]:.1f}->{current:.1f} mm")
-    if (len(values) >= 3
-            and values[-3] - current < min_two_step_drop_mm):
+    if (len(values) >= trend_window
+            and values[-trend_window] - current < min_window_drop_mm):
         return RangeDecision(
             "stop",
-            f"two-step range drop {values[-3] - current:.1f} mm is too small")
+            f"{trend_window}-step range drop "
+            f"{values[-trend_window] - current:.1f} mm is too small")
     return RangeDecision("continue", f"range {current:.1f} mm")
 
 
