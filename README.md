@@ -541,8 +541,8 @@ brainToArm/
   in this baseline file.
   In the 3D studio, the target presentation opens one onset-locked ErrP epoch.
   After basket placement, a server-side asynchronous monitor evaluates one
-  overlapping 1 s trailing window every 62.5 ms and requires two consecutive
-  50% crossings. It runs until the operator presses stop; it does not invent
+  overlapping 1 s trailing window every 62.5 ms and rejects immediately when
+  one window crosses 50%. It runs until the operator presses stop; it does not invent
   periodic robot-action onsets. The current baseline backend is explicitly a
   diagnostic heuristic. A defensible asynchronous decoder requires labeled
   correct/error trials and a participant-trained model. A detected rejection

@@ -864,7 +864,7 @@ function SimulationLab({
                 {loadStatus?.baselineReady && <>
                   <div><span><Brain size={15} />TAR / 휴식 대비</span><strong>{loadStatus.tar?.toFixed(3) ?? "—"} / {loadStatus.smoothedRelativeTar != null ? `${loadStatus.smoothedRelativeTar >= 0 ? "+" : ""}${(loadStatus.smoothedRelativeTar * 100).toFixed(1)}%` : "—"}</strong></div>
                   <div><span><Brain size={15} />자율성 가중치</span><strong>로봇 {(loadStatus.robotWeight * 100).toFixed(0)} · 인간 {(loadStatus.humanWeight * 100).toFixed(0)}</strong></div>
-                  <div><span><Zap size={15} />ErrP 행동 반영</span><strong>비동기 ≥{(loadStatus.errpThreshold * 100).toFixed(0)}% 2회 연속 즉시 거부</strong></div>
+                  <div><span><Zap size={15} />ErrP 행동 반영</span><strong>비동기 1창 ≥{(loadStatus.errpThreshold * 100).toFixed(0)}% 즉시 거부</strong></div>
                 </>}
                 {shownAsyncErrp && <>
                   <div><span><Activity size={15} />실시간 P(error)</span><strong>{shownAsyncErrp.probability == null ? `${shownAsyncErrp.bufferedSamples}/${shownAsyncErrp.requiredSamples} 준비` : `${(shownAsyncErrp.probability * 100).toFixed(1)}% · 연속 ${shownAsyncErrp.consecutive}/${shownAsyncErrp.requiredConsecutive}`}</strong></div>
@@ -886,7 +886,7 @@ function SimulationLab({
                     <strong>{errpStatus.lastDecision.zScore?.toFixed(2) ?? "모델 판정"}</strong>
                   </div>
                 ) : null}
-                <small>행동 직후 ErrP는 event-locked로, 배송 후 감시는 CH8의 겹치는 슬라이딩 창으로 처리합니다. 비동기는 2회 연속 50%를 넘어야 거부합니다. 미학습 휴리스틱은 진단용이며, 분노 자체를 측정하는 감정 분류기가 아닙니다.</small>
+                <small>행동 직후 ErrP는 event-locked로, 배송 후 감시는 CH8의 겹치는 슬라이딩 창으로 처리합니다. 비동기는 한 창이 50%를 넘는 즉시 거부합니다. 미학습 휴리스틱은 진단용이며, 분노 자체를 측정하는 감정 분류기가 아닙니다.</small>
               </div>
             )}
           </article>

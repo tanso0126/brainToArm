@@ -2845,3 +2845,24 @@ and the trained model backend.
   confirmation, and immediate probability refresh without snapshot gaps.
 - Updated MuJoCo coverage to prove post-delivery waits for rejection or explicit
   stop rather than a timeout.
+
+## Patch 72 — react to one asynchronous ErrP window
+
+### Requested behavior
+
+- Removed the two-consecutive-window confirmation from post-delivery ErrP
+  monitoring.
+- One overlapping 1 s window crossing `P(error) >= 0.50` now publishes a
+  rejection immediately. The 62.5 ms window leap and one-second refractory
+  period remain unchanged.
+- Updated the operator UI to state `1창` explicitly and kept the live
+  probability/count display driven by the server configuration.
+- This intentionally trades consecutive-window false-positive suppression for
+  faster response. The current rest-baseline backend remains labeled as an
+  untrained diagnostic heuristic.
+
+### Verification
+
+- Updated the deterministic asynchronous monitor test to prove that the first
+  above-threshold complete window produces a detection.
+- Updated rendered UI assertions for the one-window policy.

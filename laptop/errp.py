@@ -293,10 +293,11 @@ class AsyncErrPMonitor:
     """Overlapping online ErrP evaluation over one continuous EEG stream.
 
     This is not a timer that invents a fresh action onset. It advances a
-    trailing window by a small sample leap and requires consecutive positive
-    classifier outputs, as used by asynchronous ErrP studies. The configured
-    detector may still be the baseline heuristic; only a participant-trained
-    model makes the classification a trained ErrP decoder.
+    trailing window by a small sample leap and supports configurable
+    consecutive-positive confirmation. This deployment uses one positive
+    window for the operator-requested fastest response. The detector may still
+    be the baseline heuristic; only a participant-trained model makes the
+    classification a trained ErrP decoder.
     """
 
     def __init__(

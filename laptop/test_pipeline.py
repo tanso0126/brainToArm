@@ -593,7 +593,7 @@ def test_errp():
 
 
 def test_asynchronous_errp_sliding_monitor():
-    print("[errp-async] overlapping windows + consecutive confirmation")
+    print("[errp-async] overlapping windows + immediate one-window confirmation")
 
     class StubDetector:
         backend = "baseline"
@@ -611,20 +611,20 @@ def test_asynchronous_errp_sliding_monitor():
 
     monitor = AsyncErrPMonitor(
         StubDetector(), fs=100, window_s=0.20, step_s=0.05,
-        consecutive=2, refractory_s=1.0, threshold=0.5)
+        consecutive=1, refractory_s=1.0, threshold=0.5)
     status = monitor.ingest([
         (index / 100.0, [0.0] * config.EEG_CHANNELS)
-        for index in range(25)
+        for index in range(20)
     ])
-    check(status["evaluations"] == 2,
-          "20-sample window advances by overlapping five-sample leaps")
+    check(status["evaluations"] == 1,
+          "the first complete 20-sample window is evaluated immediately")
     check(status["detectionSequence"] == 1,
-          "two consecutive threshold crossings create exactly one detection")
+          "one threshold crossing creates one detection")
     status = monitor.ingest([
         (index / 100.0, [0.0] * config.EEG_CHANNELS)
-        for index in range(25, 30)
+        for index in range(20, 25)
     ])
-    check(status["evaluations"] == 3 and not status["aboveThreshold"],
+    check(status["evaluations"] == 2 and status["aboveThreshold"],
           "the next overlapping window updates probability without a snapshot gap")
 
 

@@ -211,8 +211,8 @@ accuracy.
 
 The simulator keeps basket delivery in an unlimited review phase until the
 operator presses stop. A server-side CH8 asynchronous monitor advances an
-overlapping 1 s trailing window every 62.5 ms and requires two consecutive
-50% crossings. This is a continuous sliding classifier, not a sequence of fake
+overlapping 1 s trailing window every 62.5 ms and rejects as soon as one window
+crosses 50%. This is a continuous sliding classifier, not a sequence of fake
 0.8-second action onsets. The baseline backend remains an explicitly untrained
 diagnostic heuristic; validated asynchronous use requires participant-specific
 labeled correct/error data and threshold tuning. A confirmed asynchronous
@@ -224,7 +224,8 @@ non-rejected object.
 Research basis: Spüler and Niethammer (2015) used a 1 s window shifted by
 62.5 ms for asynchronous continuous-feedback classification; Lopes-Dias et al.
 (2019) used overlapping classifier windows and required two consecutive
-above-threshold outputs. Both trained participant-specific classifiers from
+above-threshold outputs, while this project intentionally uses one at the
+operator's request for lower reaction latency. Both trained participant-specific classifiers from
 labeled error/correct data. The present CH8 rest heuristic copies the online
 windowing mechanics, not their validated classifier accuracy.
 

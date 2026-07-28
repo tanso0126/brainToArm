@@ -47,7 +47,8 @@ test("starter preview is removed and localhost API is explicit", async () => {
   assert.match(simulationLab, /\/api\/errp\/async/);
   assert.match(simulationLab, /useState<SignalSource>\("polyg"\)/);
   assert.match(simulationLab, /window\.setInterval\(\(\) => void pull\(\), 50\)/);
-  assert.match(simulationLab, /2회 연속/);
+  assert.match(simulationLab, /비동기 1창/);
+  assert.match(simulationLab, /한 창이 50%를 넘는 즉시/);
   assert.match(page, /샘플 수는 안정도 점수가 아니며/);
   assert.match(page, /\/api\/baseline\/load/);
   assert.match(page, /index 0 · ×0\.10/);
