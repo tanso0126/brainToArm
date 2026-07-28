@@ -2708,3 +2708,35 @@ and the trained model backend.
   required channel, no blocking channels, and `ready=true`.
 - Full Python pipeline, compilation, Ruff, dashboard lint/build/render tests,
   and a production-browser console check pass.
+
+## Patch 68 — make strong human ErrP an immediate veto
+
+### Gap found
+
+- High TAR can raise the ordinary ErrP threshold to 65% and space behavioral
+  application to every third checkpoint. The existing immediate override was
+  fixed at 90%, approximately a five-sigma response under the baseline
+  heuristic, so a visibly strong rejection below that extreme could still be
+  observation-only.
+- The UI compressed threshold and stride into `매 3번째 · 65%`, which did not
+  explain that a separate immediate-veto path existed.
+
+### Changes
+
+- Lowered the strong time-locked ErrP override from 90% to 75% (approximately
+  a 4.2-sigma sustained CH8 negative deflection under the baseline sigmoid).
+  Strong ErrP now vetoes immediately regardless of TAR, adaptive threshold, or
+  checkpoint stride. A false stop is recoverable; silently missing a clear
+  human rejection is the less safe failure.
+- Preserved the requested adaptive-autonomy behavior for ordinary detections:
+  TAR can still alter the ordinary threshold and application stride, and every
+  checkpoint is still calculated and logged.
+- Reworded both EEG views to distinguish `ordinary threshold + stride` from
+  `strong >=75% immediate`, instead of showing an ambiguous two-number label.
+- This remains an ErrP detector, not an anger detector: intensity refers to the
+  time-locked CH8 response probability after a robot action.
+
+### Verification
+
+- The allocator regression now proves a 75% response immediately vetoes a
+  checkpoint that TAR scheduling would otherwise leave observation-only.

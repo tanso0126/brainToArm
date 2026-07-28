@@ -44,6 +44,8 @@ test("starter preview is removed and localhost API is explicit", async () => {
   assert.match(page, /index 0 · ×0\.10/);
   assert.match(page, /index 2 · ×0\.40/);
   assert.match(page, /필터 p-p는 진단값일 뿐 ADC 포화 판정에 사용하지 않습니다/);
+  assert.match(page, /강한 ≥/);
+  assert.match(page, /즉시/);
   assert.match(page, /requestAnimationFrame/);
   assert.match(page, /부드럽게 · 0\.45초/);
   assert.match(page, /SimulationLab/);

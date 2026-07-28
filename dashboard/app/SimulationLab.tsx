@@ -755,7 +755,7 @@ function SimulationLab({
                 {loadStatus?.baselineReady && <>
                   <div><span><Brain size={15} />TAR / 휴식 대비</span><strong>{loadStatus.tar?.toFixed(3) ?? "—"} / {loadStatus.smoothedRelativeTar != null ? `${loadStatus.smoothedRelativeTar >= 0 ? "+" : ""}${(loadStatus.smoothedRelativeTar * 100).toFixed(1)}%` : "—"}</strong></div>
                   <div><span><Brain size={15} />자율성 가중치</span><strong>로봇 {(loadStatus.robotWeight * 100).toFixed(0)} · 인간 {(loadStatus.humanWeight * 100).toFixed(0)}</strong></div>
-                  <div><span><Zap size={15} />ErrP 행동 반영</span><strong>매 {loadStatus.errpApplyStride}번째 · {(loadStatus.errpThreshold * 100).toFixed(0)}%</strong></div>
+                  <div><span><Zap size={15} />ErrP 행동 반영</span><strong>보통 ≥{(loadStatus.errpThreshold * 100).toFixed(0)}% 매 {loadStatus.errpApplyStride}번째 · 강한 ≥{(loadStatus.strongErrpOverrideThreshold * 100).toFixed(0)}% 즉시</strong></div>
                 </>}
                 <button onClick={calibrateErrp} disabled={!apiOnline || !eegRunning || errpBusy || !calibrationWindow?.ready}>{errpBusy ? "처리 중…" : calibrationWindow?.ready ? "최근 8초로 통합 보정·저장" : "신호 확인 후 보정"}</button>
                 {savedBaseline?.available && <button onClick={loadSavedBaseline} disabled={!apiOnline || !eegRunning || errpBusy || !savedBaseline.compatible || errpReady}>저장 안정 기준 불러오기</button>}

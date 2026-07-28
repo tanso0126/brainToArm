@@ -475,13 +475,16 @@ def test_cognitive_load_and_autonomy():
           and invalid_allocation.robot_weight == config.AUTONOMY_ROBOT_MIN
           and invalid_allocation.errp_apply_stride == 1,
           "flat/invalid PSD fails toward minimum robot authority")
-    first = allocator.decide(0.8, high_state)
-    second = allocator.decide(0.8, high_state)
-    override = allocator.decide(config.AUTONOMY_ERRP_OVERRIDE_THRESHOLD, high_state)
+    first = allocator.decide(0.70, high_state)
+    second = allocator.decide(0.70, high_state)
     check(first.applied and not second.applied,
           "high-load ErrP is still calculated but only scheduled checkpoints apply")
+    strong_allocator = AutonomyAllocator()
+    strong_allocator.decide(0.70, high_state)
+    override = strong_allocator.decide(
+        config.AUTONOMY_ERRP_OVERRIDE_THRESHOLD, high_state)
     check(override.veto and override.override and override.applied,
-          "very strong ErrP remains a load-independent veto")
+          "75% strong ErrP immediately vetoes an otherwise skipped checkpoint")
 
 
 def test_dashboard_integrates_tar_allocation():

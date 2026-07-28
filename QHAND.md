@@ -185,6 +185,9 @@ threshold, and the action-application stride. Lower TAR shifts weight toward the
 human and applies every checkpoint. CH8 ErrP probability is still calculated at
 every action checkpoint; a skipped checkpoint means observation-only, not that
 the EEG was ignored. A very strong ErrP remains an immediate override.
+The immediate override is `P(error) >= 0.75`; it bypasses both the adaptive
+threshold and the TAR-derived application stride. Ordinary threshold crossings
+still follow the displayed stride.
 
 The default `baseline` backend is not a trained ErrP classifier. The eight-second
 button measures CH8 resting noise σ and the CH1–4/CH8 resting TAR. For each

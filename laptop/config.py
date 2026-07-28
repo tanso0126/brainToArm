@@ -245,7 +245,10 @@ AUTONOMY_RELATIVE_MAX = 1.50
 AUTONOMY_ERRP_THRESHOLD_GAIN = 0.50
 AUTONOMY_STRIDE_TAR_STEP = 0.25
 AUTONOMY_MAX_ERRP_STRIDE = 3
-AUTONOMY_ERRP_OVERRIDE_THRESHOLD = 0.90
+# A strong, time-locked human veto always wins over TAR scheduling. False stops
+# are recoverable; silently missing a clear rejection is not. With the baseline
+# sigmoid, 0.75 is roughly a 4.2-sigma sustained negative CH8 deflection.
+AUTONOMY_ERRP_OVERRIDE_THRESHOLD = 0.75
 
 # ======================================================================
 # Vision (overhead camera)

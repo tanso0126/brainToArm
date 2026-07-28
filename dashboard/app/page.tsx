@@ -845,7 +845,7 @@ export default function Home() {
         <span><b>ErrP 입력</b> CH8 단독 · 1–10 Hz</span>
         <span><b>TAR</b> {loadStatus?.tar != null ? `${loadStatus.tar.toFixed(3)} · Δ ${((loadStatus.smoothedRelativeTar ?? 0) * 100).toFixed(1)}%` : "휴식 보정 필요"}</span>
         <span><b>자율성</b> 로봇 {((loadStatus?.robotWeight ?? 0.5) * 100).toFixed(0)}% · 인간 {((loadStatus?.humanWeight ?? 0.5) * 100).toFixed(0)}%</span>
-        <span><b>ErrP 반영</b> {loadStatus?.baselineReady ? `매 ${loadStatus.errpApplyStride}번째 · 기준 ${(loadStatus.errpThreshold * 100).toFixed(0)}%` : calibrationWindowLabel(calibrationWindow)}</span>
+        <span><b>ErrP 반영</b> {loadStatus?.baselineReady ? `보통 ≥${(loadStatus.errpThreshold * 100).toFixed(0)}% 매 ${loadStatus.errpApplyStride}번째 · 강한 ≥${(loadStatus.strongErrpOverrideThreshold * 100).toFixed(0)}% 즉시` : calibrationWindowLabel(calibrationWindow)}</span>
       </div>
     </article>
   ), [
@@ -1023,7 +1023,7 @@ export default function Home() {
               <div><span>휴식 TAR</span><strong>{loadStatus?.restTar?.toFixed(4) ?? "—"}</strong></div>
               <div><span>휴식 대비</span><strong>{loadStatus?.smoothedRelativeTar != null ? `${loadStatus.smoothedRelativeTar >= 0 ? "+" : ""}${(loadStatus.smoothedRelativeTar * 100).toFixed(1)}%` : "—"}</strong></div>
               <div><span>결정 가중치</span><strong>로봇 {((loadStatus?.robotWeight ?? 0.2) * 100).toFixed(0)} · 인간 {((loadStatus?.humanWeight ?? 0.8) * 100).toFixed(0)}</strong></div>
-              <div><span>ErrP 행동 반영</span><strong>매 {loadStatus?.errpApplyStride ?? 1}번째</strong></div>
+              <div><span>ErrP 행동 반영</span><strong>보통 매 {loadStatus?.errpApplyStride ?? 1}번째 · 강한 ≥{((loadStatus?.strongErrpOverrideThreshold ?? 0.75) * 100).toFixed(0)}% 즉시</strong></div>
               <div><span>적응 임계값</span><strong>{((loadStatus?.errpThreshold ?? 0.5) * 100).toFixed(0)}%</strong></div>
             </div>
             <div className="baseline-actions">

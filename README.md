@@ -529,7 +529,9 @@ brainToArm/
   raises robot weight and the ErrP veto threshold and spaces out application
   checkpoints; lower TAR gives the human/ErrP more weight. ErrP probability is
   still calculated at every action event, and a very strong response remains an
-  override. Invalid/flat PSD windows fail toward minimum robot authority. Once a
+  override. `P(error) >= 0.75` is an immediate veto regardless of TAR stride;
+  ordinary threshold crossings retain the adaptive checkpoint schedule.
+  Invalid/flat PSD windows fail toward minimum robot authority. Once a
   clean rest window is accepted, the aggregate CH8 noise and CH1–4/CH8 power
   baseline is atomically saved under ignored local `data/eeg_baselines/`. A later
   session can explicitly restore it only when the device, PGA, sampling, channel,
