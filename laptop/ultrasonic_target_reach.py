@@ -71,6 +71,7 @@ PRE_CLOSE_LIFT_MM = 12.0
 VERIFY_LIFT_MM = 25.0
 RETAINED_BOTTOM_RATIO = 0.90
 RETAINED_HORIZONTAL_RATIO = 0.20
+LOADED_HOME_REASSERT_TEMPLATE = [90, 90, 90, 150, 180, 170]
 FAR_ADVANCE_MM = 20.0
 MID_ADVANCE_MM = 15.0
 APPROACH_MAX_JOINT_STEP_DEG = 12
@@ -300,21 +301,32 @@ def home_pose_holding(pose):
     return home
 
 
+def loaded_home_reassert_pose(pose):
+    """Distinct safe waypoint that forces a physical HOME pulse trajectory."""
+    waypoint = list(LOADED_HOME_REASSERT_TEMPLATE)
+    waypoint[config.J_GRIP] = int(pose[config.J_GRIP])
+    return waypoint
+
+
 def _return_home_holding(client, mover, safety, pose):
     """Transport a retained object to HOME without ever opening the gripper."""
     if int(pose[config.J_GRIP]) != int(config.GRIP_CLOSED):
         raise RuntimeError("HOME transport requires a closed gripper")
+    waypoint = loaded_home_reassert_pose(pose)
     home = home_pose_holding(pose)
-    report = safety.transition_report(pose, home)
-    if not report.safe:
-        raise RuntimeError(
-            "loaded HOME transition rejected: " + report.explain())
-    print(
-        f"[sonar-reach] loaded HOME {pose} -> {home}; "
-        f"clearance={report.minimum_clearance_mm:.1f}mm",
-        flush=True,
-    )
-    mover.slow_move(home, final_settle=0.8)
+    for start, target, label in (
+            (pose, waypoint, "loaded HOME reassert"),
+            (waypoint, home, "loaded HOME")):
+        report = safety.transition_report(start, target)
+        if not report.safe:
+            raise RuntimeError(
+                f"{label} transition rejected: " + report.explain())
+        print(
+            f"[sonar-reach] {label} {start} -> {target}; "
+            f"clearance={report.minimum_clearance_mm:.1f}mm",
+            flush=True,
+        )
+        mover.slow_move(target, final_settle=0.8)
     return home
 
 

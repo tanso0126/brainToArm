@@ -8,6 +8,7 @@ from ultrasonic_target_reach import (
     approach_stop_decision,
     fingertip_floor_clearance_mm,
     home_pose_holding,
+    loaded_home_reassert_pose,
     tracking_wrist_target,
     transition_fingertip_floor_clearance_mm,
 )
@@ -78,6 +79,9 @@ class ApproachStopTests(unittest.TestCase):
         held = [90, 111, 70, 177, 180, 170]
         self.assertEqual(
             home_pose_holding(held), [90, 70, 90, 140, 180, 170])
+        self.assertEqual(
+            loaded_home_reassert_pose(held),
+            [90, 90, 90, 150, 180, 170])
 
 if __name__ == "__main__":
     unittest.main()

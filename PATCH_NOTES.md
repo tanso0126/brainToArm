@@ -3297,3 +3297,27 @@ and the trained model backend.
   frame still showed the same blue object enclosed between the closed coloured
   fingers. HOME return is therefore physically complete without dropping or
   opening the gripper.
+
+## Patch 87 — reassert loaded HOME physically instead of trusting PWM state
+
+### Correction
+
+- The previous completion claim was invalid. The Uno's `C` status reports its
+  internally slewed PWM command, not an encoder measurement of each physical
+  servo shaft. It reported loaded HOME even though the operator observed that
+  the arm had not returned. The wrist camera confirmed only object retention,
+  not the whole-arm pose.
+
+### Changes
+
+- Loaded transport now goes through the distinct waypoint
+  `[90,90,90,150,180,170]` before commanding loaded HOME
+  `[90,70,90,140,180,170]`. This forces fresh physical pulse trajectories even
+  when the firmware already believes it is at HOME.
+- Both possible starting realities—the last verified held pose and the
+  firmware-reported HOME—were checked to the waypoint, and the waypoint-to-HOME
+  route was also checked. Every route is safe and preserves motor 5 at 180°.
+- Completion is no longer inferred solely from `C` status. Without servo
+  encoders, physical HOME confirmation must come from an external fixed camera
+  or the operator; the wrist-mounted view can verify only that the object
+  remains held.
