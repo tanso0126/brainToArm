@@ -194,6 +194,13 @@ participant use still requires collecting labeled correct/error trials and
 training the `model` backend; the baseline heuristic is a diagnostic/demo
 detector and must not be reported as validated subject accuracy.
 
+The calibration button uses its own full eight-second quality window, not the
+short two-second channel badge. It becomes enabled only when enough samples are
+present and the complete window is clean. If it stays disabled, stop acquisition,
+lower PGA (start with ×1.00), reconnect CH8/reference/ground, restart, and wait
+for a new clean eight-second window. Do not bypass saturation: it cannot produce
+a defensible ErrP baseline.
+
 ## 8. Local endpoints
 
 ```text

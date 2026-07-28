@@ -81,6 +81,8 @@ def analyze_signal_quality(values, raw_counts=None, raw_adc_mv=None):
     effective_lsb_mv = abs(ADC_VOLTS_PER_COUNT * 2 * 1000.0)
     if clipping > 0.0:
         state = "saturated"
+    elif peak_to_peak >= abs(ADC_VOLTS_PER_COUNT * 1000.0) * 65534 * 0.8:
+        state = "unstable"
     elif peak_to_peak <= effective_lsb_mv * 2:
         state = "flat"
     else:
@@ -402,8 +404,11 @@ class EEGDashboardService:
             )
             if quality["state"] != "present":
                 raise RuntimeError(
-                    f"ErrP CH{channel + 1} 신호 상태가 {quality['state']}입니다. "
-                    "전극 접촉/포화 여부를 해결한 뒤 다시 보정하세요")
+                    f"ErrP CH{channel + 1} 최근 {seconds:.0f}초 상태가 "
+                    f"{quality['state']}입니다 "
+                    f"(clipping {quality['clippingPercent']:.3f}%, "
+                    f"p-p {quality['peakToPeakMv']:.3f} mV). "
+                    "전극 접촉·움직임·PGA를 확인하고 깨끗한 8초를 다시 확보하세요")
         self._errp_detector.update_baseline(window)
         with self._lock:
             self._errp_baseline_ready = True
@@ -538,6 +543,31 @@ class EEGDashboardService:
                 )
                 for channel in range(CHANNELS)
             ]
+            errp_seconds = float(config.COG_REST_S)
+            errp_recent = [
+                item for item in self._rows
+                if item[1] >= now - errp_seconds
+            ]
+            errp_channel = config.ERRP_CHANNELS[0]
+            errp_quality = analyze_signal_quality(
+                [item[4][errp_channel] for item in errp_recent],
+                [item[2][errp_channel] for item in errp_recent],
+                [item[3][errp_channel] for item in errp_recent],
+            )
+            errp_required = int(
+                errp_seconds * config.EEG_FS
+                * config.EEG_MIN_EPOCH_FRACTION)
+            calibration_window = {
+                "seconds": errp_seconds,
+                "samples": len(errp_recent),
+                "requiredSamples": errp_required,
+                "quality": errp_quality,
+                "ready": (
+                    running
+                    and len(errp_recent) >= errp_required
+                    and errp_quality["state"] == "present"
+                ),
+            }
             recording = self.recording_status_locked()
             last_age = now - self._last_report_mono if self._last_report_mono else None
             return {
@@ -592,6 +622,7 @@ class EEGDashboardService:
                     "baselineStdMv": (
                         round(float(self._errp_detector.baseline_std), 6)
                         if self._errp_detector.baseline_std is not None else None),
+                    "calibrationWindow": calibration_window,
                     "lastDecision": self._errp_last,
                 },
                 "quality": qualities,
@@ -821,8 +852,13 @@ def start_ui_process(port):
         return None
     if not (DASHBOARD_DIR / "package.json").exists():
         raise RuntimeError("dashboard/package.json이 없습니다")
+    subprocess.run(
+        ["npm", "run", "build"],
+        cwd=DASHBOARD_DIR,
+        check=True,
+    )
     return subprocess.Popen(
-        ["npm", "run", "dev", "--", "--port", str(port)],
+        ["npm", "run", "start", "--", "--port", str(port)],
         cwd=DASHBOARD_DIR,
     )
 

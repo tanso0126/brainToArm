@@ -2493,3 +2493,47 @@ and the trained model backend.
 - Dashboard lint, production build, and rendered-shell tests pass.
 - The full pipeline passes with a synthetic CH8-only error epoch separated from
   a clean epoch; configuration validation rejects any ErrP map other than CH8.
+
+## Patch 63 — explain calibration conflicts and bound long-run UI memory
+
+### Observed failures
+
+- The live device returned HTTP 409 because CH8 had clipped somewhere inside the
+  requested eight-second rest window. The two-second status card had already
+  returned to `present`, so the button gave no advance warning.
+- Long runs raised React development `Performance.measure` `DataCloneError:
+  out of memory`, followed by scheduler re-entry errors and frozen live views.
+  EEG samples were replacing a 7,000-row React state array every 80 ms, while
+  camera timestamps and simulation status re-rendered the complete studio tree.
+
+### Changes
+
+- Added an eight-second ErrP calibration-window status containing sample count,
+  required count, signal quality, clipping percentage, peak-to-peak value, and a
+  `ready` gate. The calibration button is disabled until this exact window is
+  clean instead of issuing a predictable 409.
+- Calibration failures now render inline with the full server reason. The
+  observed case is explicitly reported as CH8 saturation, including clipping
+  percentage and peak-to-peak mV.
+- Added `unstable` classification when filtered peak-to-peak exceeds 80% of the
+  ADC input span; a nearly railed signal can no longer be mislabeled merely
+  `present`. The embedded panel also exposes PGA selection while stopped.
+- Moved high-rate EEG samples to a bounded mutable 7,000-row buffer consumed
+  directly by the canvas. React receives only a 2,048-row analysis snapshot at
+  2 Hz, and buffer updates mutate in place instead of allocating a full array
+  12.5 times per second.
+- Camera `<img>` URLs now update through refs rather than React state, unchanged
+  simulation status no longer commits, status polling is reduced to 2.5 Hz, and
+  the studio component is memoized. This removes the high-frequency full-tree
+  passive commits identified in the supplied stack trace.
+- The one-command dashboard launcher now builds and serves the optimized
+  production bundle instead of leaving React development instrumentation active
+  throughout an experiment. This removes the `logComponentRender` performance
+  history seen at the top of the supplied out-of-memory stack.
+
+### Verification
+
+- Full EEG/device/ErrP/robot pipeline passes.
+- Dashboard build, rendered-shell tests, and lint pass without warnings.
+- MuJoCo renderer cache passed 80 concurrent frame requests without the earlier
+  AGX limit; the studio physics suite continues to pass.

@@ -567,6 +567,8 @@ footer {
 .sim-eeg-box span { display: inline-flex; align-items: center; gap: 6px; color: var(--sim-text2); }
 .sim-eeg-box button { width: 100%; min-height: 34px; margin-top: 7px; border-color: rgba(55,109,250,.25); border-radius: 6px; color: #376dfa; background: #fff; font-size: 10px; font-weight: 700; }
 .sim-eeg-box small { display: block; margin-top: 8px; color: var(--sim-text3); font-size: 9px; line-height: 1.45; }
+.sim-errp-error { display: flex; align-items: flex-start; gap: 6px; margin: 8px 0 0; padding: 8px; border-radius: 6px; color: #a20c27; background: #fff1f2; font-size: 9px; line-height: 1.45; }
+.sim-errp-error svg { flex: 0 0 auto; margin-top: 1px; }
 .sim-errp-decision { display: grid !important; grid-template-columns: 1fr auto; gap: 4px 10px !important; margin-top: 8px; padding: 8px !important; border: 1px solid rgba(55,109,250,.14); border-radius: 6px; background: rgba(255,255,255,.72); }
 .sim-errp-decision.detected { border-color: rgba(227,15,50,.28); background: #fff1f2; }
 .sim-errp-decision strong { color: var(--sim-text); font: 700 10px/1.2 var(--font-mono), monospace; text-align: right; }

@@ -16,6 +16,7 @@ import {
   Tag,
   Usb,
 } from "lucide-react";
+import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import SimulationLab from "./SimulationLab";
 
@@ -94,6 +95,13 @@ type DashboardStatus = {
     channels: number[];
     bandHz: [number, number];
     baselineStdMv: number | null;
+    calibrationWindow: {
+      seconds: number;
+      samples: number;
+      requiredSamples: number;
+      quality: Quality;
+      ready: boolean;
+    };
     lastDecision: {
       isError: boolean;
       probability: number;
@@ -159,7 +167,7 @@ async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 function WaveformCanvas({
-  rows,
+  rowsRef,
   visible,
   selected,
   windowSeconds,
@@ -167,7 +175,7 @@ function WaveformCanvas({
   renderDelayMs,
   paused,
 }: {
-  rows: SampleRow[];
+  rowsRef: MutableRefObject<SampleRow[]>;
   visible: boolean[];
   selected: number;
   windowSeconds: number;
@@ -176,14 +184,9 @@ function WaveformCanvas({
   paused: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rowsRef = useRef(rows);
   const settingsRef = useRef({ visible, selected, windowSeconds, fixedScale, renderDelayMs, paused });
   const playheadRef = useRef<number | null>(null);
   const previousFrameRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    rowsRef.current = rows;
-  }, [rows]);
 
   useEffect(() => {
     settingsRef.current = { visible, selected, windowSeconds, fixedScale, renderDelayMs, paused };
@@ -355,7 +358,7 @@ function WaveformCanvas({
     };
     animationFrame = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(animationFrame);
-  }, []);
+  }, [rowsRef]);
 
   return <canvas ref={canvasRef} className="waveform-canvas" role="img" aria-label="고정 축 8채널 EEG 실시간 필터 파형" />;
 }
@@ -509,6 +512,8 @@ export default function Home() {
   const [apiOnline, setApiOnline] = useState(false);
   const [busy, setBusy] = useState(false);
   const [markers, setMarkers] = useState<{ label: string; time: string }[]>([]);
+  const liveRowsRef = useRef<SampleRow[]>([]);
+  const lastAnalysisPublishRef = useRef(0);
   const sequenceRef = useRef(0);
   const sessionRef = useRef<string | null>(null);
   const inFlightRef = useRef(false);
@@ -521,6 +526,7 @@ export default function Home() {
       if (sessionRef.current !== next.acquisition.sessionId) {
         sessionRef.current = next.acquisition.sessionId;
         sequenceRef.current = 0;
+        liveRowsRef.current = [];
         setRows([]);
         setMarkers([]);
       }
@@ -564,11 +570,23 @@ export default function Home() {
           latestSequence: number;
           rows: SampleRow[];
         }>(`/api/data?after=${sequenceRef.current}&limit=2048`);
-        if (payload.reset) setRows([]);
+        if (payload.reset) {
+          liveRowsRef.current = [];
+          setRows([]);
+        }
         if (payload.rows.length) {
           sequenceRef.current = payload.rows[payload.rows.length - 1].sequence;
           if (!displayPaused) {
-            setRows((previous) => [...previous, ...payload.rows].slice(-7000));
+            liveRowsRef.current.push(...payload.rows);
+            if (liveRowsRef.current.length > 7000) {
+              liveRowsRef.current.splice(
+                0, liveRowsRef.current.length - 7000);
+            }
+            const now = performance.now();
+            if (now - lastAnalysisPublishRef.current >= 500) {
+              lastAnalysisPublishRef.current = now;
+              setRows(liveRowsRef.current.slice(-2048));
+            }
           }
         }
       } catch (error) {
@@ -588,7 +606,10 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [message]);
 
-  const perform = async (path: string, body: Record<string, unknown> = {}) => {
+  const perform = useCallback(async (
+    path: string,
+    body: Record<string, unknown> = {},
+  ) => {
     setBusy(true);
     try {
       await apiRequest(path, { method: "POST", body: JSON.stringify(body) });
@@ -598,14 +619,17 @@ export default function Home() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [refreshStatus]);
 
   const toggleChannel = (index: number) => {
     setVisible((previous) => previous.map((value, channel) => (channel === index ? !value : value)));
   };
 
   const toggleDisplayPause = () => {
-    if (displayPaused) setRows([]);
+    if (displayPaused) {
+      liveRowsRef.current = [];
+      setRows([]);
+    }
     setDisplayPaused(!displayPaused);
   };
 
@@ -630,6 +654,67 @@ export default function Home() {
   const isRunning = Boolean(status?.acquisition.running);
   const isRecording = Boolean(status?.recording.active);
   const deviceReady = Boolean(status?.device.available);
+  const calibrationWindow = status?.errp.calibrationWindow;
+  const simulationEegPanel = useMemo(() => (
+    <article className="sim-card sim-eeg-live-card">
+      <div className="sim-card-head">
+        <div>
+          <p>POLYG-I LIVE · ALL 8 DISPLAYED · ERRP = CH8 ONLY</p>
+          <h3>시뮬레이션과 동시에 보는 실시간 EEG</h3>
+        </div>
+        <div className="sim-eeg-live-actions">
+          <span className={`sim-live ${isRunning ? "" : "stopped"}`}><i />{isRunning ? `${fs.toFixed(1)} Hz` : "STOPPED"}</span>
+          <label>공통 Y축
+            <select value={fixedScale} onChange={(event) => setFixedScale(Number(event.target.value))}>
+              <option value={0.1}>±0.10 mV</option><option value={0.25}>±0.25 mV</option><option value={0.5}>±0.50 mV</option><option value={1}>±1.00 mV</option><option value={2.5}>±2.50 mV</option><option value={5}>±5.00 mV</option><option value={10}>±10.00 mV</option><option value={25}>±25.00 mV</option><option value={50}>±50.00 mV</option><option value={100}>±100.00 mV</option><option value={250}>±250.00 mV</option><option value={500}>±500.00 mV</option><option value={1000}>±1000.00 mV</option>
+            </select>
+          </label>
+          <label>EEG PGA
+            <select value={gainIndex} disabled={isRunning} onChange={(event) => setGainIndex(Number(event.target.value))}>
+              <option value={4}>×1.00</option><option value={5}>×1.36</option><option value={6}>×1.70</option><option value={7}>×2.55</option><option value={8}>×3.40</option><option value={9}>×4.25</option><option value={10}>×5.67</option>
+            </select>
+          </label>
+          {!isRunning ? (
+            <button className="sim-primary" disabled={busy || !apiOnline || !deviceReady} onClick={() => perform("/api/acquisition/start", { gainIndex })}>
+              <Play size={14} fill="currentColor" />측정 시작
+            </button>
+          ) : (
+            <button className="sim-secondary" disabled={busy} onClick={() => perform("/api/acquisition/stop")}>
+              <CircleStop size={14} />측정 정지
+            </button>
+          )}
+        </div>
+      </div>
+      <WaveformCanvas
+        rowsRef={liveRowsRef}
+        visible={Array(8).fill(true)}
+        selected={7}
+        windowSeconds={5}
+        fixedScale={fixedScale}
+        renderDelayMs={renderDelayMs}
+        paused={displayPaused}
+      />
+      <div className="sim-eeg-live-meta">
+        <span><b>ErrP 입력</b> CH8 단독 · 1–10 Hz</span>
+        <span><b>CH8 최근 8초</b> {qualityLabel(calibrationWindow?.quality.state ?? "waiting")}</span>
+        <span><b>휴식 보정</b> {status?.errp.baselineReady ? `완료 · σ ${status.errp.baselineStdMv?.toFixed(4) ?? "—"} mV` : calibrationWindow?.ready ? "지금 가능" : `${calibrationWindow?.samples ?? 0}/${calibrationWindow?.requiredSamples ?? 1638} samples`}</span>
+        <span><b>최근 판정</b> {status?.errp.lastDecision ? `P(error) ${(status.errp.lastDecision.probability * 100).toFixed(1)}%` : "없음"}</span>
+      </div>
+    </article>
+  ), [
+    apiOnline,
+    busy,
+    calibrationWindow,
+    deviceReady,
+    displayPaused,
+    fixedScale,
+    fs,
+    gainIndex,
+    isRunning,
+    perform,
+    renderDelayMs,
+    status,
+  ]);
 
   return (
     <main className="app-shell">
@@ -682,48 +767,7 @@ export default function Home() {
           eegRunning={isRunning}
           apiOnline={apiOnline}
           errpStatus={status?.errp ?? null}
-          eegPanel={(
-            <article className="sim-card sim-eeg-live-card">
-              <div className="sim-card-head">
-                <div>
-                  <p>POLYG-I LIVE · ALL 8 DISPLAYED · ERRP = CH8 ONLY</p>
-                  <h3>시뮬레이션과 동시에 보는 실시간 EEG</h3>
-                </div>
-                <div className="sim-eeg-live-actions">
-                  <span className={`sim-live ${isRunning ? "" : "stopped"}`}><i />{isRunning ? `${fs.toFixed(1)} Hz` : "STOPPED"}</span>
-                  <label>공통 Y축
-                    <select value={fixedScale} onChange={(event) => setFixedScale(Number(event.target.value))}>
-                      <option value={0.1}>±0.10 mV</option><option value={0.25}>±0.25 mV</option><option value={0.5}>±0.50 mV</option><option value={1}>±1.00 mV</option><option value={2.5}>±2.50 mV</option><option value={5}>±5.00 mV</option><option value={10}>±10.00 mV</option><option value={25}>±25.00 mV</option><option value={50}>±50.00 mV</option><option value={100}>±100.00 mV</option><option value={250}>±250.00 mV</option><option value={500}>±500.00 mV</option><option value={1000}>±1000.00 mV</option>
-                    </select>
-                  </label>
-                  {!isRunning ? (
-                    <button className="sim-primary" disabled={busy || !apiOnline || !deviceReady} onClick={() => perform("/api/acquisition/start", { gainIndex })}>
-                      <Play size={14} fill="currentColor" />측정 시작
-                    </button>
-                  ) : (
-                    <button className="sim-secondary" disabled={busy} onClick={() => perform("/api/acquisition/stop")}>
-                      <CircleStop size={14} />측정 정지
-                    </button>
-                  )}
-                </div>
-              </div>
-              <WaveformCanvas
-                rows={rows}
-                visible={Array(8).fill(true)}
-                selected={7}
-                windowSeconds={5}
-                fixedScale={fixedScale}
-                renderDelayMs={renderDelayMs}
-                paused={displayPaused}
-              />
-              <div className="sim-eeg-live-meta">
-                <span><b>ErrP 입력</b> CH8 단독 · 1–10 Hz</span>
-                <span><b>CH8 상태</b> {qualityLabel(status?.quality[7]?.state ?? "waiting")}</span>
-                <span><b>휴식 보정</b> {status?.errp.baselineReady ? `완료 · σ ${status.errp.baselineStdMv?.toFixed(4) ?? "—"} mV` : "필요"}</span>
-                <span><b>최근 판정</b> {status?.errp.lastDecision ? `P(error) ${(status.errp.lastDecision.probability * 100).toFixed(1)}%` : "없음"}</span>
-              </div>
-            </article>
-          )}
+          eegPanel={simulationEegPanel}
         />
       ) : (
       <>
@@ -783,7 +827,7 @@ export default function Home() {
               </button>
             </div>
           </div>
-          <WaveformCanvas rows={rows} visible={visible} selected={selectedChannel} windowSeconds={windowSeconds} fixedScale={fixedScale} renderDelayMs={renderDelayMs} paused={displayPaused} />
+          <WaveformCanvas rowsRef={liveRowsRef} visible={visible} selected={selectedChannel} windowSeconds={windowSeconds} fixedScale={fixedScale} renderDelayMs={renderDelayMs} paused={displayPaused} />
           <div className="channel-controls" aria-label="채널 표시 설정">
             {visible.map((on, index) => (
               <div className={`channel-control ${selectedChannel === index ? "selected" : ""}`} key={index}>

@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -50,6 +51,19 @@ type ErrpStatus = {
   channels: number[];
   bandHz: [number, number];
   baselineStdMv: number | null;
+  calibrationWindow: {
+    seconds: number;
+    samples: number;
+    requiredSamples: number;
+    quality: {
+      state: "waiting" | "present" | "flat" | "saturated" | "unstable";
+      rmsMv: number;
+      peakToPeakMv: number;
+      clippingPercent: number;
+      dcOffsetMv: number;
+    };
+    ready: boolean;
+  };
   lastDecision: {
     isError: boolean;
     probability: number;
@@ -268,7 +282,7 @@ function PlacementMap({
   );
 }
 
-export default function SimulationLab({
+function SimulationLab({
   eegRunning,
   apiOnline,
   errpStatus,
@@ -282,19 +296,26 @@ export default function SimulationLab({
   const [status, setStatus] = useState<SimulationStatus | null>(null);
   const [engineError, setEngineError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [frameTick, setFrameTick] = useState(0);
   const [selectedId, setSelectedId] = useState<string | "basket" | null>(null);
   const [draft, setDraft] = useState<ObjectDraft | null>(null);
   const [signalSource, setSignalSource] = useState<SignalSource>("manual");
   const [localErrpReady, setLocalErrpReady] = useState(false);
   const [errpBusy, setErrpBusy] = useState(false);
+  const [errpError, setErrpError] = useState("");
   const decisionKey = useRef("");
+  const overviewImageRef = useRef<HTMLImageElement>(null);
+  const wristImageRef = useRef<HTMLImageElement>(null);
   const errpReady = Boolean(errpStatus?.baselineReady || localErrpReady);
+  const calibrationWindow = errpStatus?.calibrationWindow;
 
   const refreshStatus = useCallback(async () => {
     try {
       const next = await simulationRequest<SimulationStatus>("/api/simulation/status");
-      setStatus(next);
+      setStatus((current) => (
+        current && JSON.stringify(current) === JSON.stringify(next)
+          ? current
+          : next
+      ));
       setEngineError("");
       return next;
     } catch (error) {
@@ -305,7 +326,7 @@ export default function SimulationLab({
 
   useEffect(() => {
     const initial = window.setTimeout(refreshStatus, 0);
-    const timer = window.setInterval(refreshStatus, 240);
+    const timer = window.setInterval(refreshStatus, 400);
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(timer);
@@ -313,9 +334,19 @@ export default function SimulationLab({
   }, [refreshStatus]);
 
   useEffect(() => {
+    const updateFrames = () => {
+      const stamp = Date.now();
+      if (overviewImageRef.current) {
+        overviewImageRef.current.src = `${API_BASE}/api/simulation/frame?camera=overview&width=960&height=540&t=${stamp}`;
+      }
+      if (wristImageRef.current) {
+        wristImageRef.current.src = `${API_BASE}/api/simulation/frame?camera=wrist&width=640&height=360&t=${stamp}`;
+      }
+    };
+    updateFrames();
     const timer = window.setInterval(() => {
-      if (!document.hidden) setFrameTick((value) => value + 1);
-    }, status?.running ? 140 : 650);
+      if (!document.hidden) updateFrames();
+    }, status?.running ? 160 : 800);
     return () => window.clearInterval(timer);
   }, [status?.running]);
 
@@ -381,9 +412,12 @@ export default function SimulationLab({
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "ErrP 보정 실패");
       setLocalErrpReady(true);
+      setErrpError("");
       setEngineError("");
     } catch (error) {
-      setEngineError(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      setErrpError(message);
+      setEngineError(message);
     } finally {
       setErrpBusy(false);
     }
@@ -537,7 +571,8 @@ export default function SimulationLab({
             <div className="sim-frame-wrap overview">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={`${frameBase}?camera=overview&width=960&height=540&t=${frameTick}`}
+                ref={overviewImageRef}
+                src={`${frameBase}?camera=overview&width=960&height=540`}
                 alt="원본 로봇팔 STL과 물체 접촉을 렌더링한 MuJoCo 3D 장면"
               />
               <div className="sim-frame-hud">
@@ -556,7 +591,8 @@ export default function SimulationLab({
               <div className="sim-frame-wrap wrist">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={`${frameBase}?camera=wrist&width=640&height=360&t=${frameTick}`}
+                  ref={wristImageRef}
+                  src={`${frameBase}?camera=wrist&width=640&height=360`}
                   alt="실물과 동일한 위치에서 렌더링한 집게 손목 RGB 카메라"
                 />
                 <div className="sim-frame-hud">
@@ -620,8 +656,10 @@ export default function SimulationLab({
               <div className={`sim-eeg-box ${errpReady ? "ready" : ""}`}>
                 <div><span><Activity size={15} />PolyG-I</span><strong>{apiOnline && eegRunning ? "측정 중" : "준비 안 됨"}</strong></div>
                 <div><span><Zap size={15} />판정 입력</span><strong>CH8 단독 · 1–10 Hz</strong></div>
+                <div><span><Zap size={15} />최근 8초 품질</span><strong>{calibrationWindow?.quality.state ?? "waiting"} · clip {calibrationWindow?.quality.clippingPercent.toFixed(2) ?? "0.00"}%</strong></div>
                 <div><span><Zap size={15} />휴식 기준</span><strong>{errpReady ? "보정 완료" : "보정 필요"}</strong></div>
-                <button onClick={calibrateErrp} disabled={!apiOnline || !eegRunning || errpBusy}>{errpBusy ? "판정 중…" : "최근 8초로 ErrP 보정"}</button>
+                <button onClick={calibrateErrp} disabled={!apiOnline || !eegRunning || errpBusy || !calibrationWindow?.ready}>{errpBusy ? "판정 중…" : calibrationWindow?.ready ? "최근 8초로 ErrP 보정" : `깨끗한 보정창 대기 · ${calibrationWindow?.samples ?? 0}/${calibrationWindow?.requiredSamples ?? 1638}`}</button>
+                {errpError && <p className="sim-errp-error"><CircleAlert size={13} />{errpError}</p>}
                 {errpStatus?.lastDecision ? (
                   <div className={`sim-errp-decision ${errpStatus.lastDecision.isError ? "detected" : ""}`}>
                     <span>최근 P(error)</span>
@@ -702,3 +740,5 @@ export default function SimulationLab({
     </section>
   );
 }
+
+export default memo(SimulationLab);
