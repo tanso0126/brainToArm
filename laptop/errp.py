@@ -6,7 +6,7 @@ human's brain involuntarily fires an ErrP — a fronto-central negative deflecti
 training to push a mental button.
 
 Pipeline (given an epoch of EEG right after action onset):
-  1. band-pass 1-10 Hz (scipy) over all configured EEG channels
+  1. band-pass 1-10 Hz over the configured ErrP electrode (project map: CH8)
   2. baseline-correct against the pre-onset segment
   3. extract features (negative peak amplitude + latency, peak-to-peak, mean)
   4a. baseline backend: threshold the negative-peak amplitude (zero training)
@@ -19,7 +19,6 @@ import math
 import config
 
 try:
-    import numpy as np
     from scipy.signal import butter, filtfilt
     _HAVE_SP = True
 except ImportError:
@@ -91,6 +90,10 @@ class ErrPDetector:
             "window_s": config.ERRP_WINDOW_S,
         }
 
+    @property
+    def baseline_std(self):
+        return self._baseline_std
+
     def _validate_model_metadata(self, metadata, path):
         expected = self._model_metadata()
         mismatches = [
@@ -125,9 +128,8 @@ class ErrPDetector:
     def _reference(self, window):
         """Common Average Reference: subtract, at each timepoint, the mean across
         ALL electrodes. Cancels noise shared by every channel (mains hum, motion,
-        reference drift) — standard, near-mandatory on real EEG. Cheap sensors
-        need it most. It is deliberately disabled for the configured all-channel
-        ErrP average because averaging every CAR channel would be exactly zero."""
+        reference drift). It is deliberately disabled for the current CH8-only
+        project mapping because the single decision channel must be preserved."""
         if not window:
             return window
         if not self.use_car:
@@ -199,9 +201,18 @@ class ErrPDetector:
             if hasattr(self.model, "predict_proba"):
                 return float(self.model.predict_proba([f])[0][1])
             return float(self.model.predict([f])[0])
-        return self._baseline_prob(window)
+        return self.diagnose(window)["probability"]
 
-    def _baseline_prob(self, window):
+    def diagnose(self, window):
+        """Return the baseline decision plus values needed to audit it live."""
+        if self.backend == "model" and self.model is not None:
+            probability = self.p_error(window)
+            return {
+                "probability": probability,
+                "negativeDeflection": None,
+                "baselineStd": self._baseline_std,
+                "zScore": None,
+            }
         # ErrP = a sustained NEGATIVE deflection ~250-450ms after
         # the action. Score the strongest sustained dip, expressed as a Z-SCORE
         # against the person's resting noise (from update_baseline). Z-scoring
@@ -209,21 +220,23 @@ class ErrPDetector:
         # dip reads ~0.5, ~4-sigma ~0.9. Falls back to a fixed uV scale only if
         # no baseline was captured.
         chans = self._preprocess(window)
-        # Spatially average all configured channels first, then search for the
-        # dip. Independent per-channel noise cancels. With all eight channels the
-        # configuration disables CAR because the average of every CAR channel is
-        # identically zero; a trained multichannel model remains the deployment
-        # target after participant-specific ErrP collection.
+        # Average the configured channels, then search for the dip. The current
+        # project mapping contains CH8 only, so this is exactly the CH8 waveform.
         mean_sig = self._mean_signal(chans)
         neg = -self._deflection(mean_sig)             # positive when deflected down
         std = self._baseline_std
         if std and std > 1e-6:
-            # Baseline std is measured on the same spatially averaged signal.
             z = neg / std
-            # center at 3.3 sigma: real ErrP is many-sigma (saturates ~1.0), so
-            # this keeps full sensitivity while rejecting noise-search false alarms.
-            return _sigmoid(1.2 * (z - 3.3))
-        return _sigmoid(0.25 * (neg - 12.0))   # uncalibrated fallback
+            probability = _sigmoid(1.2 * (z - 3.3))
+        else:
+            z = None
+            probability = _sigmoid(0.25 * (neg - 12.0))
+        return {
+            "probability": probability,
+            "negativeDeflection": neg,
+            "baselineStd": std,
+            "zScore": z,
+        }
 
     @staticmethod
     def _mean_signal(chans):

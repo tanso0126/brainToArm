@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event, RLock, Thread, current_thread
 from typing import Iterable
@@ -225,6 +226,9 @@ class MuJoCoStudio:
         self._joint_by_id: dict[str, int] = {}
         self._floor_x_by_elbow: dict[int, float] = {}
         self._held_offsets_local: dict[str, np.ndarray] = {}
+        self._renderers: dict[tuple[int, int], mujoco.Renderer] = {}
+        self._render_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="mujoco-studio-render")
         self._rebuild()
         self._add_event("3D MuJoCo 작업실이 준비되었습니다.", "info")
 
@@ -234,6 +238,17 @@ class MuJoCoStudio:
         worker = self._worker
         if worker and worker.is_alive() and worker is not current_thread():
             worker.join(timeout=2)
+        with self._lock:
+            self._close_renderers()
+        self._render_executor.shutdown(wait=True, cancel_futures=True)
+
+    def _close_renderers(self):
+        def close_all():
+            for renderer in self._renderers.values():
+                renderer.close()
+            self._renderers.clear()
+
+        self._render_executor.submit(close_all).result(timeout=5)
 
     def _add_event(self, text: str, kind: str = "info"):
         self._event_counter += 1
@@ -246,6 +261,7 @@ class MuJoCoStudio:
         del self._events[80:]
 
     def _rebuild(self):
+        self._close_renderers()
         xml = build_studio_mjcf(
             self._objects, basket_x=self._basket_x, basket_y=self._basket_y,
             spec=self._spec)
@@ -375,13 +391,23 @@ class MuJoCoStudio:
             self._pose = pose.copy()
         return True
 
+    def _render_on_render_thread(
+        self, camera: str, width: int, height: int,
+    ) -> np.ndarray:
+        key = (width, height)
+        renderer = self._renderers.get(key)
+        if renderer is None:
+            renderer = mujoco.Renderer(
+                self._model, height=height, width=width)
+            self._renderers[key] = renderer
+        renderer.update_scene(self._data, camera=camera)
+        return renderer.render().copy()
+
     def _render_rgb(self, camera: str, width: int, height: int) -> np.ndarray:
-        renderer = mujoco.Renderer(self._model, height=height, width=width)
-        try:
-            renderer.update_scene(self._data, camera=camera)
-            return renderer.render().copy()
-        finally:
-            renderer.close()
+        return self._render_executor.submit(
+            self._render_on_render_thread,
+            camera, width, height,
+        ).result(timeout=5)
 
     def render_jpeg(self, camera="overview", width=960, height=540) -> bytes:
         if camera not in {"overview", "wrist"}:
@@ -655,7 +681,7 @@ class MuJoCoStudio:
                 self._phase = "target"
                 self._add_event(
                     f"후보 제시: {target.label} · ErrP 판정 창", "move")
-                if self._wait_for_veto(1.25):
+                if self._wait_for_veto(1.6):
                     self._return_item(target)
                     continue
 

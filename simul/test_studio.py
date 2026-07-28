@@ -51,6 +51,8 @@ class MuJoCoStudioTests(unittest.TestCase):
         self.assertEqual(self.studio.status()["servoDeg"][0], 90.0)
         self.assertGreater(len(self.studio.render_jpeg("overview", 640, 360)), 1000)
         self.assertGreater(len(self.studio.render_jpeg("wrist", 320, 180)), 1000)
+        self.studio.render_jpeg("overview", 640, 360)
+        self.assertEqual(len(self.studio._renderers), 2)
 
     def test_scene_edit_is_bounded_to_the_reachable_annulus(self):
         object_id = self.studio.status()["objects"][0]["id"]

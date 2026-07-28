@@ -387,16 +387,35 @@ class EEGDashboardService:
             if not self._running:
                 raise RuntimeError("ErrP 휴식 보정 전에 EEG 측정을 시작하세요")
             now = time.monotonic()
-            window = [item[4] for item in self._rows if item[1] >= now - seconds]
+            recent = [item for item in self._rows if item[1] >= now - seconds]
+            window = [item[4] for item in recent]
         required = int(seconds * config.EEG_FS * config.EEG_MIN_EPOCH_FRACTION)
         if len(window) < required:
             raise RuntimeError(
                 f"휴식 데이터가 부족합니다 ({len(window)}/{required} samples). "
                 f"눈을 편하게 두고 {seconds:.0f}초 후 다시 누르세요")
+        for channel in config.ERRP_CHANNELS:
+            quality = analyze_signal_quality(
+                [item[4][channel] for item in recent],
+                [item[2][channel] for item in recent],
+                [item[3][channel] for item in recent],
+            )
+            if quality["state"] != "present":
+                raise RuntimeError(
+                    f"ErrP CH{channel + 1} 신호 상태가 {quality['state']}입니다. "
+                    "전극 접촉/포화 여부를 해결한 뒤 다시 보정하세요")
         self._errp_detector.update_baseline(window)
         with self._lock:
             self._errp_baseline_ready = True
-        return {"ready": True, "samples": len(window), "seconds": seconds}
+        return {
+            "ready": True,
+            "samples": len(window),
+            "seconds": seconds,
+            "channels": [
+                channel + 1 for channel in config.ERRP_CHANNELS],
+            "baselineStdMv": round(
+                float(self._errp_detector.baseline_std or 0.0), 6),
+        }
 
     def check_errp(self, marker="SIM_DECISION"):
         """Open one onset-locked decision window for the simulator.
@@ -430,13 +449,31 @@ class EEGDashboardService:
             if len(epoch) < required:
                 raise RuntimeError(
                     f"ErrP epoch samples 부족 ({len(epoch)}/{required}); 판정을 적용하지 않습니다")
-            probability = float(self._errp_detector.p_error(epoch))
+            for channel in config.ERRP_CHANNELS:
+                values = [row[channel] for row in epoch]
+                if max(values) - min(values) <= abs(
+                        ADC_VOLTS_PER_COUNT * 2 * 1000.0) * 2:
+                    raise RuntimeError(
+                        f"ErrP CH{channel + 1} epoch가 평탄하여 판정을 적용하지 않습니다")
+            diagnostics = self._errp_detector.diagnose(epoch)
+            probability = float(diagnostics["probability"])
             result = {
                 "isError": probability >= config.ERRP_THRESHOLD,
                 "probability": round(probability, 4),
                 "threshold": config.ERRP_THRESHOLD,
                 "samples": len(epoch),
                 "marker": str(marker or "SIM_DECISION"),
+                "channels": [channel + 1 for channel in config.ERRP_CHANNELS],
+                "bandHz": list(config.ERRP_BAND),
+                "negativeDeflectionMv": (
+                    round(float(diagnostics["negativeDeflection"]), 6)
+                    if diagnostics["negativeDeflection"] is not None else None),
+                "baselineStdMv": (
+                    round(float(diagnostics["baselineStd"]), 6)
+                    if diagnostics["baselineStd"] is not None else None),
+                "zScore": (
+                    round(float(diagnostics["zScore"]), 3)
+                    if diagnostics["zScore"] is not None else None),
             }
             with self._lock:
                 self._errp_last = result
@@ -548,6 +585,13 @@ class EEGDashboardService:
                     "backend": self._errp_detector.backend,
                     "threshold": config.ERRP_THRESHOLD,
                     "windowSeconds": config.ERRP_WINDOW_S,
+                    "baselineSeconds": config.ERRP_BASELINE_S,
+                    "channels": [
+                        channel + 1 for channel in config.ERRP_CHANNELS],
+                    "bandHz": list(config.ERRP_BAND),
+                    "baselineStdMv": (
+                        round(float(self._errp_detector.baseline_std), 6)
+                        if self._errp_detector.baseline_std is not None else None),
                     "lastDecision": self._errp_last,
                 },
                 "quality": qualities,
@@ -694,6 +738,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 self.wfile.write(body)
                 return
             self._json({"error": "API 경로를 찾을 수 없습니다"}, HTTPStatus.NOT_FOUND)
+        except (BrokenPipeError, ConnectionResetError):
+            return
         except (ValueError, TypeError) as exc:
             self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
         except Exception as exc:

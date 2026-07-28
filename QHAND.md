@@ -153,11 +153,14 @@ Hardware path:
 Preparation:
 
 1. Connect PolyG-I and run the one-command launcher.
-2. Open **EEG 실시간 모니터** and press **측정 시작**.
-3. Rest for at least eight seconds.
-4. Return to **시뮬레이션 작업실** and choose **PolyG-I**.
-5. Press **최근 8초로 ErrP 보정**.
-6. Start the 3D task.
+2. Stay in **시뮬레이션 작업실**; its embedded EEG card now shows all eight
+   live channels beside the 3D scene.
+3. Press **측정 시작** in that card.
+4. Verify CH8 says `신호 있음`, remain still and relaxed for eight seconds.
+5. Choose **PolyG-I** and press **최근 8초로 ErrP 보정**.
+6. Start the 3D task and look at the selected object/robot action. Do not try to
+   manufacture a generic blink or button-press signal; an ErrP trial is the
+   time-locked response to perceiving the shown decision as wrong.
 
 At `SIM_TARGET_PRESENTED` and `SIM_BASKET_DROP`, the API evaluates:
 
@@ -168,6 +171,28 @@ At `SIM_TARGET_PRESENTED` and `SIM_BASKET_DROP`, the API evaluates:
 At least 80% of the expected 256 Hz samples are required. A missing or short
 epoch fails closed and does not become a rejection. If CSV recording is active,
 the onset marker is written into the sample stream.
+
+All eight channels are acquired and displayed. **ErrP uses CH8 only**, according
+to the project's electrode mapping. Cognitive-load TAR remains separate:
+theta CH1–CH4 divided by alpha CH8.
+
+The default `baseline` backend is not a trained ErrP classifier. The eight-second
+button only measures CH8 resting noise σ. For each decision it:
+
+1. filters CH8 to 1–10 Hz;
+2. subtracts the 0.2-second pre-onset mean;
+3. searches the first 0.6 seconds after onset for the strongest sustained
+   150 ms negative deflection;
+4. divides that magnitude by resting σ;
+5. maps the z-score to probability; the current 50% threshold corresponds to
+   approximately z=3.3.
+
+The embedded panel shows the CH8 quality, resting σ, last probability, threshold,
+and z-score. Flat/saturated CH8, insufficient samples, or an uncalibrated session
+now produces an explicit error instead of a silent non-detection. Reliable
+participant use still requires collecting labeled correct/error trials and
+training the `model` backend; the baseline heuristic is a diagnostic/demo
+detector and must not be reported as validated subject accuracy.
 
 ## 8. Local endpoints
 

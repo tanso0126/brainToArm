@@ -503,12 +503,12 @@ brainToArm/
   ctypes function names follow LAXTHA's documented API pattern; confirm them
   against the LXSMWD12 developer manual if that compatibility path is needed.
 
-- **`errp.py`** — `ErrPDetector`: the brain-signal classifier. Given all eight
-  EEG channels around an action onset, it returns `p_error` ∈ [0,1]
+- **`errp.py`** — `ErrPDetector`: the brain-signal classifier. It acquires and
+  displays all eight EEG inputs, but the agreed electrode map feeds **CH8 only**
+  into ErrP. Given CH8 around an action onset, it returns `p_error` ∈ [0,1]
   (probability the human judged
   the action wrong). Pipeline: **band-pass 1–10 Hz** → baseline-correct →
-  spatially average the configured eight channels → find the
-  strongest **sustained negative deflection** in the post-onset region (a sliding
+  find the strongest **sustained negative deflection** in the post-onset region (a sliding
   ~150 ms window over roughly the first 0.6 s, robust to person-to-person latency
   differences). Two backends:
   - `"baseline"` — zero-training heuristic; scores the deflection as a **z-score
@@ -781,7 +781,7 @@ python3 laptop/eeg_detect.py --seconds 5
 python3 laptop/eeg_bridge.py
 ```
 Both commands must show live 8-channel data. `EEG_SOURCE="hid"` is already set
-for this unit. ErrP uses CH1–CH8. Continuous load uses theta from CH1–CH4 and
+for this unit. ErrP uses CH8 only. Continuous load uses theta from CH1–CH4 and
 alpha from CH8, so verify those physical electrode assignments, signal response,
 and the sustained rate with the headset mounted, then set
 `EEG_CONFIG_VERIFIED=True`. At trial start remain still during the printed
@@ -885,7 +885,7 @@ Grouped constants (see the file for full comments):
 ## 12. Testing and verification
 
 - **`python3 laptop/test_pipeline.py`** — must pass: PolyG-I command/decoder,
-  LXSDF compatibility, IK, all-channel ErrP, TAR/autonomy direction, and full
+  LXSDF compatibility, IK, CH8 ErrP, TAR/autonomy direction, and full
   mock pick-and-place tests.
 - **`python3 laptop/eeg_detect.py --seconds 5`** — physical HID start, live
   8-channel range/cadence report, and deterministic stop.

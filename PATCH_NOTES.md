@@ -2449,3 +2449,47 @@ violated the simulation fidelity requirement.
 - Three consecutive accelerated physics runs completed delivery, post-completion
   rejection, physical tray recovery, return within 7 mm, rejection-memory
   update, next-object selection, and second delivery within 7 mm of the tray.
+
+## Patch 62 — simultaneous EEG view and auditable CH8 ErrP
+
+### Correction
+
+The project specification assigns instantaneous ErrP to EEG CH8, but the
+implementation was averaging CH1–CH8. That diluted a channel-specific response
+and made failed decisions impossible to diagnose from the simulation screen.
+
+### Changes
+
+- Changed `ERRP_CHANNELS` to zero-based `[7]` (physical/UI CH8) and updated
+  validation, mock generation, tests, and documentation. All eight channels are
+  still acquired and displayed; TAR remains theta CH1–CH4 / alpha CH8.
+- Embedded the smooth fixed-scale eight-channel waveform directly below the
+  simulation camera panels, with acquisition start/stop, sampling status, CH8
+  quality, resting-noise σ, and last ErrP probability visible without changing
+  tabs.
+- Added live ErrP diagnostics: channel/band, sustained negative deflection,
+  baseline σ, z-score, probability, threshold, sample count, and decision marker.
+- CH8 must be signal-present during rest calibration; flat/saturated calibration
+  is rejected. A flat decision epoch also fails closed with an explicit reason.
+- Synchronized UI calibration state with the server so a reload no longer hides
+  an existing baseline, and increased the target decision hold from 1.25 to
+  1.6 seconds to leave margin for the 0.8-second epoch plus UI polling.
+- Reused MuJoCo renderers by resolution instead of recompiling Metal variants
+  for every JPEG frame, and treated cancelled image requests as normal client
+  disconnects. This removes the observed AGX variant-limit/500-frame failure
+  during long simultaneous camera and EEG viewing.
+
+### Current detection principle
+
+The default backend is a zero-training heuristic, not a participant-validated
+classifier: CH8 is filtered 1–10 Hz, corrected by the 0.2-second pre-onset
+baseline, searched for the strongest 150 ms negative mean within 0–0.6 seconds,
+and divided by the person's eight-second resting noise. Probability 0.5 is
+approximately z=3.3. Production accuracy requires labeled correct/error trials
+and the trained model backend.
+
+### Verification
+
+- Dashboard lint, production build, and rendered-shell tests pass.
+- The full pipeline passes with a synthetic CH8-only error epoch separated from
+  a clean epoch; configuration validation rejects any ErrP map other than CH8.

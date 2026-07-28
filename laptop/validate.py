@@ -89,8 +89,8 @@ def validate():
             errs.append(f"ERRP_CHANNELS ch {ch} >= EEG_CHANNELS {config.EEG_CHANNELS}")
     if len(set(config.EEG_CHANNEL_MAP)) != len(config.EEG_CHANNEL_MAP):
         errs.append("EEG_CHANNEL_MAP contains duplicate packet slots")
-    if config.ERRP_CHANNELS != list(range(config.EEG_CHANNELS)):
-        errs.append("ErrP requirement uses all eight EEG channels in acquisition order")
+    if config.ERRP_CHANNELS != [7]:
+        errs.append("ErrP requirement uses EEG CH8 only (zero-based channel 7)")
     if not isinstance(config.ERRP_USE_CAR, bool):
         errs.append("ERRP_USE_CAR must be True or False")
 

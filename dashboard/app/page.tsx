@@ -85,6 +85,28 @@ type DashboardStatus = {
     rows: number;
     durationSeconds: number;
   };
+  errp: {
+    baselineReady: boolean;
+    backend: "baseline" | "model";
+    threshold: number;
+    windowSeconds: number;
+    baselineSeconds: number;
+    channels: number[];
+    bandHz: [number, number];
+    baselineStdMv: number | null;
+    lastDecision: {
+      isError: boolean;
+      probability: number;
+      threshold: number;
+      samples: number;
+      marker: string;
+      channels: number[];
+      bandHz: [number, number];
+      negativeDeflectionMv: number | null;
+      baselineStdMv: number | null;
+      zScore: number | null;
+    } | null;
+  };
   quality: Quality[];
 };
 
@@ -656,7 +678,53 @@ export default function Home() {
       )}
 
       {activeWorkspace === "simulation" ? (
-        <SimulationLab eegRunning={isRunning} apiOnline={apiOnline} />
+        <SimulationLab
+          eegRunning={isRunning}
+          apiOnline={apiOnline}
+          errpStatus={status?.errp ?? null}
+          eegPanel={(
+            <article className="sim-card sim-eeg-live-card">
+              <div className="sim-card-head">
+                <div>
+                  <p>POLYG-I LIVE · ALL 8 DISPLAYED · ERRP = CH8 ONLY</p>
+                  <h3>시뮬레이션과 동시에 보는 실시간 EEG</h3>
+                </div>
+                <div className="sim-eeg-live-actions">
+                  <span className={`sim-live ${isRunning ? "" : "stopped"}`}><i />{isRunning ? `${fs.toFixed(1)} Hz` : "STOPPED"}</span>
+                  <label>공통 Y축
+                    <select value={fixedScale} onChange={(event) => setFixedScale(Number(event.target.value))}>
+                      <option value={0.1}>±0.10 mV</option><option value={0.25}>±0.25 mV</option><option value={0.5}>±0.50 mV</option><option value={1}>±1.00 mV</option><option value={2.5}>±2.50 mV</option><option value={5}>±5.00 mV</option><option value={10}>±10.00 mV</option><option value={25}>±25.00 mV</option><option value={50}>±50.00 mV</option><option value={100}>±100.00 mV</option><option value={250}>±250.00 mV</option><option value={500}>±500.00 mV</option><option value={1000}>±1000.00 mV</option>
+                    </select>
+                  </label>
+                  {!isRunning ? (
+                    <button className="sim-primary" disabled={busy || !apiOnline || !deviceReady} onClick={() => perform("/api/acquisition/start", { gainIndex })}>
+                      <Play size={14} fill="currentColor" />측정 시작
+                    </button>
+                  ) : (
+                    <button className="sim-secondary" disabled={busy} onClick={() => perform("/api/acquisition/stop")}>
+                      <CircleStop size={14} />측정 정지
+                    </button>
+                  )}
+                </div>
+              </div>
+              <WaveformCanvas
+                rows={rows}
+                visible={Array(8).fill(true)}
+                selected={7}
+                windowSeconds={5}
+                fixedScale={fixedScale}
+                renderDelayMs={renderDelayMs}
+                paused={displayPaused}
+              />
+              <div className="sim-eeg-live-meta">
+                <span><b>ErrP 입력</b> CH8 단독 · 1–10 Hz</span>
+                <span><b>CH8 상태</b> {qualityLabel(status?.quality[7]?.state ?? "waiting")}</span>
+                <span><b>휴식 보정</b> {status?.errp.baselineReady ? `완료 · σ ${status.errp.baselineStdMv?.toFixed(4) ?? "—"} mV` : "필요"}</span>
+                <span><b>최근 판정</b> {status?.errp.lastDecision ? `P(error) ${(status.errp.lastDecision.probability * 100).toFixed(1)}%` : "없음"}</span>
+              </div>
+            </article>
+          )}
+        />
       ) : (
       <>
       <section className="metric-grid" aria-label="측정 요약">

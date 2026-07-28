@@ -458,14 +458,26 @@ def test_cognitive_load_and_autonomy():
 
 def test_errp():
     print("[errp] separates error vs clean epoch")
-    check(config.ERRP_CHANNELS == list(range(8)),
-          "ErrP consumes all eight acquired EEG channels")
+    check(config.ERRP_CHANNELS == [7],
+          "ErrP consumes only project-mapped EEG CH8")
     det = ErrPDetector(backend="baseline")
     det.update_baseline(_synth_epoch(config.EEG_FS, error=False))
     p_ok = det.p_error(_synth_epoch(config.EEG_FS, error=False))
-    p_err = det.p_error(_synth_epoch(config.EEG_FS, error=True))
+    error_epoch = _synth_epoch(config.EEG_FS, error=True)
+    diagnostics = det.diagnose(error_epoch)
+    p_err = diagnostics["probability"]
     print(f"       P(ok)={p_ok:.2f}  P(err)={p_err:.2f}")
     check(p_err > p_ok, "error epoch scores higher than clean")
+    check(diagnostics["zScore"] is not None
+          and diagnostics["zScore"] > 3.3,
+          "CH8 sustained negative deflection crosses the audited z threshold")
+    wrong_channel = _synth_epoch(config.EEG_FS, error=False)
+    for sample, row in enumerate(wrong_channel):
+        t = sample / config.EEG_FS
+        if 0.25 < t < 0.5:
+            row[0] -= 40
+    check(det.p_error(wrong_channel) < config.ERRP_THRESHOLD,
+          "a CH1-only deflection cannot masquerade as the specified CH8 ErrP")
 
 
 def test_errp_model_metadata():

@@ -27,7 +27,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import {
   useCallback,
   useEffect,
@@ -40,6 +40,29 @@ const API_BASE = "http://127.0.0.1:8765";
 
 type Shape = "box" | "cylinder" | "sphere";
 type SignalSource = "manual" | "mock" | "polyg";
+
+type ErrpStatus = {
+  baselineReady: boolean;
+  backend: "baseline" | "model";
+  threshold: number;
+  windowSeconds: number;
+  baselineSeconds: number;
+  channels: number[];
+  bandHz: [number, number];
+  baselineStdMv: number | null;
+  lastDecision: {
+    isError: boolean;
+    probability: number;
+    threshold: number;
+    samples: number;
+    marker: string;
+    channels: number[];
+    bandHz: [number, number];
+    negativeDeflectionMv: number | null;
+    baselineStdMv: number | null;
+    zScore: number | null;
+  } | null;
+};
 
 type SimObject = {
   id: string;
@@ -248,9 +271,13 @@ function PlacementMap({
 export default function SimulationLab({
   eegRunning,
   apiOnline,
+  errpStatus,
+  eegPanel,
 }: {
   eegRunning: boolean;
   apiOnline: boolean;
+  errpStatus: ErrpStatus | null;
+  eegPanel: ReactNode;
 }) {
   const [status, setStatus] = useState<SimulationStatus | null>(null);
   const [engineError, setEngineError] = useState("");
@@ -259,9 +286,10 @@ export default function SimulationLab({
   const [selectedId, setSelectedId] = useState<string | "basket" | null>(null);
   const [draft, setDraft] = useState<ObjectDraft | null>(null);
   const [signalSource, setSignalSource] = useState<SignalSource>("manual");
-  const [errpReady, setErrpReady] = useState(false);
+  const [localErrpReady, setLocalErrpReady] = useState(false);
   const [errpBusy, setErrpBusy] = useState(false);
   const decisionKey = useRef("");
+  const errpReady = Boolean(errpStatus?.baselineReady || localErrpReady);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -352,7 +380,7 @@ export default function SimulationLab({
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "ErrP 보정 실패");
-      setErrpReady(true);
+      setLocalErrpReady(true);
       setEngineError("");
     } catch (error) {
       setEngineError(error instanceof Error ? error.message : String(error));
@@ -552,6 +580,8 @@ export default function SimulationLab({
             </article>
           </div>
 
+          {eegPanel}
+
           <article className="sim-card sim-placement-card">
             <div className="sim-card-head">
               <div><p>SCENE AUTHORING · NOT THE SIMULATOR</p><h3>물체와 목표 위치 배치</h3></div>
@@ -589,9 +619,18 @@ export default function SimulationLab({
             {signalSource === "polyg" && (
               <div className={`sim-eeg-box ${errpReady ? "ready" : ""}`}>
                 <div><span><Activity size={15} />PolyG-I</span><strong>{apiOnline && eegRunning ? "측정 중" : "준비 안 됨"}</strong></div>
+                <div><span><Zap size={15} />판정 입력</span><strong>CH8 단독 · 1–10 Hz</strong></div>
                 <div><span><Zap size={15} />휴식 기준</span><strong>{errpReady ? "보정 완료" : "보정 필요"}</strong></div>
                 <button onClick={calibrateErrp} disabled={!apiOnline || !eegRunning || errpBusy}>{errpBusy ? "판정 중…" : "최근 8초로 ErrP 보정"}</button>
-                <small>후보 제시와 트레이 도착 순간에 0.2초 이전 + 0.8초 이후 epoch를 판정합니다.</small>
+                {errpStatus?.lastDecision ? (
+                  <div className={`sim-errp-decision ${errpStatus.lastDecision.isError ? "detected" : ""}`}>
+                    <span>최근 P(error)</span>
+                    <strong>{(errpStatus.lastDecision.probability * 100).toFixed(1)}% / 기준 {(errpStatus.lastDecision.threshold * 100).toFixed(0)}%</strong>
+                    <span>CH8 z-score</span>
+                    <strong>{errpStatus.lastDecision.zScore?.toFixed(2) ?? "모델 판정"}</strong>
+                  </div>
+                ) : null}
+                <small>후보 제시/트레이 도착을 onset으로 삼아 직전 0.2초 + 이후 0.8초를 자릅니다. 이후 0–0.6초 구간에서 가장 강한 150 ms 음의 편위를 찾습니다.</small>
               </div>
             )}
           </article>

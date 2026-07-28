@@ -206,8 +206,8 @@ EEG_TCP_PORT = 9000
 # ======================================================================
 ERRP_BACKEND = "baseline"  # "baseline" (zero-training heuristic) | "model" (trained)
 ERRP_MODEL_PATH = "errp_model.pkl"
-ERRP_CHANNELS = list(range(8))    # all acquired EEG channels, zero-based CH1..CH8
-ERRP_USE_CAR = False        # all-channel averaging after CAR would cancel identically
+ERRP_CHANNELS = [7]         # project electrode mapping: ErrP uses CH8 only (zero-based 7)
+ERRP_USE_CAR = False        # preserve the single CH8 waveform; CAR needs other electrodes
 ERRP_WINDOW_S = 0.8        # epoch length after action onset
 ERRP_BASELINE_S = 0.2      # pre-onset baseline for correction
 ERRP_BAND = (1.0, 10.0)    # ErrP bandpass (Hz)
