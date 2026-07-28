@@ -3053,3 +3053,35 @@ and the trained model backend.
   the physically impossible transform.
 - Added a regression using the measured 155–180° data that must fail the new
   boundary-quality gate despite its small residual.
+
+## Patch 80 — use sonar only as the missing target-depth axis
+
+### Corrected control architecture
+
+- Removed the tabletop-plane calibration from the grasp path. Existing vision
+  already locks an object and computes safe motor-2/3/4 pointing/advance steps;
+  the missing observation was only distance along that bearing.
+- Physically centred the blue test object near the camera/sonar axis at motor 4
+  ≈174°. A first existing visual step advanced 4.79 mm while stable sonar range
+  decreased from 159 to 156 mm and the same object remained locked. This
+  confirms the required closed-loop sign without any floor coordinate.
+
+### Changes
+
+- Added a dedicated vision-bearing + ultrasonic-depth controller. Every step
+  reacquires the same object, requires a stable echo, plans one bounded visual
+  2/3/4 move, checks the full physical swept trajectory, then requires range to
+  keep decreasing.
+- Range growth over 6 mm, less than 1.5 mm net progress across two steps,
+  unstable echo, lost/shrinking target, lateral misalignment, stale camera or a
+  collision report all stop before another command.
+- The final close needs three facts simultaneously: conservative 78 mm sonar
+  standoff, object inside the coloured open-jaw corridor, and object base within
+  100 px of the finger row. Sonar alone can never close the gripper.
+- Added dry-run mode and a live annotated evidence frame. Physical movement and
+  gripper close remain separate explicit flags.
+
+### Verification
+
+- Added policy tests for the measured 159→156 mm approach, near standoff,
+  excessive range increase and two-step depth stall.
