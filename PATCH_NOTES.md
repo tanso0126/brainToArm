@@ -3164,3 +3164,33 @@ and the trained model backend.
   `608.7,469.6` px after) while the marker opening changed from 289.1 to
   84.9 px. This is direct visual evidence that the closed gripper retained the
   object through the lift rather than leaving it on the table.
+
+## Patch 84 — make measured sonar and fingertip clearance the only approach stops
+
+### Calibration
+
+- With the gripper open and the object inserted as deeply as physically
+  possible, 180 consecutive ultrasonic requests were valid. The dominant
+  33–40 mm reflection cluster had a 36 mm median and 1 mm MAD. A secondary
+  48–50 mm reflector was present, so the densest-cluster estimator remains
+  necessary instead of taking the unfiltered mean.
+- The operational threshold is the measured deepest range plus the requested
+  10 mm margin: `36 + 10 = 46 mm`.
+
+### Changes
+
+- The only normal approach stops are now stable sonar distance at or below
+  46 mm, or modeled physical fingertip-to-table clearance at or below 10 mm.
+  Image jaw entry, range plateaus, range trend and object scale no longer end a
+  valid approach.
+- The camera continues locking and steering toward the same object. It is used
+  after a sonar stop only to authorize closing; it cannot stop translation.
+- Removed the ineffective 5 mm final command. Approach commands are 15 mm in
+  the far image band and 10 mm everywhere else, with autonomous re-observation
+  between moves.
+- Added an explicit swept-trajectory fingertip clearance calculation. A move
+  whose interpolated path would enter the 10 mm floor band stops before any
+  serial command is sent.
+- Sensor loss, target loss, stale camera, configured joint limits, and
+  non-floor body collision remain fail-closed hardware faults rather than
+  normal approach-completion conditions.

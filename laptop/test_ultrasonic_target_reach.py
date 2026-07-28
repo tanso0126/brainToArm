@@ -2,70 +2,41 @@ import unittest
 
 from ultrasonic_target_reach import (
     adaptive_advance_mm,
-    fused_progress_decision,
-    range_progress_decision,
-    update_range_progress,
+    approach_stop_decision,
+    fingertip_floor_clearance_mm,
+    transition_fingertip_floor_clearance_mm,
 )
 
 
-class RangeProgressTests(unittest.TestCase):
-    def test_monotonic_approach_continues(self):
+class ApproachStopTests(unittest.TestCase):
+    def test_only_two_normal_stop_conditions(self):
         self.assertEqual(
-            range_progress_decision([159.0, 156.0]).action, "continue")
+            approach_stop_decision(46.1, 10.1).action, "continue")
+        self.assertEqual(
+            approach_stop_decision(46.0, 40.0).action, "sonar")
+        self.assertEqual(
+            approach_stop_decision(100.0, 10.0).action, "floor")
 
-    def test_near_standoff_wins(self):
-        decision = range_progress_decision([90.0, 77.0])
-        self.assertEqual(decision.action, "near")
+    def test_floor_stop_has_priority_when_both_apply(self):
+        self.assertEqual(
+            approach_stop_decision(40.0, 8.0).action, "floor")
 
-    def test_large_range_increase_stops(self):
-        decision = range_progress_decision([130.0, 139.0])
-        self.assertEqual(decision.action, "stop")
-        self.assertIn("increased", decision.reason)
-
-    def test_long_window_without_depth_progress_stops(self):
-        decision = range_progress_decision(
-            [130.0, 129.7, 129.0, 129.5, 129.0])
-        self.assertEqual(decision.action, "stop")
-        self.assertIn("too small", decision.reason)
-
-    def test_local_jitter_does_not_override_good_long_trend(self):
-        decision = range_progress_decision(
-            [152.0, 148.8, 141.2, 144.2, 142.0])
-        self.assertEqual(decision.action, "continue")
-
-    def test_aim_only_rotation_resets_range_baseline(self):
-        history, decision = update_range_progress(
-            [142.0], 151.8, previous_was_approach=False)
-        self.assertEqual(history, [151.8])
-        self.assertEqual(decision.action, "continue")
-
-    def test_adaptive_step_is_servo_scale_until_final_band(self):
+    def test_adaptive_step_never_falls_below_ten_mm(self):
         self.assertEqual(adaptive_advance_mm(220), 15.0)
         self.assertEqual(adaptive_advance_mm(150), 10.0)
-        self.assertEqual(adaptive_advance_mm(110), 5.0)
+        self.assertEqual(adaptive_advance_mm(110), 10.0)
 
-    def test_visual_progress_overrides_ambiguous_sonar_plateau(self):
-        decision = fused_progress_decision(
-            [134.5, 132.5, 132.0, 132.0, 132.0],
-            [183.0, 180.0, 163.0, 134.0, 105.0],
-            jaw_ready=False,
-        )
-        self.assertEqual(decision.action, "continue")
-        self.assertIn("jaw-row gap fell", decision.reason)
+    def test_fingertip_clearance_uses_distal_model_point(self):
+        pose = [90, 107, 84, 178, 90, 170]
+        self.assertAlmostEqual(
+            fingertip_floor_clearance_mm(pose), 67.0, delta=1.0)
 
-    def test_jaw_ready_stops_at_positive_sensor_distance(self):
-        decision = fused_progress_decision(
-            [134.5, 132.5, 132.0, 132.0, 132.0],
-            [183.0, 180.0, 163.0, 134.0, 72.0],
-            jaw_ready=True,
-        )
-        self.assertEqual(decision.action, "ready")
-
-    def test_near_sonar_without_jaw_alignment_stops(self):
-        decision = fused_progress_decision(
-            [90.0, 77.0], [180.0, 170.0], jaw_ready=False)
-        self.assertEqual(decision.action, "stop")
-        self.assertIn("not inside", decision.reason)
+    def test_swept_clearance_includes_endpoints(self):
+        high = [90, 107, 84, 178, 90, 170]
+        low = [90, 111, 82, 180, 90, 170]
+        swept = transition_fingertip_floor_clearance_mm(high, low)
+        self.assertLessEqual(swept, fingertip_floor_clearance_mm(high))
+        self.assertLessEqual(swept, fingertip_floor_clearance_mm(low) + 0.1)
 
 
 if __name__ == "__main__":

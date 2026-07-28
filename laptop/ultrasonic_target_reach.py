@@ -13,11 +13,12 @@ Every physical step is:
 4. collision-check the complete swept transition;
 5. move, reacquire, and require the echo distance to decrease.
 
-The sonar face is physically behind the finger contact plane, so a zero or even
-small sonar reading is not a sensible grasp target.  The final stop instead
-fuses a stable echo, the direct coloured finger/object image gate, and the
-full-arm collision model.  Far from the hand the controller advances boldly;
-near the fingers the image gate wins before a floor or object collision.
+The sonar face is physically behind the finger contact plane.  With an object
+inserted as deeply as the fingers permit, 180 live echoes formed a dominant
+stable cluster at 36 mm.  The operational stop therefore retains 10 mm margin
+and stops at 46 mm.  The only normal approach stops are that measured sonar
+threshold and 10 mm fingertip-to-floor clearance.  Vision keeps steering the
+same object but never ends an otherwise valid approach.
 """
 
 from dataclasses import dataclass
@@ -52,21 +53,19 @@ SONAR_AIM_X_RATIO = 0.50
 SONAR_AIM_Y_RATIO = 0.50
 MAX_AIM_X_ERROR_PX = 90.0
 
-# The transmitter face sits behind the open finger tips.  78 mm retains a
-# conservative margin over the observed ~65 mm finger-plane distance.  It is a
-# local sensor-to-hand standoff, not a table-coordinate calibration.
-STOP_RANGE_MM = 78.0
-MAX_RANGE_INCREASE_MM = 6.0
-RANGE_TREND_WINDOW = 5
-MIN_WINDOW_DROP_MM = 3.0
-MIN_VISUAL_WINDOW_DROP_PX = 18.0
+# The deepest physically inserted object produced a stable 36 mm dominant echo
+# cluster (180/180 valid samples, 1 mm MAD). Stop 10 mm before that plane.
+MEASURED_DEEPEST_OBJECT_RANGE_MM = 36.0
+SONAR_STOP_MARGIN_MM = 10.0
+STOP_RANGE_MM = MEASURED_DEEPEST_OBJECT_RANGE_MM + SONAR_STOP_MARGIN_MM
+FINGERTIP_FLOOR_STOP_MM = 10.0
 FAR_ROW_GAP_PX = 180.0
-MID_ROW_GAP_PX = 120.0
 FAR_ADVANCE_MM = 15.0
 MID_ADVANCE_MM = 10.0
-NEAR_ADVANCE_MM = 5.0
 APPROACH_MAX_JOINT_STEP_DEG = 8
-MIN_TOOL_CENTER_Z_M = 0.058
+# The explicit fingertip-floor gate below is authoritative. This lower planner
+# bound prevents an unrelated tool-centre clamp from ending the approach early.
+MIN_TOOL_CENTER_Z_M = 0.010
 MAX_STEPS = 24
 
 
@@ -76,76 +75,52 @@ class RangeDecision:
     reason: str
 
 
-def range_progress_decision(history, stop_range_mm=STOP_RANGE_MM,
-                            max_increase_mm=MAX_RANGE_INCREASE_MM,
-                            trend_window=RANGE_TREND_WINDOW,
-                            min_window_drop_mm=MIN_WINDOW_DROP_MM):
-    """Fail-closed range policy, independent of cameras and hardware."""
-    values = [float(value) for value in history]
-    if not values:
-        raise ValueError("range history cannot be empty")
-    current = values[-1]
-    if current <= stop_range_mm:
+def approach_stop_decision(distance_mm, fingertip_floor_clearance_mm,
+                           stop_range_mm=STOP_RANGE_MM,
+                           floor_stop_mm=FINGERTIP_FLOOR_STOP_MM):
+    """Return one of the two normal approach stops, otherwise continue."""
+    clearance = float(fingertip_floor_clearance_mm)
+    distance = float(distance_mm)
+    if clearance <= float(floor_stop_mm):
         return RangeDecision(
-            "near", f"sonar standoff reached ({current:.1f} mm)")
-    if len(values) >= 2 and current > values[-2] + max_increase_mm:
+            "floor",
+            f"fingertip-floor clearance {clearance:.1f} mm <= "
+            f"{float(floor_stop_mm):.1f} mm")
+    if distance <= float(stop_range_mm):
         return RangeDecision(
-            "stop", f"range increased {values[-2]:.1f}->{current:.1f} mm")
-    if (len(values) >= trend_window
-            and values[-trend_window] - current < min_window_drop_mm):
-        return RangeDecision(
-            "stop",
-            f"{trend_window}-step range drop "
-            f"{values[-trend_window] - current:.1f} mm is too small")
-    return RangeDecision("continue", f"range {current:.1f} mm")
-
-
-def update_range_progress(history, distance_mm, previous_was_approach):
-    """Reset the depth baseline after an aim-only sensor rotation."""
-    if previous_was_approach:
-        updated = [*history, float(distance_mm)]
-    else:
-        updated = [float(distance_mm)]
-    return updated, range_progress_decision(updated)
+            "sonar",
+            f"sonar {distance:.1f} mm <= {float(stop_range_mm):.1f} mm")
+    return RangeDecision(
+        "continue",
+        f"sonar {distance:.1f} mm; floor clearance {clearance:.1f} mm")
 
 
 def adaptive_advance_mm(row_gap_px):
-    """Make servo-scale moves while preserving a small final correction band."""
+    """Make servo-scale moves; never request the ineffective old 5 mm step."""
     gap = float(row_gap_px)
     if gap > FAR_ROW_GAP_PX:
         return FAR_ADVANCE_MM
-    if gap > MID_ROW_GAP_PX:
-        return MID_ADVANCE_MM
-    return NEAR_ADVANCE_MM
+    return MID_ADVANCE_MM
 
 
-def fused_progress_decision(range_history, row_gap_history, jaw_ready):
-    """Fuse acoustic and visual progress without treating either as depth truth.
+def fingertip_floor_clearance_mm(pose, table_z_m=0.0):
+    """Physical distal endpoint height over the shared table plane."""
+    return (
+        float(arm_fk.geometry(pose).finger_tip[2]) - float(table_z_m)
+    ) * 1000.0
 
-    A stable sonar batch is required by the caller on every observation.  The
-    absolute echo can remain positive or plateau because the transducers sit
-    behind the finger contact plane and may see a background reflector.
-    """
-    if jaw_ready:
-        return RangeDecision(
-            "ready", "object is inside jaws with a stable sonar observation")
 
-    acoustic = range_progress_decision(range_history)
-    gaps = [float(value) for value in row_gap_history]
-    if acoustic.action == "near":
-        return RangeDecision(
-            "stop", "sonar is near but object is not inside the jaw gate")
-    if acoustic.action != "stop":
-        return acoustic
-
-    visual_drop = 0.0
-    if len(gaps) >= RANGE_TREND_WINDOW:
-        visual_drop = gaps[-RANGE_TREND_WINDOW] - gaps[-1]
-    if visual_drop >= MIN_VISUAL_WINDOW_DROP_PX:
-        return RangeDecision(
-            "continue",
-            f"sonar is ambiguous but jaw-row gap fell {visual_drop:.0f}px")
-    return acoustic
+def transition_fingertip_floor_clearance_mm(
+        start_pose, end_pose, table_z_m=0.0, step_deg=0.5):
+    """Minimum fingertip clearance over the complete interpolated servo slew."""
+    start = np.asarray(start_pose, dtype=float)
+    end = np.asarray(end_pose, dtype=float)
+    span = float(np.max(np.abs(end - start)))
+    samples = max(2, int(np.ceil(span / float(step_deg))) + 1)
+    return min(
+        fingertip_floor_clearance_mm(pose, table_z_m)
+        for pose in np.linspace(start, end, samples)
+    )
 
 
 def _reacquire(detector, selector, attempts=3):
@@ -225,9 +200,6 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
         return {"state": "no-target", "moved": False}
     initial_area = float(candidate.area)
     previous_area = initial_area
-    range_history = []
-    row_gap_history = []
-    previous_was_approach = False
 
     for step in range(int(max_steps)):
         frame, scene, candidate = _reacquire(detector, selector)
@@ -244,19 +216,11 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
 
         profile, attempts = wait_for_stable_profile(client, timeout_s=8.0)
         distance = float(profile.distance_mm)
-        range_history, _acoustic_decision = update_range_progress(
-            range_history, distance, previous_was_approach)
         jaw_ready, jaw_reason, row_gap = _jaw_metrics(scene, candidate)
         if row_gap is None:
             raise RuntimeError(jaw_reason)
-        if previous_was_approach or not row_gap_history:
-            row_gap_history.append(float(row_gap))
-        else:
-            # An aim-only wrist rotation changes the image projection.  As with
-            # sonar, begin a new comparable visual trend after the re-aim.
-            row_gap_history = [float(row_gap)]
-        decision = fused_progress_decision(
-            range_history, row_gap_history, jaw_ready)
+        floor_clearance = fingertip_floor_clearance_mm(pose)
+        decision = approach_stop_decision(distance, floor_clearance)
         _draw_preview(
             frame, scene, candidate, pose, distance, step, decision)
         print(
@@ -266,13 +230,23 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
             f"attempts={len(attempts)} decision={decision.action} "
             f"jaw={jaw_reason}", flush=True)
 
-        if decision.action == "stop":
-            raise RuntimeError(decision.reason)
-        if decision.action == "ready":
-            if not execute or not allow_grasp:
+        if decision.action == "floor":
+            return {
+                "state": "floor-clearance-stop", "pose": pose,
+                "distance_mm": distance,
+                "fingertip_floor_clearance_mm": floor_clearance,
+                "preview": str(PREVIEW),
+            }
+        if decision.action == "sonar":
+            if not execute or not allow_grasp or not jaw_ready:
                 return {
-                    "state": "sonar-jaw-ready", "pose": pose,
-                    "distance_mm": distance, "preview": str(PREVIEW)}
+                    "state": (
+                        "sonar-stop-ready" if jaw_ready
+                        else "sonar-stop-image-disagrees"),
+                    "pose": pose, "distance_mm": distance,
+                    "fingertip_floor_clearance_mm": floor_clearance,
+                    "preview": str(PREVIEW),
+                }
             closed = list(pose)
             closed[config.J_GRIP] = config.GRIP_CLOSED
             report = safety.transition_report(pose, closed)
@@ -300,6 +274,15 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
             raise RuntimeError("no bounded 2/3/4 step remains")
 
         next_pose = list(plan["pose"])
+        swept_floor_clearance = transition_fingertip_floor_clearance_mm(
+            pose, next_pose)
+        if swept_floor_clearance <= FINGERTIP_FLOOR_STOP_MM:
+            return {
+                "state": "floor-clearance-stop", "pose": pose,
+                "distance_mm": distance,
+                "fingertip_floor_clearance_mm": swept_floor_clearance,
+                "preview": str(PREVIEW),
+            }
         report = safety.transition_report(pose, next_pose)
         if not report.safe:
             raise RuntimeError(
@@ -317,13 +300,11 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
                 "state": "planned", "pose": next_pose,
                 "distance_mm": distance, "preview": str(PREVIEW)}
         mover.slow_move(next_pose, final_settle=0.35)
-        previous_was_approach = not bool(plan.get("aim_only"))
         time.sleep(0.10)
 
     return {
         "state": "step-limit",
         "pose": client.request({"command": "status"})["pose"],
-        "ranges_mm": range_history,
         "preview": str(PREVIEW),
     }
 
