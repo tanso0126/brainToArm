@@ -3376,3 +3376,31 @@ and the trained model backend.
   back to 140° and lowering again.
 - Added synthetic tests proving hue independence, sonar-axis ranking, and
   coloured-finger-marker exclusion.
+
+## Patch 90 — keep unattended approach on the reproduced forward branch
+
+### Physical finding
+
+- The fallback correctly locked and tracked the same object through eight
+  observations, but starting translation directly from HOME-with-wrist-180 was
+  kinematically wrong. At that pose the modeled camera ray points partly back
+  toward the base. The solver folded the finger endpoint from about 478 mm to
+  314 mm while the target remained 225 mm away, and the swept body collision
+  interlock correctly rejected the next move before contact.
+- The previously successful floor-grasp branch begins near
+  `[90,107,84,178,open,170]`: its finger endpoint is about 480 mm forward, its
+  camera looks down the work surface, and the known successful close pose stays
+  at essentially the same forward reach.
+
+### Changes
+
+- After the bounded wrist search confirms a target, the full cycle now makes a
+  separately swept, collision-checked transition to the physically reproduced
+  forward observation pose. It then discards the search-view pixel lock and
+  reacquires an on-axis target from the new view before any approach step.
+- Added a physical direction invariant: every later candidate pose must keep
+  the fingertip within 5 mm of the forward observation reach. A mathematically
+  valid but physically wrong inward-folding IK branch is rejected before a
+  servo command.
+- Added tests distinguishing the known successful forward/close family from the
+  rejected folded-body family.

@@ -9,6 +9,8 @@ from ultrasonic_target_reach import (
     _retained_image_gate,
     _candidate_on_sonar_axis,
     adaptive_advance_mm,
+    approach_observation_pose,
+    approach_stays_forward,
     approach_stop_decision,
     fingertip_floor_clearance_mm,
     home_pose_holding,
@@ -93,6 +95,22 @@ class ApproachStopTests(unittest.TestCase):
         home = [90, 70, 90, 140, 170, 170]
         self.assertEqual(
             open_ready_pose(home), [90, 70, 90, 140, 90, 170])
+
+    def test_forward_observation_uses_reproduced_approach_branch(self):
+        home_open = [90, 70, 90, 180, 90, 170]
+        self.assertEqual(
+            approach_observation_pose(home_open),
+            [90, 107, 84, 178, 90, 170])
+
+    def test_approach_cannot_fold_back_toward_body(self):
+        forward = [90, 107, 84, 178, 90, 170]
+        known_close = [90, 124, 66, 179, 90, 170]
+        folded = [90, 80, 131, 144, 90, 170]
+
+        from ultrasonic_target_reach import fingertip_forward_x_mm
+        start_x = fingertip_forward_x_mm(forward)
+        self.assertTrue(approach_stays_forward(start_x, known_close))
+        self.assertFalse(approach_stays_forward(start_x, folded))
 
     def test_search_rejects_home_background_outside_sonar_axis(self):
         near_axis = SimpleNamespace(center=(600.0, 450.0))

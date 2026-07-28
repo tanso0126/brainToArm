@@ -74,6 +74,11 @@ VERIFY_LIFT_MM = 25.0
 RETAINED_BOTTOM_RATIO = 0.90
 RETAINED_HORIZONTAL_RATIO = 0.20
 LOADED_HOME_REASSERT_TEMPLATE = [90, 90, 90, 150, 180, 170]
+# This is the physically reproduced start of the successful floor approach.
+# Unlike HOME with only motor 4 lowered, its camera ray and open fingers both
+# face the forward work surface while retaining generous body clearance.
+APPROACH_OBSERVATION_TEMPLATE = [90, 107, 84, 178, 90, 170]
+MAX_APPROACH_INWARD_DRIFT_MM = 5.0
 SEARCH_WRIST_SEQUENCE = (140, 150, 160, 170, 180)
 SEARCH_SELECTION_MIN_WRIST = 170
 VIVID_MIN_SATURATION = 70
@@ -327,6 +332,25 @@ def open_ready_pose(pose):
     return ready
 
 
+def approach_observation_pose(pose):
+    """Known safe forward/down observation pose, preserving an open gripper."""
+    target = list(APPROACH_OBSERVATION_TEMPLATE)
+    target[config.J_GRIP] = int(pose[config.J_GRIP])
+    return target
+
+
+def fingertip_forward_x_mm(pose):
+    """Planar distance of the physical finger endpoint from the base axis."""
+    return float(arm_fk.geometry(pose).finger_tip[0]) * 1000.0
+
+
+def approach_stays_forward(start_x_mm, candidate_pose,
+                           max_inward_mm=MAX_APPROACH_INWARD_DRIFT_MM):
+    """The approach may descend, but must not fold back into the base."""
+    return fingertip_forward_x_mm(candidate_pose) >= (
+        float(start_x_mm) - float(max_inward_mm))
+
+
 def _candidate_on_sonar_axis(candidate, frame_width):
     if candidate is None:
         return False
@@ -522,6 +546,37 @@ def _open_and_find_target(
     return pose, frame, scene, None
 
 
+def _enter_forward_observation(
+        client, safety, detector, selector, pose, execute):
+    """Stage the arm in the reproduced forward approach branch and relock."""
+    target = approach_observation_pose(pose)
+    report = safety.transition_report(pose, target)
+    if not report.safe:
+        raise RuntimeError(
+            "forward observation transition rejected: " + report.explain())
+    if execute and target != pose:
+        print(
+            f"[sonar-reach] FORWARD observation {pose[1:4]} "
+            f"->{target[1:4]}; clearance="
+            f"{report.minimum_clearance_mm:.1f}mm",
+            flush=True,
+        )
+        _fast_approach_move(client, target, settle_s=0.50)
+    pose = target
+    _clear_target_lock(selector)
+    frame, scene, candidate = acquire_initial_target(
+        detector, target_selector=selector, pose=pose)
+    if not _candidate_on_sonar_axis(candidate, frame.shape[1]):
+        if candidate is not None:
+            _clear_target_lock(selector)
+        candidate = _choose_vivid_on_axis(
+            frame, scene, selector, pose)
+    if not _candidate_on_sonar_axis(candidate, frame.shape[1]):
+        _clear_target_lock(selector)
+        return pose, frame, scene, None
+    return pose, frame, scene, candidate
+
+
 def _return_home_holding(client, mover, safety, pose):
     """Transport a retained object to HOME without ever opening the gripper."""
     if int(pose[config.J_GRIP]) != int(config.GRIP_CLOSED):
@@ -622,10 +677,18 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
         client, mover, safety, detector, selector, pose, execute)
     if candidate is None:
         return {"state": "no-target", "moved": False}
+    pose, frame, scene, candidate = _enter_forward_observation(
+        client, safety, detector, selector, pose, execute)
+    if candidate is None:
+        return {
+            "state": "target-not-visible-from-forward-observation",
+            "pose": pose,
+        }
     jaw_ready, jaw_reason, row_gap = _jaw_metrics(scene, candidate)
     if row_gap is None:
         raise RuntimeError(jaw_reason)
     last_visible_pose = list(pose)
+    approach_start_x_mm = fingertip_forward_x_mm(pose)
 
     for step in range(int(max_steps)):
         frame, observed_scene, observed_candidate = _reacquire(
@@ -718,6 +781,11 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
         next_pose = list(plan["pose"])
         next_pose[config.J_WRIST] = tracking_wrist_target(
             pose[config.J_WRIST], vertical_error)
+        if not approach_stays_forward(approach_start_x_mm, next_pose):
+            raise RuntimeError(
+                "approach rejected: candidate would fold the fingertip "
+                f"inward to {fingertip_forward_x_mm(next_pose):.1f}mm "
+                f"from forward start {approach_start_x_mm:.1f}mm")
         swept_floor_clearance = transition_fingertip_floor_clearance_mm(
             pose, next_pose)
         if swept_floor_clearance <= FINGERTIP_FLOOR_STOP_MM:
