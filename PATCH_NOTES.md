@@ -3151,3 +3151,16 @@ and the trained model backend.
 - Added regression coverage for all three adaptive step bands, the measured
   132 mm plateau with strong visual progress, positive-distance jaw readiness,
   and sonar/image disagreement.
+
+### Physical verification
+
+- At pose `[90, 111, 82, 180, 90, 170]`, the controller accepted the same
+  locked blue object with a stable 130.5–132.0 mm echo and a 71–72 px jaw-row
+  gap. It correctly made no additional forward move and closed only the
+  gripper.
+- A swept-collision-checked 20 mm vertical test lift changed the pose to
+  `[90, 107, 84, 178, 180, 170]`. The detected object centre remained fixed
+  relative to the wrist camera (`608.8,471.6` px before versus
+  `608.7,469.6` px after) while the marker opening changed from 289.1 to
+  84.9 px. This is direct visual evidence that the closed gripper retained the
+  object through the lift rather than leaving it on the table.
