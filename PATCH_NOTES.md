@@ -3592,3 +3592,39 @@ and the trained model backend.
   pretending HOME was reached.
 - Added regression coverage for the 180° close → 165° hold → loaded waypoint →
   loaded HOME sequence.
+
+## Patch 98 — set loaded hold to the physically recovered 158 degrees
+
+### Physical validation
+
+- A motor-5-only backoff from 180° to 165° retained the object, but a commanded
+  loaded waypoint changed the wrist-camera frame by only 0.85 px with near-unit
+  affine scale. The large joints had not physically moved.
+- Backing off again to 162° still retained the object but did not clearly
+  release the stalled rail. At 158° the mechanism visibly responded while the
+  object remained between the coloured fingers, but the loaded arm still
+  failed to reach HOME.
+- With motor 5 held at 158°, the commanded
+  `[90,90,90,150,158,170] → [90,70,90,140,158,170]` HOME leg produced 109 good
+  image matches and a robust affine transform with about `(68,31) px`
+  translation and `0.92` scale. This proves partial real motion, not successful
+  HOME arrival. The operator confirmed that the physical arm still stopped
+  short while the object remained wedged between the fingers.
+
+### Changes
+
+- Replaced the estimated 165° hold with the physically validated 158° value.
+  Future successful grasps close at 180°, verify the lift, unload to 158°,
+  verify retention again, and only then execute the loaded waypoint and HOME.
+- Updated loaded-hold, reassert, and HOME regression expectations to preserve
+  158°.
+
+### Remaining hardware blocker
+
+- Software backoff reduces the gripper load but does not create enough supply
+  headroom for a loaded HOME move on the present power path. External servo
+  power is required before another physical retry.
+- A lithium-ion pack must not be attached until cell count, maximum charged
+  voltage, regulator/BEC output, current capacity, polarity, and common-ground
+  wiring are verified. The partial motion above must not be reported as HOME
+  completion.

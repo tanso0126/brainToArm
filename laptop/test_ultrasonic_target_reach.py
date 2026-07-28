@@ -166,14 +166,14 @@ class ApproachStopTests(unittest.TestCase):
         closed = [90, 108, 78, 172, 180, 170]
         holding = grip_hold_pose(closed)
 
-        self.assertEqual(holding, [90, 108, 78, 172, 165, 170])
+        self.assertEqual(holding, [90, 108, 78, 172, 158, 170])
         self.assertGreater(holding[4], config.GRIP_OPEN)
         self.assertLess(holding[4], config.GRIP_CLOSED)
         self.assertEqual(
-            home_pose_holding(holding), [90, 70, 90, 140, 165, 170])
+            home_pose_holding(holding), [90, 70, 90, 140, 158, 170])
         self.assertEqual(
             loaded_home_reassert_pose(holding),
-            [90, 90, 90, 150, 165, 170])
+            [90, 90, 90, 150, 158, 170])
 
     def test_full_cycle_opens_without_changing_home_observation_pose(self):
         home = [90, 70, 90, 140, 170, 170]

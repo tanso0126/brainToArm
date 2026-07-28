@@ -57,9 +57,10 @@ J_TILT = J_ROLL            # compatibility alias; servo6 is physically wrist rol
 GRIP_OPEN = 90             # physically verified: 90=open
 GRIP_CLOSED = 180          # physically confirmed full-close endpoint
 # A held object's measured 151 px jaw opening corresponds to about 163° on the
-# empty-jaw calibration. 165° keeps a small clamping preload without the severe
-# continuous stall current caused by commanding the unreachable empty 180°.
-GRIP_HOLD = 165
+# empty-jaw calibration. Physical loaded trials showed 165° and 162° still left
+# the large joints unresponsive; 158° released the stall while retaining the
+# object through a measured waypoint-to-HOME move.
+GRIP_HOLD = 158
 
 # ---- Camera-calibrated planar arm mode (physically verified 2026-07-20) ----
 # Servo1 is operational again, but this legacy side-camera calibration is valid
