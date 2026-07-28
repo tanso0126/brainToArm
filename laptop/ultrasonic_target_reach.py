@@ -72,6 +72,7 @@ VERIFY_LIFT_MM = 25.0
 RETAINED_BOTTOM_RATIO = 0.90
 RETAINED_HORIZONTAL_RATIO = 0.20
 LOADED_HOME_REASSERT_TEMPLATE = [90, 90, 90, 150, 180, 170]
+SEARCH_WRIST_SEQUENCE = (140, 150, 160, 170, 180)
 FAR_ADVANCE_MM = 20.0
 MID_ADVANCE_MM = 15.0
 APPROACH_MAX_JOINT_STEP_DEG = 12
@@ -308,6 +309,52 @@ def loaded_home_reassert_pose(pose):
     return waypoint
 
 
+def open_ready_pose(pose):
+    """Preserve the observation pose while fully opening the fingers."""
+    ready = list(pose)
+    ready[config.J_GRIP] = config.GRIP_OPEN
+    return ready
+
+
+def _open_and_find_target(
+        client, mover, safety, detector, selector, pose, execute):
+    """Open at HOME, then lower the wrist camera through a bounded search."""
+    ready = open_ready_pose(pose)
+    if ready != pose:
+        report = safety.transition_report(pose, ready)
+        if not report.safe:
+            raise RuntimeError("initial open rejected: " + report.explain())
+        if execute:
+            mover.slow_move(ready, final_settle=0.45)
+        pose = ready
+
+    frame, scene, candidate = acquire_initial_target(
+        detector, target_selector=selector, pose=pose)
+    if candidate is not None or not execute:
+        return pose, frame, scene, candidate
+
+    for wrist in SEARCH_WRIST_SEQUENCE:
+        search_pose = list(pose)
+        search_pose[config.J_WRIST] = int(wrist)
+        if search_pose == pose:
+            continue
+        report = safety.transition_report(pose, search_pose)
+        if not report.safe:
+            continue
+        print(
+            f"[sonar-reach] SEARCH wrist {pose[config.J_WRIST]}"
+            f"->{search_pose[config.J_WRIST]}",
+            flush=True,
+        )
+        _fast_approach_move(client, search_pose, settle_s=0.35)
+        pose = search_pose
+        frame, scene, candidate = acquire_initial_target(
+            detector, target_selector=selector, pose=pose)
+        if candidate is not None:
+            return pose, frame, scene, candidate
+    return pose, frame, scene, None
+
+
 def _return_home_holding(client, mover, safety, pose):
     """Transport a retained object to HOME without ever opening the gripper."""
     if int(pose[config.J_GRIP]) != int(config.GRIP_CLOSED):
@@ -402,8 +449,8 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
     mover = FloorServo(client, calib=None)
     pose = list(client.request({"command": "status"})["pose"])
 
-    frame, scene, candidate = acquire_initial_target(
-        detector, target_selector=selector, pose=pose)
+    pose, frame, scene, candidate = _open_and_find_target(
+        client, mover, safety, detector, selector, pose, execute)
     if candidate is None:
         return {"state": "no-target", "moved": False}
     jaw_ready, jaw_reason, row_gap = _jaw_metrics(scene, candidate)

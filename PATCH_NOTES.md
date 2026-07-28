@@ -3321,3 +3321,19 @@ and the trained model backend.
   encoders, physical HOME confirmation must come from an external fixed camera
   or the operator; the wrist-mounted view can verify only that the object
   remains held.
+
+## Patch 88 — make HOME-to-HOME a single unattended command
+
+### Changes
+
+- Physical testing after reconnect confirmed the firmware HOME pose. The full
+  controller now starts by preserving that observation pose while changing
+  only motor 5 from HOME's 170° to the fully open 90° endpoint.
+- If no portable object is immediately selected, motor 4 searches the bounded
+  `140→150→160→170→180°` sequence. Every search transition is collision
+  checked, the camera must remain live, and motors 2/3 do not translate until a
+  concrete target identity is locked.
+- Once found, the existing loop performs fast camera/sonar-guided approach,
+  floor/sonar stop, clearance lift, coloured-finger close gate, verification
+  lift, retention check, and loaded staged HOME return without a new process or
+  human command between phases.
