@@ -10,6 +10,7 @@ Examples::
 
     python3 laptop/arm_session.py serve --floor hover
     python3 laptop/arm_session.py status
+    python3 laptop/arm_session.py distance
     python3 laptop/arm_session.py check 90 124 90 180 90 170
     python3 laptop/arm_session.py floor grasp 90
     python3 laptop/arm_session.py move 90 124 90 180 90 170
@@ -22,7 +23,6 @@ import json
 import os
 import signal
 import socket
-import sys
 import time
 
 import config
@@ -111,6 +111,17 @@ class ArmSessionServer:
             return {"ok": bool(self.arm.ping()), "pid": os.getpid()}
         if command == "status":
             return {"ok": True, "pose": self.arm.status(), "pid": os.getpid()}
+        if command == "distance":
+            samples = int(request.get("samples", config.ULTRASONIC_SAMPLES))
+            distance_mm = self.arm.ultrasonic_distance_mm(samples=samples)
+            return {
+                "ok": True,
+                "distanceMm": distance_mm,
+                "valid": distance_mm is not None,
+                "samples": samples,
+                "triggerPin": config.ULTRASONIC_TRIGGER_PIN,
+                "echoPin": config.ULTRASONIC_ECHO_PIN,
+            }
         if command == "check":
             target = self._validated_sequence([request.get("pose")])[0]
             current = self.arm.status()
@@ -271,6 +282,9 @@ def main():
     serve.add_argument("--floor", choices=("hover", "grasp"))
     serve.add_argument("--elbow", type=int, default=config.FLOOR_REFERENCE_ELBOW)
     subparsers.add_parser("status")
+    distance = subparsers.add_parser("distance")
+    distance.add_argument("--samples", type=int,
+                          default=config.ULTRASONIC_SAMPLES)
     check = subparsers.add_parser("check")
     check.add_argument("angles", type=int, nargs=config.N_JOINTS)
     move = subparsers.add_parser("move")
@@ -307,6 +321,11 @@ def main():
     client = ArmSessionClient(args.socket)
     if args.action == "status":
         response = client.request({"command": "status"})
+    elif args.action == "distance":
+        response = client.request({
+            "command": "distance",
+            "samples": args.samples,
+        })
     elif args.action == "check":
         response = client.request({"command": "check", "pose": args.angles})
     elif args.action == "move":

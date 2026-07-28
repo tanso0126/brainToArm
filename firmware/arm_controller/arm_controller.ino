@@ -21,6 +21,8 @@
 //     "S\n"                        status -> replies current angles "C a1..a6"
 //     "H\n"                        compiled home pose -> "H a1..a6"
 //     "F\n"                        grip sensor -> "F 0..1023", or "F -1" absent
+//     "D\n"                        ultrasonic range -> "D millimetres", or
+//                                   "D -1" on timeout/out-of-range
 //   Reply to laptop:
 //     "OK\n"      command accepted
 //     "ERR ...\n" parse error
@@ -34,6 +36,11 @@
 
 const uint8_t N = 6;
 const uint8_t PINS[N] = {13, 12, 11, 10, 9, 8};
+const uint8_t ULTRASONIC_TRIGGER_PIN = 7;
+const uint8_t ULTRASONIC_ECHO_PIN = 6;
+const unsigned long ULTRASONIC_TIMEOUT_US = 25000UL;
+const unsigned int ULTRASONIC_MIN_MM = 20;
+const unsigned int ULTRASONIC_MAX_MM = 4000;
 
 // Physically verified travel limits after removing the old unused third motor.
 const int MIN_DEG[N] = {0, 0, 0, 130, 90, 0};
@@ -66,6 +73,9 @@ int clampJoint(uint8_t i, int deg) {
 
 void setup() {
   Serial.begin(115200);
+  pinMode(ULTRASONIC_TRIGGER_PIN, OUTPUT);
+  digitalWrite(ULTRASONIC_TRIGGER_PIN, LOW);
+  pinMode(ULTRASONIC_ECHO_PIN, INPUT);
   for (uint8_t i = 0; i < N; i++) {
     servos[i].attach(PINS[i]);
     current[i] = HOME_DEG[i];
@@ -132,6 +142,32 @@ void sendGripFeedback() {
   Serial.println((int)(sum / 8));
 }
 
+void sendUltrasonicDistance() {
+  // Trigger only on an explicit host request. Continuous pulseIn() calls would
+  // unnecessarily stall the servo slew loop whenever no echo is received.
+  digitalWrite(ULTRASONIC_TRIGGER_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(ULTRASONIC_TRIGGER_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(ULTRASONIC_TRIGGER_PIN, LOW);
+
+  unsigned long durationUs = pulseIn(
+    ULTRASONIC_ECHO_PIN, HIGH, ULTRASONIC_TIMEOUT_US);
+  if (durationUs == 0) {
+    Serial.println("D -1");
+    return;
+  }
+
+  // 343 m/s = 0.343 mm/us; divide by two for the outbound/return path.
+  unsigned long distanceMm = (durationUs * 343UL + 1000UL) / 2000UL;
+  if (distanceMm < ULTRASONIC_MIN_MM || distanceMm > ULTRASONIC_MAX_MM) {
+    Serial.println("D -1");
+    return;
+  }
+  Serial.print("D ");
+  Serial.println(distanceMm);
+}
+
 void handleLine(char* line) {
   switch (line[0]) {
     case 'A':
@@ -152,6 +188,10 @@ void handleLine(char* line) {
       break;
     case 'F':
       if (line[1] == '\0') sendGripFeedback();
+      else                  Serial.println("ERR parse");
+      break;
+    case 'D':
+      if (line[1] == '\0') sendUltrasonicDistance();
       else                  Serial.println("ERR parse");
       break;
     default:  Serial.println("ERR cmd");

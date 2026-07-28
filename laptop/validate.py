@@ -22,6 +22,21 @@ def validate():
             servo_arrays_ok = False
     if len(set(config.SERVO_PINS)) != len(config.SERVO_PINS):
         errs.append("SERVO_PINS contains duplicate Arduino pins")
+    ultrasonic_pins = {
+        config.ULTRASONIC_TRIGGER_PIN,
+        config.ULTRASONIC_ECHO_PIN,
+    }
+    if len(ultrasonic_pins) != 2:
+        errs.append("ultrasonic trigger and echo pins must differ")
+    if ultrasonic_pins.intersection(config.SERVO_PINS):
+        errs.append("ultrasonic pins overlap SERVO_PINS")
+    if not 0 < config.ULTRASONIC_MIN_MM < config.ULTRASONIC_MAX_MM:
+        errs.append("ultrasonic range must satisfy 0 < minimum < maximum")
+    if not 1 <= config.ULTRASONIC_MIN_VALID_SAMPLES <= config.ULTRASONIC_SAMPLES:
+        errs.append(
+            "ultrasonic valid-sample count must be within total samples")
+    if config.ULTRASONIC_SAMPLE_INTERVAL_S < 0.060:
+        errs.append("ultrasonic sample interval must be at least 60 ms")
     if not isinstance(config.ARM_MOCK, bool):
         errs.append("ARM_MOCK must be True or False")
     if not config.ARM_MOCK and not config.ARM_PORT:

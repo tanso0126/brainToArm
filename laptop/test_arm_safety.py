@@ -33,6 +33,10 @@ class FakeArm:
     def wait_done(timeout=15.0):
         return True
 
+    @staticmethod
+    def ultrasonic_distance_mm(samples=None):
+        return 237.0
+
 
 class PhysicalArmSafetyTests(unittest.TestCase):
     def setUp(self):
@@ -108,6 +112,16 @@ class PhysicalArmSafetyTests(unittest.TestCase):
         report = server.handle({"command": "check", "pose": FAILED_PREPOSE})
         self.assertFalse(report["safe"])
         self.assertIn("base-housing", report["explanation"])
+        self.assertEqual(arm.moves, [])
+
+    def test_distance_command_reads_sensor_without_moving(self):
+        arm = FakeArm(HOVER)
+        server = ArmSessionServer("/tmp/brainToArm-distance-test.sock", arm=arm)
+        response = server.handle({"command": "distance", "samples": 3})
+        self.assertEqual(response["distanceMm"], 237.0)
+        self.assertTrue(response["valid"])
+        self.assertEqual(response["triggerPin"], 7)
+        self.assertEqual(response["echoPin"], 6)
         self.assertEqual(arm.moves, [])
 
     def test_autonomous_motion_rejects_stale_camera(self):

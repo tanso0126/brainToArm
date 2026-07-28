@@ -2866,3 +2866,33 @@ and the trained model backend.
 - Updated the deterministic asynchronous monitor test to prove that the first
   above-threshold complete window produces a detection.
 - Updated rendered UI assertions for the one-window policy.
+
+## Patch 73 — add the wrist ultrasonic range sensor
+
+### Hardware mapping
+
+- Recorded the new sensor mounted directly below the wrist camera: Trigger D7,
+  Echo D6 on the Uno. The six servos remain on D13–D8, so the mappings do not
+  overlap.
+
+### Firmware and host integration
+
+- Added the read-only `D` firmware command. It emits a 10 µs trigger pulse,
+  bounds echo waiting to 25 ms, converts round-trip time to millimetres, and
+  reports `D -1` on timeout or outside the supported 20–4000 mm range.
+- Ranging happens only on explicit request so a missing echo cannot
+  continuously stall servo slew.
+- Added strict host reply parsing and a three-sample median that requires at
+  least two valid echoes.
+- Added a read-only persistent-session `distance` command. It never commands a
+  servo and reports both validity and the physical pin mapping.
+- Documented that ultrasonic distance is nearest-reflector range, not object
+  identity, and must complement rather than replace wrist RGB and collision
+  checks.
+
+### Verification
+
+- Added parser coverage for valid, no-echo, malformed, and out-of-range replies.
+- Added a session regression proving a distance request performs no arm move.
+- Added preflight validation that sensor pins are distinct from each other and
+  all servo pins, and that range/sample timing settings are internally valid.

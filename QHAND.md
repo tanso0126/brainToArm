@@ -307,3 +307,19 @@ The studio regression suite covers:
   is not claimed to be inferred from monocular RGB.
 - The physical arm remains separately safety-gated; this patch sends no Uno
   commands.
+
+## 11. Wrist ultrasonic range sensor
+
+- Physical mount: directly below the wrist camera.
+- Uno wiring: Trigger D7, Echo D6. Servo pins remain D13–D8, so there is no pin
+  overlap.
+- Firmware command `D` performs one bounded on-demand ranging pulse and returns
+  `D <millimetres>` or `D -1` for timeout/out-of-range. It does not range
+  continuously because `pulseIn()` would otherwise stall the servo slew loop
+  whenever an echo is missing.
+- `ArmSerial.ultrasonic_distance_mm()` takes three readings and returns their
+  median only when at least two are valid. The persistent session exposes this
+  as `python3 laptop/arm_session.py distance` without moving the arm.
+- The ultrasonic cone sees the nearest reflector. Treat the value as
+  camera-axis proximity/depth assistance, never as proof that the selected
+  visual object produced the echo.

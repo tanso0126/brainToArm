@@ -43,6 +43,13 @@ N_JOINTS = 6
 HOME_POSE = _load_home_pose()
 SERVO_PINS = [13, 12, 11, 10, 9, 8]
 JOINT_NAMES = ["base", "shoulder", "elbow", "wrist_pitch", "gripper", "wrist_roll"]
+ULTRASONIC_TRIGGER_PIN = 7
+ULTRASONIC_ECHO_PIN = 6
+ULTRASONIC_MIN_MM = 20
+ULTRASONIC_MAX_MM = 4000
+ULTRASONIC_SAMPLES = 3
+ULTRASONIC_MIN_VALID_SAMPLES = 2
+ULTRASONIC_SAMPLE_INTERVAL_S = 0.060
 
 # Joint indices (readable names). Bottom -> top of the arm.
 J_BASE, J_SHOULDER, J_ELBOW, J_WRIST, J_GRIP, J_ROLL = range(N_JOINTS)

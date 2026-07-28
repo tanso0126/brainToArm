@@ -256,10 +256,17 @@ pick another," otherwise we finish the grasp and delivery.**
   | servo4 | 10 | wrist pitch | verified safe range 130°–180° |
   | servo5 | 9 | gripper | 90° open, 180° closed |
   | servo6 | 8 | wrist roll | rotate gripper orientation |
+  | ultrasonic Trigger | 7 | wrist range sensor | explicit-request 10 µs pulse |
+  | ultrasonic Echo | 6 | wrist range sensor | pulse-width distance input |
 
   The former unused servo3 slot was removed completely. Elbow and wrist pitch
   moved to 3/D11 and 4/D10; the observed harness has the gripper on 5/D9 and
-  wrist roll on 6/D8. Arduino pin 7 is unused.
+  wrist roll on 6/D8. The ultrasonic sensor mounted directly below the wrist
+  camera uses Trigger D7 and Echo D6. The Uno returns median millimetres from
+  three bounded on-demand samples; no echo is reported as unavailable rather
+  than zero distance. Its acoustic cone measures the nearest reflecting surface,
+  so it is a depth aid and safety gate—not object identity or a sole collision
+  detector.
 
 - **EEG device:** [LAXTHA PolyG-I](https://www.laxtha.com/ProductView.asp?Model=PolyG-I),
   an 8-channel EEG amplifier (part of a 16-channel polygraph). Connects by USB.
@@ -818,6 +825,18 @@ physical arm to the new pose, so clear its workspace first. Every real
 pose compiled into the Uno before accepting commands. Missing query support or
 a mismatch stops the run and names the upload command; stale firmware can no
 longer continue silently.
+
+The current firmware also exposes the wrist ultrasonic sensor. After uploading
+the sketch and starting the persistent arm owner, read it without moving:
+
+```bash
+python3 laptop/arm_session.py serve
+python3 laptop/arm_session.py distance
+```
+
+`distanceMm: null` means too few valid echoes, not a measured zero. Firmware
+upload and the first serial connection reset the Uno to HOME, so support the arm
+and clear the complete swept volume before either operation.
 
 **2 — EEG.** Plug in the PolyG-I and:
 ```bash

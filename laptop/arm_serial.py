@@ -7,6 +7,7 @@ raise instead of silently pretending that the command succeeded.
 """
 import time
 import glob
+import statistics
 import config
 
 try:
@@ -52,6 +53,22 @@ def parse_home_pose_line(line):
     if any(not 0 <= value <= 180 for value in values):
         raise ValueError(f"firmware home pose outside 0..180: {line!r}")
     return values
+
+
+def parse_distance_line(line):
+    """Parse firmware ``D millimetres``; ``D -1`` represents no valid echo."""
+    parts = str(line).strip().split()
+    if len(parts) != 2 or parts[0] != "D":
+        raise ValueError(f"malformed ultrasonic distance: {line!r}")
+    try:
+        value = int(parts[1])
+    except ValueError as exc:
+        raise ValueError(f"non-integer ultrasonic distance: {line!r}") from exc
+    if value == -1:
+        return None
+    if not config.ULTRASONIC_MIN_MM <= value <= config.ULTRASONIC_MAX_MM:
+        raise ValueError(f"ultrasonic distance outside valid range: {value} mm")
+    return value
 
 
 def assert_home_pose_match(compiled_pose, local_pose=None):
@@ -233,6 +250,47 @@ class ArmSerial:
                 return value
         raise TimeoutError("arm serial timeout waiting for grip feedback")
 
+    def ultrasonic_distance_mm(self, samples=None):
+        """Return a median wrist-sonar distance, or ``None`` without enough echoes.
+
+        The sensor is sampled only on request so a missing echo cannot
+        continuously block the firmware's servo loop. A single query may block
+        for the firmware's bounded 25 ms echo timeout.
+        """
+        samples = config.ULTRASONIC_SAMPLES if samples is None else int(samples)
+        if not 1 <= samples <= 9:
+            raise ValueError("ultrasonic samples must be between 1 and 9")
+        if self.mock:
+            return None
+        valid = []
+        for index in range(samples):
+            self.ser.write(b"D\n")
+            deadline = time.monotonic() + 1.0
+            reading_received = False
+            while time.monotonic() < deadline:
+                raw = self.ser.readline()
+                if not raw:
+                    continue
+                line = raw.decode(errors="replace").strip()
+                if line.startswith("ERR"):
+                    raise RuntimeError(
+                        f"arm firmware rejected ultrasonic request: {line}")
+                if line.startswith("D"):
+                    value = parse_distance_line(line)
+                    reading_received = True
+                    if value is not None:
+                        valid.append(value)
+                    break
+            if not reading_received:
+                raise TimeoutError(
+                    "arm serial timeout waiting for ultrasonic distance")
+            if index + 1 < samples:
+                time.sleep(config.ULTRASONIC_SAMPLE_INTERVAL_S)
+        required = min(samples, config.ULTRASONIC_MIN_VALID_SAMPLES)
+        if len(valid) < required:
+            return None
+        return float(statistics.median(valid))
+
     def gripper(self, open_=True):
         a = [-1] * config.N_JOINTS
         a[config.J_GRIP] = config.GRIP_OPEN if open_ else config.GRIP_CLOSED
@@ -248,7 +306,10 @@ class ArmSerial:
 
 if __name__ == "__main__":
     arm = ArmSerial()
-    arm.home(); arm.wait_done()
-    arm.gripper(open_=True); arm.wait_done()
-    arm.gripper(open_=False); arm.wait_done()
+    arm.home()
+    arm.wait_done()
+    arm.gripper(open_=True)
+    arm.wait_done()
+    arm.gripper(open_=False)
+    arm.wait_done()
     arm.close()

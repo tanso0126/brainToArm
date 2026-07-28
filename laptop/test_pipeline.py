@@ -272,7 +272,7 @@ def test_arm_command_validation():
     print("[arm] rejects malformed or unsafe commands before serial write")
     from arm_serial import (ArmSerial, _serial_candidates,
                             assert_home_pose_match, parse_home_pose_line,
-                            parse_status_line)
+                            parse_distance_line, parse_status_line)
     from unittest.mock import patch
 
     with patch("arm_serial.glob.glob") as mocked_glob:
@@ -290,6 +290,9 @@ def test_arm_command_validation():
           and config.JOINT_NAMES
           == ["base", "shoulder", "elbow", "wrist_pitch", "gripper", "wrist_roll"],
           "physical six-servo pin and joint map is exact")
+    check(config.ULTRASONIC_TRIGGER_PIN == 7
+          and config.ULTRASONIC_ECHO_PIN == 6,
+          "wrist ultrasonic trigger/echo pins do not overlap six servos")
     check(config.HOME_POSE == [90, 70, 90, 140, 170, 170],
           "six-servo HOME pose matches the latest raised camera pose")
     check(config.SERVO_MIN == [0, 0, 0, 130, 90, 0]
@@ -301,6 +304,15 @@ def test_arm_command_validation():
     firmware_home = "H " + " ".join(str(angle) for angle in config.HOME_POSE)
     check(parse_home_pose_line(firmware_home) == config.HOME_POSE,
           "compiled firmware HOME pose is parsed")
+    check(parse_distance_line("D 237") == 237
+          and parse_distance_line("D -1") is None,
+          "ultrasonic millimetres and no-echo sentinel are parsed")
+    for invalid in ("D", "D bad", "D 1", "D 5000", "C 237"):
+        try:
+            parse_distance_line(invalid)
+            check(False, f"malformed ultrasonic reply rejected: {invalid}")
+        except ValueError:
+            check(True, f"malformed ultrasonic reply rejected: {invalid}")
     check(assert_home_pose_match(config.HOME_POSE),
           "matching local and firmware HOME poses pass")
     stale_home = list(config.HOME_POSE)
@@ -387,16 +399,21 @@ def test_planar_pick_calibration_and_detection():
 
 
 def test_validate_handles_short_arrays():
-    print("[config] malformed servo arrays are reported without crashing")
+    print("[config] malformed servo arrays and sensor pin overlap are reported")
     import validate
     original = config.SERVO_MIN
+    original_trigger = config.ULTRASONIC_TRIGGER_PIN
     try:
         config.SERVO_MIN = [0]
+        config.ULTRASONIC_TRIGGER_PIN = config.SERVO_PINS[0]
         errors, _warnings = validate.validate()
         check(any("SERVO_MIN has" in error for error in errors),
               "short servo array reported")
+        check("ultrasonic pins overlap SERVO_PINS" in errors,
+              "ultrasonic/servo pin collision reported")
     finally:
         config.SERVO_MIN = original
+        config.ULTRASONIC_TRIGGER_PIN = original_trigger
 
 
 def _synth_epoch(fs, error=False):
