@@ -3453,3 +3453,28 @@ and the trained model backend.
   ever invoking grasp.
 - Added the measured floor-approach pose to the forward-envelope regression
   test.
+
+## Patch 93 — prioritize the physical floor stop before scoring an unused pose
+
+### Physical finding
+
+- The full run reproduced the intended descent exactly:
+  `[107,84,178] → [111,80,177] → [120,73,175]`, while stable ultrasonic
+  distance decreased `159 → 149 → 118 mm`.
+- At the last commanded pose the fingertip remained 12.0 mm above the modeled
+  floor. The next candidate `[132,66,173]` would sweep through -9.1 mm, so it
+  must never be commanded; its only role is to prove that the 10 mm physical
+  stop has been reached.
+- The forward-envelope check inspected that deliberately unused below-floor
+  candidate before the floor-stop branch and aborted first.
+
+### Changes
+
+- Moved swept fingertip-floor evaluation ahead of the forward-envelope check.
+  Crossing the 10 mm guard now immediately enters clearance-lift and grasp from
+  the current safe pose; the below-floor candidate is neither otherwise scored
+  nor sent to a servo.
+- Forward-branch rejection still applies to every candidate that could actually
+  be commanded.
+- Added a regression test for the measured 12.0 mm safe pose and -9.1 mm
+  rejected transition.

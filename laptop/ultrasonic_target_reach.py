@@ -786,11 +786,6 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
         # motor 4 afterward: on this arm it rotates the entire distal hand, so a
         # camera-only correction would also pull the fingers toward the base.
         next_pose = list(plan["pose"])
-        if not approach_stays_forward(approach_start_x_mm, next_pose):
-            raise RuntimeError(
-                "approach rejected: candidate would fold the fingertip "
-                f"inward to {fingertip_forward_x_mm(next_pose):.1f}mm "
-                f"from forward start {approach_start_x_mm:.1f}mm")
         swept_floor_clearance = transition_fingertip_floor_clearance_mm(
             pose, next_pose)
         if swept_floor_clearance <= FINGERTIP_FLOOR_STOP_MM:
@@ -808,6 +803,11 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
                 "fingertip_floor_clearance_mm": swept_floor_clearance,
                 "preview": str(PREVIEW),
             }
+        if not approach_stays_forward(approach_start_x_mm, next_pose):
+            raise RuntimeError(
+                "approach rejected: candidate would fold the fingertip "
+                f"inward to {fingertip_forward_x_mm(next_pose):.1f}mm "
+                f"from forward start {approach_start_x_mm:.1f}mm")
         report = safety.transition_report(pose, next_pose)
         if not report.safe:
             raise RuntimeError(

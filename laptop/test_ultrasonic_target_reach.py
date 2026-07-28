@@ -52,6 +52,17 @@ class ApproachStopTests(unittest.TestCase):
         self.assertLessEqual(swept, fingertip_floor_clearance_mm(high))
         self.assertLessEqual(swept, fingertip_floor_clearance_mm(low) + 0.1)
 
+    def test_measured_last_descent_crosses_floor_guard(self):
+        safe_last = [90, 120, 73, 175, 90, 170]
+        rejected_next = [90, 132, 66, 173, 90, 170]
+
+        self.assertGreater(fingertip_floor_clearance_mm(safe_last), 10.0)
+        self.assertLess(
+            transition_fingertip_floor_clearance_mm(
+                safe_last, rejected_next),
+            10.0,
+        )
+
     def test_final_close_requires_object_between_physical_fingers(self):
         scene = SimpleNamespace(gripper=SimpleNamespace(
             center=(640.0, 690.0), opening_px=300.0))
