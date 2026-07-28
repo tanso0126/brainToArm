@@ -1,6 +1,9 @@
 import unittest
 from types import SimpleNamespace
 
+import cv2
+import numpy as np
+
 from ultrasonic_target_reach import (
     _final_grasp_gate,
     _retained_image_gate,
@@ -13,6 +16,7 @@ from ultrasonic_target_reach import (
     open_ready_pose,
     tracking_wrist_target,
     transition_fingertip_floor_clearance_mm,
+    vivid_table_candidates,
 )
 
 
@@ -95,6 +99,28 @@ class ApproachStopTests(unittest.TestCase):
         background = SimpleNamespace(center=(546.0, 450.0))
         self.assertTrue(_candidate_on_sonar_axis(near_axis, 1280))
         self.assertFalse(_candidate_on_sonar_axis(background, 1280))
+
+    def test_vivid_fallback_is_hue_independent_and_axis_ranked(self):
+        frame = np.full((720, 1280, 3), 215, dtype=np.uint8)
+        cv2.rectangle(frame, (625, 495), (650, 595), (255, 0, 0), -1)
+        cv2.rectangle(frame, (430, 470), (520, 570), (0, 255, 255), -1)
+
+        candidates = vivid_table_candidates(frame)
+
+        self.assertGreaterEqual(len(candidates), 2)
+        self.assertAlmostEqual(candidates[0].center[0], 637.5, delta=2.0)
+        self.assertAlmostEqual(candidates[0].center[1], 545.0, delta=2.0)
+
+    def test_vivid_fallback_excludes_finger_marker(self):
+        frame = np.full((720, 1280, 3), 215, dtype=np.uint8)
+        cv2.rectangle(frame, (625, 495), (650, 595), (0, 255, 255), -1)
+        cv2.rectangle(frame, (700, 560), (760, 640), (255, 0, 0), -1)
+
+        candidates = vivid_table_candidates(
+            frame, marker_boxes=[(695, 555, 70, 90)])
+
+        self.assertEqual(len(candidates), 1)
+        self.assertAlmostEqual(candidates[0].center[0], 637.5, delta=2.0)
 
 if __name__ == "__main__":
     unittest.main()

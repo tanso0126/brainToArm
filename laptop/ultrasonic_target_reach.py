@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import argparse
 
+import cv2
 import numpy as np
 
 import arm_fk
@@ -40,6 +41,7 @@ from look_reach import (
     plan_resolved_step,
 )
 from ultrasonic_depth import acquire_profile
+from vision_segment import ObjectDetection
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,6 +76,14 @@ RETAINED_HORIZONTAL_RATIO = 0.20
 LOADED_HOME_REASSERT_TEMPLATE = [90, 90, 90, 150, 180, 170]
 SEARCH_WRIST_SEQUENCE = (140, 150, 160, 170, 180)
 SEARCH_SELECTION_MIN_WRIST = 170
+VIVID_MIN_SATURATION = 70
+VIVID_MIN_VALUE = 45
+VIVID_MIN_AREA_RATIO = 0.0004
+VIVID_MAX_AREA_RATIO = 0.04
+VIVID_SEARCH_TOP_RATIO = 0.42
+VIVID_SEARCH_BOTTOM_RATIO = 0.90
+VIVID_SEARCH_LEFT_RATIO = 0.25
+VIVID_SEARCH_RIGHT_RATIO = 0.75
 FAR_ADVANCE_MM = 20.0
 MID_ADVANCE_MM = 15.0
 APPROACH_MAX_JOINT_STEP_DEG = 12
@@ -330,6 +340,126 @@ def _clear_target_lock(selector):
     selector.lock = None
 
 
+def _box_overlap_fraction(box, obstacle, padding=12):
+    """Fraction of ``box`` covered by a padded finger-marker box."""
+    x, y, width, height = box
+    ox, oy, owidth, oheight = obstacle
+    ox -= padding
+    oy -= padding
+    owidth += 2 * padding
+    oheight += 2 * padding
+    left, top = max(x, ox), max(y, oy)
+    right = min(x + width, ox + owidth)
+    bottom = min(y + height, oy + oheight)
+    intersection = max(0, right - left) * max(0, bottom - top)
+    return intersection / float(max(1, width * height))
+
+
+def vivid_table_candidates(frame, marker_boxes=()):
+    """Find compact, vividly distinct tabletop objects without a hue preset.
+
+    FastSAM occasionally omits a narrow real object entirely.  This fallback
+    finds sufficiently saturated connected components only in the near-table
+    search band, removes the coloured finger markers, and ranks surviving
+    components by proximity to the camera/sonar axis.  It intentionally does
+    not encode blue, yellow, or any other target colour.
+    """
+    height, width = frame.shape[:2]
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(
+        hsv,
+        np.asarray((0, VIVID_MIN_SATURATION, VIVID_MIN_VALUE), dtype=np.uint8),
+        np.asarray((179, 255, 255), dtype=np.uint8),
+    )
+    roi = np.zeros_like(mask)
+    top = int(round(VIVID_SEARCH_TOP_RATIO * height))
+    bottom = int(round(VIVID_SEARCH_BOTTOM_RATIO * height))
+    left = int(round(VIVID_SEARCH_LEFT_RATIO * width))
+    right = int(round(VIVID_SEARCH_RIGHT_RATIO * width))
+    roi[top:bottom, left:right] = 255
+    mask = cv2.bitwise_and(mask, roi)
+    mask = cv2.morphologyEx(
+        mask, cv2.MORPH_OPEN, np.ones((3, 3), dtype=np.uint8))
+    mask = cv2.morphologyEx(
+        mask, cv2.MORPH_CLOSE, np.ones((7, 7), dtype=np.uint8))
+
+    count, labels, stats, centroids = cv2.connectedComponentsWithStats(
+        mask, connectivity=8)
+    frame_area = float(width * height)
+    minimum_area = VIVID_MIN_AREA_RATIO * frame_area
+    maximum_area = VIVID_MAX_AREA_RATIO * frame_area
+    aim_x = SONAR_AIM_X_RATIO * float(width)
+    detections = []
+    for label in range(1, count):
+        x, y, box_width, box_height, area = (
+            int(value) for value in stats[label])
+        if not minimum_area <= area <= maximum_area:
+            continue
+        if box_width < 10 or box_height < 10:
+            continue
+        if y + box_height >= bottom:
+            continue
+        bbox = (x, y, box_width, box_height)
+        if any(_box_overlap_fraction(bbox, marker) > 0.15
+               for marker in marker_boxes):
+            continue
+        pixels = hsv[:, :, 1][labels == label]
+        values = hsv[:, :, 2][labels == label]
+        center = tuple(float(value) for value in centroids[label])
+        detections.append(ObjectDetection(
+            center=center,
+            bbox=bbox,
+            area=float(area),
+            confidence=0.97,
+            median_saturation=float(np.median(pixels)),
+            median_value=float(np.median(values)),
+        ))
+    detections.sort(key=lambda item: (
+        abs(float(item.center[0]) - aim_x),
+        -float(item.center[1]),
+        -float(item.area),
+    ))
+    return detections
+
+
+class VividFallbackDetector:
+    """Add generic colour-connected candidates to every FastSAM scene."""
+
+    def __init__(self, primary):
+        self.primary = primary
+
+    def scene(self, frame):
+        scene, observation = self.primary.scene(frame)
+        vivid = vivid_table_candidates(frame, scene.marker_boxes)
+        for candidate in vivid:
+            if any(
+                    abs(candidate.center[0] - existing.center[0]) < 12
+                    and abs(candidate.center[1] - existing.center[1]) < 12
+                    for existing in scene.ranked):
+                continue
+            scene.ranked.append(candidate)
+        return scene, observation
+
+
+def _choose_vivid_on_axis(frame, scene, selector, pose):
+    """Prefer a verified on-axis vivid component after a model miss."""
+    candidates = [
+        item for item in vivid_table_candidates(frame, scene.marker_boxes)
+        if _candidate_on_sonar_axis(item, frame.shape[1])
+    ]
+    if not candidates:
+        return None
+    _clear_target_lock(selector)
+    scene.ranked = candidates + [
+        item for item in scene.ranked
+        if all(
+            abs(item.center[0] - vivid.center[0]) >= 12
+            or abs(item.center[1] - vivid.center[1]) >= 12
+            for vivid in candidates)
+    ]
+    return selector.choose(scene, pose=pose)
+
+
 def _open_and_find_target(
         client, mover, safety, detector, selector, pose, execute):
     """Open at HOME, then lower the wrist camera through a bounded search."""
@@ -348,7 +478,10 @@ def _open_and_find_target(
             detector, target_selector=selector, pose=pose)
         return pose, frame, scene, candidate
 
-    for wrist in SEARCH_WRIST_SEQUENCE:
+    current_wrist = int(pose[config.J_WRIST])
+    search_sequence = (current_wrist,) + tuple(
+        wrist for wrist in SEARCH_WRIST_SEQUENCE if wrist != current_wrist)
+    for wrist in search_sequence:
         search_pose = list(pose)
         search_pose[config.J_WRIST] = int(wrist)
         if search_pose != pose:
@@ -376,6 +509,16 @@ def _open_and_find_target(
                 flush=True,
             )
             _clear_target_lock(selector)
+        candidate = _choose_vivid_on_axis(
+            frame, scene, selector, pose)
+        if _candidate_on_sonar_axis(candidate, frame.shape[1]):
+            print(
+                f"[sonar-reach] SEARCH vivid fallback locked "
+                f"center=({candidate.center[0]:.0f},"
+                f"{candidate.center[1]:.0f})",
+                flush=True,
+            )
+            return pose, frame, scene, candidate
     return pose, frame, scene, None
 
 
@@ -468,6 +611,8 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
         detector=None, selector=None):
     client = client or ArmSessionClient()
     detector = detector or WristSceneDetector()
+    if not isinstance(detector, VividFallbackDetector):
+        detector = VividFallbackDetector(detector)
     selector = selector or LookReachTargetSelector()
     safety = PhysicalArmSafety()
     mover = FloorServo(client, calib=None)

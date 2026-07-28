@@ -3351,3 +3351,28 @@ and the trained model backend.
   only at 170°. Any resulting lock more than 90 px from the sonar axis is
   cleared and search continues to 180°. Explicit ErrP veto history is retained
   while these accidental background locks are discarded.
+
+## Patch 89 — recover real tabletop objects omitted by FastSAM
+
+### Physical finding
+
+- With motor 4 at 180°, the raw wrist frame clearly contained the actual object
+  at approximately `(639,555)`, directly on the camera/sonar axis. FastSAM did
+  not propose that narrow object and instead proposed distant clutter, so the
+  unattended cycle safely ended as `no-target` without translating motors 2/3.
+
+### Changes
+
+- Added a hue-independent vivid-component fallback for the near-table search
+  band. It accepts any sufficiently saturated compact object, excludes the
+  detected red/blue finger-marker boxes and frame-edge regions, and ranks by
+  proximity to the measured sonar axis. No blue/yellow target preset or venue
+  background is encoded.
+- The fallback augments every later scene as well as initial search, allowing
+  the same target lock to be reacquired during approach when FastSAM continues
+  to omit it.
+- Search now evaluates the current safe wrist angle first. A controller already
+  at 180° can lock the visible object immediately instead of needlessly moving
+  back to 140° and lowering again.
+- Added synthetic tests proving hue independence, sonar-axis ranking, and
+  coloured-finger-marker exclusion.
