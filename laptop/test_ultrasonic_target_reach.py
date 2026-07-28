@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import cv2
 import numpy as np
 
+import config
 from ultrasonic_target_reach import (
     _best_final_grasp_candidate,
     _final_grasp_gate,
@@ -16,6 +17,7 @@ from ultrasonic_target_reach import (
     approach_stays_forward,
     approach_stop_decision,
     fingertip_floor_clearance_mm,
+    grip_hold_pose,
     home_pose_holding,
     loaded_home_reassert_pose,
     open_ready_pose,
@@ -159,6 +161,19 @@ class ApproachStopTests(unittest.TestCase):
         self.assertEqual(
             loaded_home_reassert_pose(held),
             [90, 90, 90, 150, 180, 170])
+
+    def test_loaded_hold_reduces_stall_without_opening(self):
+        closed = [90, 108, 78, 172, 180, 170]
+        holding = grip_hold_pose(closed)
+
+        self.assertEqual(holding, [90, 108, 78, 172, 165, 170])
+        self.assertGreater(holding[4], config.GRIP_OPEN)
+        self.assertLess(holding[4], config.GRIP_CLOSED)
+        self.assertEqual(
+            home_pose_holding(holding), [90, 70, 90, 140, 165, 170])
+        self.assertEqual(
+            loaded_home_reassert_pose(holding),
+            [90, 90, 90, 150, 165, 170])
 
     def test_full_cycle_opens_without_changing_home_observation_pose(self):
         home = [90, 70, 90, 140, 170, 170]

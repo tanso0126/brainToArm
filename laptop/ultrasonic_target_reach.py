@@ -422,6 +422,13 @@ def home_pose_holding(pose):
     return home
 
 
+def grip_hold_pose(pose):
+    """Back off from the empty-close endpoint to measured loaded preload."""
+    holding = list(pose)
+    holding[config.J_GRIP] = int(config.GRIP_HOLD)
+    return holding
+
+
 def loaded_home_reassert_pose(pose):
     """Distinct safe waypoint that forces a physical HOME pulse trajectory."""
     waypoint = list(LOADED_HOME_REASSERT_TEMPLATE)
@@ -683,8 +690,9 @@ def _enter_forward_observation(
 
 def _return_home_holding(client, mover, safety, pose):
     """Transport a retained object to HOME without ever opening the gripper."""
-    if int(pose[config.J_GRIP]) != int(config.GRIP_CLOSED):
-        raise RuntimeError("HOME transport requires a closed gripper")
+    if int(pose[config.J_GRIP]) not in (
+            int(config.GRIP_CLOSED), int(config.GRIP_HOLD)):
+        raise RuntimeError("HOME transport requires a closed/holding gripper")
     waypoint = loaded_home_reassert_pose(pose)
     home = home_pose_holding(pose)
     for start, target, label in (
@@ -786,8 +794,37 @@ def _clearance_grasp_and_verify(
         f"retained={retained_ok} ({retained_reason})",
         flush=True,
     )
+    transport_pose = verified
+    if retained_ok:
+        holding = grip_hold_pose(verified)
+        report = safety.transition_report(verified, holding)
+        if not report.safe:
+            raise RuntimeError(
+                "loaded gripper backoff rejected: " + report.explain())
+        print(
+            f"[sonar-reach] loaded gripper backoff "
+            f"{config.GRIP_CLOSED}->{config.GRIP_HOLD}deg",
+            flush=True,
+        )
+        mover.slow_move(holding, final_settle=0.45)
+        hold_frame = _fresh_frame(discard=2)
+        hold_scene, _observation = detector.scene(hold_frame)
+        held = _retained_corridor_candidate(hold_frame, hold_scene)
+        hold_ok, hold_reason = _retained_image_gate(hold_frame, held)
+        print(
+            f"[sonar-reach] low-stall hold retained={hold_ok} "
+            f"({hold_reason})",
+            flush=True,
+        )
+        if not hold_ok:
+            return {
+                "state": "hold-backoff-unverified", "pose": holding,
+                "distance_mm": distance_mm,
+                "retained_reason": hold_reason,
+            }
+        transport_pose = holding
     final_pose = (
-        _return_home_holding(client, mover, safety, verified)
+        _return_home_holding(client, mover, safety, transport_pose)
         if retained_ok else verified)
     return {
         "state": "home-with-object" if retained_ok else "closed-unverified",

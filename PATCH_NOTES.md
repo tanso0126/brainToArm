@@ -3561,3 +3561,34 @@ and the trained model backend.
   retention gate before loaded HOME is allowed.
 - Added positive held-object and negative short-background-blob regression
   tests.
+
+## Patch 97 — remove loaded-gripper stall before HOME transport
+
+### Corrected diagnosis
+
+- The operator observed that the arm still did not physically return HOME even
+  though the Uno reported the HOME numbers. The theory that an obstructed
+  gripper prevents the firmware command queue from completing is not literally
+  how this firmware works: it has no shaft encoder, advances only an internal
+  `current[]` angle, and emits `DONE` when that number reaches the PWM target.
+- The electrical consequence is real and more important. The held-object image
+  measured about 151 px between finger markers. The empty-jaw calibration maps
+  150° to 201 px and 170° to 125 px, placing the obstruction near 163°. Keeping
+  an unreachable 180° command corresponds to trying to compress from 151 px to
+  the empty 89 px endpoint continuously. That can stall the small gripper servo,
+  draw the shared supply down, and leave the shoulder/elbow without enough
+  torque even while firmware status falsely advances.
+
+### Changes
+
+- Added a measured 165° loaded hold angle. It requests an empty-jaw opening of
+  roughly 144 px—about 7 px of clamping preload on the observed 151 px object
+  instead of the roughly 62 px preload implied by 180°.
+- After close and verification lift, the controller now backs motor 5 off from
+  180° to 165° before moving any large joint. It then takes a fresh camera frame
+  and requires the same continuous closed-jaw corridor retention evidence.
+- Loaded reassert and HOME poses preserve 165° throughout transport. A failed
+  low-stall retention check stops transport instead of opening the fingers or
+  pretending HOME was reached.
+- Added regression coverage for the 180° close → 165° hold → loaded waypoint →
+  loaded HOME sequence.
