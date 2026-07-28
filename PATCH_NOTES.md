@@ -3085,3 +3085,22 @@ and the trained model backend.
 
 - Added policy tests for the measured 159→156 mm approach, near standoff,
   excessive range increase and two-step depth stall.
+
+## Patch 81 — do not compare depth across an aim-only wrist rotation
+
+### Physical finding
+
+- After two valid approach steps, the target sat above the sonar centre.
+  Motor 4 changed 178→175 solely to re-aim it; visual translation was 0 mm.
+- The new pointing direction changed the selected acoustic reflector from
+  142.0 to 151.8 mm. Treating that as an approach moving backward was a category
+  error, although the fail-closed stop itself worked.
+
+### Changes
+
+- The controller now records whether the preceding command translated toward
+  the target or only rotated the sensor.
+- An aim-only move resets the depth baseline after the new bearing settles.
+  Monotonic distance checks compare only genuine translational approach steps.
+- Added a regression proving 142→151.8 mm after re-aiming becomes a fresh
+  baseline instead of a false reverse-motion fault.

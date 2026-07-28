@@ -88,6 +88,15 @@ def range_progress_decision(history, stop_range_mm=STOP_RANGE_MM,
     return RangeDecision("continue", f"range {current:.1f} mm")
 
 
+def update_range_progress(history, distance_mm, previous_was_approach):
+    """Reset the depth baseline after an aim-only sensor rotation."""
+    if previous_was_approach:
+        updated = [*history, float(distance_mm)]
+    else:
+        updated = [float(distance_mm)]
+    return updated, range_progress_decision(updated)
+
+
 def _reacquire(detector, selector, attempts=3):
     frame = scene = candidate = None
     for _ in range(attempts):
@@ -157,6 +166,7 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
     initial_area = float(candidate.area)
     previous_area = initial_area
     range_history = []
+    previous_was_approach = False
 
     for step in range(int(max_steps)):
         frame, scene, candidate = _reacquire(detector, selector)
@@ -173,8 +183,8 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
 
         profile, attempts = wait_for_stable_profile(client, timeout_s=8.0)
         distance = float(profile.distance_mm)
-        range_history.append(distance)
-        decision = range_progress_decision(range_history)
+        range_history, decision = update_range_progress(
+            range_history, distance, previous_was_approach)
         jaw_ready, jaw_reason = _jaw_gate(scene, candidate)
         _draw_preview(
             frame, scene, candidate, pose, distance, step, decision)
@@ -235,6 +245,7 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
                 "state": "planned", "pose": next_pose,
                 "distance_mm": distance, "preview": str(PREVIEW)}
         mover.slow_move(next_pose, final_settle=0.35)
+        previous_was_approach = not bool(plan.get("aim_only"))
         time.sleep(0.10)
 
     return {
