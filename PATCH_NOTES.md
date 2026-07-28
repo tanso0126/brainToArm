@@ -3253,6 +3253,21 @@ and the trained model backend.
   open-jaw clearance lift. The controller reacquires the same locked object and
   reruns the strict coloured-finger alignment gate before allowing closure.
 - After closing, the arm performs a collision-checked 25 mm verification lift.
-  A retained object must remain within 35 px of its pre-close wrist-camera
-  centre. The controller reports `retained` only with that direct evidence;
+  The same locked object must remain centred and bottom-clipped in the wrist
+  view. The controller reports `retained` only with that direct evidence;
   otherwise it stays closed and reports `closed-unverified`.
+
+### Corrected physical ground truth
+
+- The first 12 mm clearance lift produced a detected jaw-row gap of `-25 px`.
+  The automatic gate rejected it, but direct observation showed the object was
+  exactly between the two fingers. Closing at pose
+  `[90,124,66,179,90,170]` and lifting 25 mm to
+  `[90,111,70,177,180,170]` visibly retained the object.
+- Updated the valid final gap range to `-35..90 px`; the previous positive-only
+  lower bound confused a bottom-clipped close object with overshoot.
+- Rounding in the fixed-pitch lift changed the segmentation centre by 58 px
+  even though the object was visibly held, so centre displacement is now
+  diagnostic only. Retention requires the same locked object to remain
+  horizontally centred with its bounding box bottom in the lowest 10% of the
+  wrist frame, matching the successful held-object image.

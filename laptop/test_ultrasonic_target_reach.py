@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from ultrasonic_target_reach import (
     _final_grasp_gate,
+    _retained_image_gate,
     adaptive_advance_mm,
     approach_stop_decision,
     fingertip_floor_clearance_mm,
@@ -47,15 +48,30 @@ class ApproachStopTests(unittest.TestCase):
         aligned = SimpleNamespace(
             center=(650.0, 500.0), bbox=(610, 400, 80, 240))
         overshot = SimpleNamespace(
-            center=(650.0, 650.0), bbox=(610, 520, 80, 190))
+            center=(650.0, 680.0), bbox=(610, 540, 80, 220))
+        measured_perfect = SimpleNamespace(
+            center=(650.0, 600.0), bbox=(610, 470, 80, 245))
 
         self.assertTrue(_final_grasp_gate(scene, aligned)[0])
         self.assertFalse(_final_grasp_gate(scene, overshot)[0])
+        self.assertTrue(_final_grasp_gate(scene, measured_perfect)[0])
 
     def test_motor_four_uses_measured_pixel_error_with_large_headroom(self):
         self.assertEqual(tracking_wrist_target(178, -60), 168)
         self.assertEqual(tracking_wrist_target(168, 30), 173)
         self.assertEqual(tracking_wrist_target(178, 0), 178)
+
+    def test_retention_uses_bottom_clipped_locked_object(self):
+        import numpy as np
+
+        frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+        held = SimpleNamespace(
+            center=(614.0, 528.0), bbox=(566, 335, 97, 385))
+        table = SimpleNamespace(
+            center=(614.0, 430.0), bbox=(566, 300, 97, 260))
+
+        self.assertTrue(_retained_image_gate(frame, held)[0])
+        self.assertFalse(_retained_image_gate(frame, table)[0])
 
 if __name__ == "__main__":
     unittest.main()

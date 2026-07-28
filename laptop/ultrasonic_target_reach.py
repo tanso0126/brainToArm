@@ -62,14 +62,15 @@ STOP_RANGE_MM = MEASURED_DEEPEST_OBJECT_RANGE_MM + SONAR_STOP_MARGIN_MM
 FINGERTIP_FLOOR_STOP_MM = 10.0
 FAR_ROW_GAP_PX = 180.0
 SONAR_NEAR_ROW_GAP_PX = 110.0
-FINAL_JAW_GAP_MIN_PX = 15.0
+FINAL_JAW_GAP_MIN_PX = -35.0
 FINAL_JAW_GAP_MAX_PX = 90.0
 FINAL_JAW_HORIZONTAL_FRACTION = 0.30
 TRACKING_PX_PER_WRIST_DEG = -6.0
 TRACKING_MAX_WRIST_STEP_DEG = 10
 PRE_CLOSE_LIFT_MM = 12.0
 VERIFY_LIFT_MM = 25.0
-RETAINED_CENTER_TOLERANCE_PX = 35.0
+RETAINED_BOTTOM_RATIO = 0.90
+RETAINED_HORIZONTAL_RATIO = 0.20
 FAR_ADVANCE_MM = 20.0
 MID_ADVANCE_MM = 15.0
 APPROACH_MAX_JOINT_STEP_DEG = 12
@@ -273,6 +274,25 @@ def _vertical_lift_pose(pose, lift_mm):
     return lifted
 
 
+def _retained_image_gate(frame, candidate):
+    """Held close-ups remain bottom-clipped and centred in the wrist view."""
+    if candidate is None:
+        return False, "locked object missing after lift"
+    height, width = frame.shape[:2]
+    bbox_bottom = float(candidate.bbox[1] + candidate.bbox[3])
+    bottom_ratio = bbox_bottom / float(height)
+    horizontal = abs(float(candidate.center[0]) - 0.5 * float(width))
+    if bottom_ratio < RETAINED_BOTTOM_RATIO:
+        return False, (
+            f"object bottom ratio {bottom_ratio:.2f} < "
+            f"{RETAINED_BOTTOM_RATIO:.2f}")
+    if horizontal > RETAINED_HORIZONTAL_RATIO * float(width):
+        return False, f"lifted object lateral error {horizontal:.0f}px"
+    return True, (
+        f"retained object bottom={bottom_ratio:.2f}, "
+        f"lateral={horizontal:.0f}px")
+
+
 def _clearance_grasp_and_verify(
         client, mover, safety, detector, selector, pose, distance_mm):
     """Lift open fingers off the table, close, then verify a retained lift."""
@@ -312,22 +332,24 @@ def _clearance_grasp_and_verify(
             "verification lift rejected: " + report.explain())
     mover.slow_move(verified, final_settle=0.65)
 
-    _frame, _scene, retained = _reacquire(detector, selector, attempts=4)
+    retained_frame, _scene, retained = _reacquire(
+        detector, selector, attempts=4)
     shift = None
     if retained is not None:
         shift = float(np.linalg.norm(
             np.asarray(retained.center, dtype=float) - reference_center))
-    retained_ok = shift is not None and shift <= RETAINED_CENTER_TOLERANCE_PX
+    retained_ok, retained_reason = _retained_image_gate(
+        retained_frame, retained)
     print(
         f"[sonar-reach] verification lift target shift="
         f"{'missing' if shift is None else f'{shift:.1f}px'} "
-        f"retained={retained_ok}",
+        f"retained={retained_ok} ({retained_reason})",
         flush=True,
     )
     return {
         "state": "retained" if retained_ok else "closed-unverified",
         "pose": verified, "distance_mm": distance_mm,
-        "retained_shift_px": shift,
+        "retained_shift_px": shift, "retained_reason": retained_reason,
     }
 
 
