@@ -2583,3 +2583,37 @@ and the trained model backend.
   high-load window, and sends robot-biased allocation to the web simulation.
 - Full Python pipeline, Python compilation, Ruff, dashboard lint, production
   build, and rendered-shell tests pass.
+
+## Patch 65 — tolerate brief motion artefacts and make auto axes truly independent
+
+### Diagnosis
+
+- Calibration previously labeled a complete eight-second window saturated when
+  even one raw sample touched an ADC rail. That was too strict for a brief
+  movement artefact.
+- Auto scale already measured each channel separately, but its coarse
+  `1 → 2 → 5 → 10` rounding collapsed different channel amplitudes onto the
+  same displayed range. On the connected stream, distinct p98 amplitudes around
+  1.55–1.86 V therefore appeared mostly as one ±2000 mV axis.
+
+### Changes
+
+- Raised the rest-window tolerance from zero to **5% rail samples**. Up to 5%
+  transient clipping can be treated as signal-present when the filtered span is
+  otherwise valid; more than 5% remains saturated. The stable filtered-span
+  ceiling was also raised from 80% to 95% of the ADC span. Both thresholds are
+  explicit, validated `config.py` constants.
+- Kept the safety boundary explicit: the current connected stream has roughly
+  61–73% rail occupancy on required channels, so it remains blocked rather than
+  creating invalid ErrP/TAR baselines.
+- Replaced the coarse shared-looking auto-scale quantization with independent
+  two-significant-digit ceiling values per channel. Each channel retains its own
+  p98 measurement, headroom, expansion, and contraction history.
+- Exposed the 5% calibration tolerance in the API and EEG monitor.
+
+### Verification
+
+- Added boundary tests proving exactly 5% transient rail occupancy is accepted
+  while 6% remains saturated.
+- Python compilation, Ruff, full pipeline, dashboard lint/build, and rendered
+  UI tests pass.

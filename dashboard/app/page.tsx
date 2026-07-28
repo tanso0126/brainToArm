@@ -77,6 +77,8 @@ type DashboardStatus = {
     notchHz: number;
     notchQ: number;
     metricWindowSeconds: number;
+    calibrationMaxClippingPercent: number;
+    calibrationMaxAdcSpanFraction: number;
     pgaGainIndex: number;
     pgaGain: number;
     electrodeUvCalibrated: boolean;
@@ -189,12 +191,11 @@ function apiError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function niceScale(value: number) {
+function independentAutoScale(value: number) {
   const safe = Math.max(0.001, Number.isFinite(value) ? value : 0.001);
   const magnitude = 10 ** Math.floor(Math.log10(safe));
-  const normalized = safe / magnitude;
-  const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
-  return step * magnitude;
+  const quantum = magnitude / 10;
+  return Math.ceil(safe / quantum) * quantum;
 }
 
 function formatAxisScale(value: number) {
@@ -327,14 +328,14 @@ function WaveformCanvas({
           if (!magnitudes.length) return;
           const percentile = magnitudes[
             Math.min(magnitudes.length - 1, Math.floor(magnitudes.length * 0.98))];
-          const target = niceScale(percentile * 1.15);
+          const target = independentAutoScale(percentile * 1.15);
           const previous = autoScalesRef.current[channel];
           // Expand immediately to avoid clipping. Contract only when the useful
           // signal occupies less than half the lane, preventing axis chatter.
           autoScalesRef.current[channel] = target >= previous
             ? target
             : target <= previous * 0.5
-              ? niceScale(Math.max(target, previous * 0.5))
+              ? independentAutoScale(Math.max(target, previous * 0.5))
               : previous;
         });
         lastAutoScaleAtRef.current = frameTime;
@@ -986,7 +987,7 @@ export default function Home() {
             <button className="secondary-button load-calibrate" disabled={!isRunning || busy || !calibrationWindow?.ready} onClick={() => perform("/api/errp/calibrate", { seconds: 8 })}>
               <Brain size={14} />{loadStatus?.baselineReady ? "ErrP + TAR 다시 보정" : calibrationWindow?.ready ? "깨끗한 8초로 ErrP + TAR 보정" : `CH1·2·3·4·8 대기 · ${calibrationWindow?.samples ?? 0}/${calibrationWindow?.requiredSamples ?? 1638}`}
             </button>
-            <p className="fine-print">2초 Welch 창을 1초마다 갱신합니다. TAR 상승은 로봇 가중치·ErrP 임계값·반영 간격을 높이고, TAR 하락은 인간/ErrP 반영을 높입니다. ErrP 확률 자체는 모든 행동 판정창에서 계속 계산합니다.</p>
+            <p className="fine-print">2초 Welch 창을 1초마다 갱신합니다. 8초 중 순간 rail 표본은 최대 {status?.signal.calibrationMaxClippingPercent ?? 5}%까지 허용하지만 지속 포화는 차단합니다. TAR 상승은 로봇 가중치·ErrP 임계값·반영 간격을 높이고, TAR 하락은 인간/ErrP 반영을 높입니다.</p>
           </article>
 
           <article className="panel quality-panel">

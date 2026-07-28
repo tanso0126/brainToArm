@@ -186,6 +186,9 @@ EEG_CHANNELS = 8
 # each 1024-byte report contains 32 rows across 16 physical channels.
 EEG_FS = 256
 EEG_MIN_EPOCH_FRACTION = 0.80  # abort a decision if too many onset-locked samples are missing
+# Rest calibration tolerates brief motion artefacts, never sustained saturation.
+EEG_QUALITY_MAX_TRANSIENT_CLIPPING_PERCENT = 5.0
+EEG_QUALITY_MAX_STABLE_ADC_SPAN_FRACTION = 0.95
 EEG_CONFIG_VERIFIED = False    # transport works; set True only after montage/rate signal validation
 
 # Compatibility-source scaling: LXSDF ships a 12-bit ADC value.

@@ -59,6 +59,12 @@ FILTER_LOW_HZ = 0.5
 FILTER_HIGH_HZ = 45.0
 NOTCH_HZ = 60.0
 NOTCH_Q = 30.0
+# A brief movement spike must not invalidate an entire eight-second rest
+# window. Sustained rail occupancy is still unusable for PSD/ErrP baselines.
+MAX_TRANSIENT_CLIPPING_PERCENT = (
+    config.EEG_QUALITY_MAX_TRANSIENT_CLIPPING_PERCENT)
+MAX_STABLE_ADC_SPAN_FRACTION = (
+    config.EEG_QUALITY_MAX_STABLE_ADC_SPAN_FRACTION)
 
 
 def sanitize_recording_name(value):
@@ -80,9 +86,11 @@ def analyze_signal_quality(values, raw_counts=None, raw_adc_mv=None):
                 / len(counts) if counts else 0.0)
     dc_offset = statistics.fmean(raw_adc_mv) if raw_adc_mv else 0.0
     effective_lsb_mv = abs(ADC_VOLTS_PER_COUNT * 2 * 1000.0)
-    if clipping > 0.0:
+    if clipping > MAX_TRANSIENT_CLIPPING_PERCENT:
         state = "saturated"
-    elif peak_to_peak >= abs(ADC_VOLTS_PER_COUNT * 1000.0) * 65534 * 0.8:
+    elif peak_to_peak >= (
+            abs(ADC_VOLTS_PER_COUNT * 1000.0)
+            * 65534 * MAX_STABLE_ADC_SPAN_FRACTION):
         state = "unstable"
     elif peak_to_peak <= effective_lsb_mv * 2:
         state = "flat"
@@ -727,6 +735,10 @@ class EEGDashboardService:
                     "notchHz": NOTCH_HZ,
                     "notchQ": NOTCH_Q,
                     "metricWindowSeconds": 2.0,
+                    "calibrationMaxClippingPercent": (
+                        MAX_TRANSIENT_CLIPPING_PERCENT),
+                    "calibrationMaxAdcSpanFraction": (
+                        MAX_STABLE_ADC_SPAN_FRACTION),
                     "pgaGainIndex": self._gain_index,
                     "pgaGain": PGA_GAINS[self._gain_index],
                     "electrodeUvCalibrated": False,

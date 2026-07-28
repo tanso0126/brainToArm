@@ -214,6 +214,12 @@ acquisition, lower PGA (start with ×1.00), reconnect the indicated channels plu
 reference/ground, restart, and wait for a new clean eight-second window. Do not
 bypass saturation: it cannot produce defensible ErrP or TAR baselines.
 
+Brief movement artefacts no longer invalidate the entire window: up to 5% of raw
+samples may touch an ADC rail if the filtered span remains valid. More than 5%
+is sustained saturation and stays blocked. The current hardware observation was
+roughly 61–73% on the required channels, which indicates connection/reference
+trouble rather than ordinary participant distraction.
+
 ## 8. Local endpoints
 
 ```text

@@ -109,6 +109,12 @@ def validate():
             errs.append(f"ERRP_BAND high {hi}Hz >= Nyquist {config.EEG_FS/2}Hz")
     if not (0 < config.EEG_MIN_EPOCH_FRACTION <= 1):
         errs.append("EEG_MIN_EPOCH_FRACTION must be in (0, 1]")
+    if not (0 <= config.EEG_QUALITY_MAX_TRANSIENT_CLIPPING_PERCENT < 100):
+        errs.append(
+            "EEG_QUALITY_MAX_TRANSIENT_CLIPPING_PERCENT must be in [0, 100)")
+    if not (0 < config.EEG_QUALITY_MAX_STABLE_ADC_SPAN_FRACTION <= 1):
+        errs.append(
+            "EEG_QUALITY_MAX_STABLE_ADC_SPAN_FRACTION must be in (0, 1]")
     if config.ERRP_BASELINE_S <= 0 or config.ERRP_WINDOW_S <= 0:
         errs.append("ERRP_BASELINE_S and ERRP_WINDOW_S must be > 0")
     if not 0 <= config.ERRP_THRESHOLD <= 1:

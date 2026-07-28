@@ -18,8 +18,8 @@ from cognitive_load import AutonomyAllocator, CognitiveLoadEstimator
 from polyg_hid import (
     ADC_VOLTS_PER_COUNT, PolyGIHID, command_report, counts_to_adc_mv, decode_report)
 from eeg_dashboard import (
-    EEGDashboardService, EEGSignalProcessor, analyze_signal_quality,
-    sanitize_recording_name)
+    MAX_TRANSIENT_CLIPPING_PERCENT, EEGDashboardService, EEGSignalProcessor,
+    analyze_signal_quality, sanitize_recording_name)
 from wrist_vision import (
     LATEST_PREVIEW_PATH, LATEST_RAW_PATH, WristDetector, frame_quality)
 from wrist_search import PlanarSearchSafety, WristSearcher
@@ -163,6 +163,16 @@ def test_eeg_dashboard_helpers():
           "constant channel is labeled flat")
     check(analyze_signal_quality([1.0, -1.0] * 32, [32766, -32768] * 32)["state"] == "saturated",
           "clipped channel is labeled saturated")
+    transient_counts = [32766] * 5 + [0] * 95
+    check(analyze_signal_quality(
+        [-1.0, 0.5, 1.2, -0.4] * 25,
+        transient_counts)["state"] == "present",
+        f"up to {MAX_TRANSIENT_CLIPPING_PERCENT:.0f}% transient rail samples are tolerated")
+    sustained_counts = [32766] * 6 + [0] * 94
+    check(analyze_signal_quality(
+        [-1.0, 0.5, 1.2, -0.4] * 25,
+        sustained_counts)["state"] == "saturated",
+        "sustained rail occupancy still blocks calibration")
     check(analyze_signal_quality([-1.0, 0.5, 1.2, -0.4] * 16, [0] * 64)["state"] == "present",
           "varying unclipped channel is labeled signal-present")
 
