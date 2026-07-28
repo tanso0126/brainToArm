@@ -52,6 +52,7 @@ from errp import ErrPDetector
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD_DIR = REPO_ROOT / "dashboard"
 RECORDING_DIR = REPO_ROOT / "recordings"
+BASELINE_PATH = REPO_ROOT / "data" / "eeg_baselines" / "latest.json"
 DEFAULT_API_PORT = 8765
 DEFAULT_UI_PORT = 3000
 CHANNELS = 8
@@ -65,6 +66,10 @@ MAX_TRANSIENT_CLIPPING_PERCENT = (
     config.EEG_QUALITY_MAX_TRANSIENT_CLIPPING_PERCENT)
 MAX_STABLE_ADC_SPAN_FRACTION = (
     config.EEG_QUALITY_MAX_STABLE_ADC_SPAN_FRACTION)
+ADC_RAIL_COUNTS = (-32768, 32766)
+ADC_INPUT_RANGE_MV = tuple(sorted(
+    value * ADC_VOLTS_PER_COUNT * 1000.0 for value in ADC_RAIL_COUNTS))
+ADC_FULL_SPAN_MV = ADC_INPUT_RANGE_MV[1] - ADC_INPUT_RANGE_MV[0]
 
 
 def sanitize_recording_name(value):
@@ -82,15 +87,15 @@ def analyze_signal_quality(values, raw_counts=None, raw_adc_mv=None):
     rms = (sum(value * value for value in values) / len(values)) ** 0.5
     peak_to_peak = max(values) - min(values)
     counts = raw_counts or []
-    clipping = (100.0 * sum(value <= -32768 or value >= 32766 for value in counts)
+    clipping = (100.0 * sum(
+        value <= ADC_RAIL_COUNTS[0] or value >= ADC_RAIL_COUNTS[1]
+        for value in counts)
                 / len(counts) if counts else 0.0)
     dc_offset = statistics.fmean(raw_adc_mv) if raw_adc_mv else 0.0
     effective_lsb_mv = abs(ADC_VOLTS_PER_COUNT * 2 * 1000.0)
     if clipping > MAX_TRANSIENT_CLIPPING_PERCENT:
         state = "saturated"
-    elif peak_to_peak >= (
-            abs(ADC_VOLTS_PER_COUNT * 1000.0)
-            * 65534 * MAX_STABLE_ADC_SPAN_FRACTION):
+    elif peak_to_peak >= ADC_FULL_SPAN_MV * MAX_STABLE_ADC_SPAN_FRACTION:
         state = "unstable"
     elif peak_to_peak <= effective_lsb_mv * 2:
         state = "flat"
@@ -142,7 +147,11 @@ class EEGSignalProcessor:
 
 
 class EEGDashboardService:
-    def __init__(self, device_factory=PolyGIHID, enumerate_fn=enumerate_devices):
+    BASELINE_FORMAT = 1
+
+    def __init__(
+            self, device_factory=PolyGIHID, enumerate_fn=enumerate_devices,
+            baseline_path=BASELINE_PATH):
         self._device_factory = device_factory
         self._enumerate = enumerate_fn
         self._lock = threading.RLock()
@@ -172,6 +181,10 @@ class EEGDashboardService:
         self._sample_selector = config.EEG_HID_SAMPLE_SELECTOR
         self._errp_detector = ErrPDetector(backend=config.ERRP_BACKEND)
         self._errp_lock = threading.Lock()
+        self._baseline_lock = threading.Lock()
+        self._baseline_path = Path(baseline_path)
+        self._baseline_source = None
+        self._baseline_created_at = None
         self._errp_baseline_ready = False
         self._errp_last = None
         self._load_estimator = CognitiveLoadEstimator()
@@ -252,6 +265,8 @@ class EEGDashboardService:
             self._errp_detector = ErrPDetector(backend=config.ERRP_BACKEND)
             self._errp_baseline_ready = False
             self._errp_last = None
+            self._baseline_source = None
+            self._baseline_created_at = None
             self._load_estimator = CognitiveLoadEstimator()
             self._autonomy_allocator = AutonomyAllocator()
             self._load_baseline_ready = False
@@ -404,6 +419,169 @@ class EEGDashboardService:
             self._pending_marker = label
         return {"marker": label, "accepted": True}
 
+    def _baseline_signature_locked(self):
+        return {
+            "device": {
+                "vendorId": VID,
+                "productId": PID,
+            },
+            "acquisition": {
+                "samplingHz": config.EEG_FS,
+                "channels": CHANNELS,
+                "gainIndex": self._gain_index,
+                "sampleSelector": self._sample_selector,
+                "adcVoltsPerCount": ADC_VOLTS_PER_COUNT,
+            },
+            "displayFilter": {
+                "bandpassHz": [FILTER_LOW_HZ, FILTER_HIGH_HZ],
+                "bandpassOrder": 4,
+                "notchHz": NOTCH_HZ,
+                "notchQ": NOTCH_Q,
+            },
+            "errp": {
+                "backend": self._errp_detector.backend,
+                "channels": list(config.ERRP_CHANNELS),
+                "bandHz": list(config.ERRP_BAND),
+                "useCar": config.ERRP_USE_CAR,
+                "baselineSeconds": config.ERRP_BASELINE_S,
+                "windowSeconds": config.ERRP_WINDOW_S,
+            },
+            "cognitiveLoad": {
+                "thetaChannels": list(config.COG_THETA_CHANNELS),
+                "alphaChannels": list(config.COG_ALPHA_CHANNELS),
+                "thetaBandHz": list(config.COG_THETA_BAND),
+                "alphaBandHz": list(config.COG_ALPHA_BAND),
+                "windowSeconds": config.COG_WINDOW_S,
+                "psdSegmentSeconds": config.COG_PSD_SEGMENT_S,
+            },
+        }
+
+    def _read_saved_baseline(self):
+        with self._baseline_lock:
+            return json.loads(self._baseline_path.read_text(encoding="utf-8"))
+
+    def _baseline_path_label(self):
+        try:
+            return str(self._baseline_path.relative_to(REPO_ROOT))
+        except ValueError:
+            return str(self._baseline_path)
+
+    def _saved_baseline_compatibility_locked(self, payload):
+        if payload.get("format") != self.BASELINE_FORMAT:
+            return "저장 형식 버전이 다릅니다"
+        if payload.get("signature") != self._baseline_signature_locked():
+            return "장비/PGA/채널/샘플링/필터 설정이 현재 세션과 다릅니다"
+        baseline = payload.get("baseline")
+        if not isinstance(baseline, dict):
+            return "저장 기준값이 없습니다"
+        return ""
+
+    def saved_baseline_status(self):
+        if not self._baseline_path.exists():
+            return {
+                "available": False,
+                "compatible": False,
+                "reason": "저장된 안정 기준이 없습니다",
+                "createdAt": None,
+                "path": self._baseline_path_label(),
+            }
+        try:
+            payload = self._read_saved_baseline()
+            with self._lock:
+                reason = self._saved_baseline_compatibility_locked(payload)
+            return {
+                "available": True,
+                "compatible": not reason,
+                "reason": reason,
+                "createdAt": payload.get("createdAt"),
+                "path": self._baseline_path_label(),
+                "gainIndex": payload.get(
+                    "signature", {}).get("acquisition", {}).get("gainIndex"),
+                "samplingHz": payload.get(
+                    "signature", {}).get("acquisition", {}).get("samplingHz"),
+                "thetaChannels": [
+                    channel + 1 for channel in payload.get(
+                        "signature", {}).get(
+                            "cognitiveLoad", {}).get("thetaChannels", [])],
+                "alphaChannels": [
+                    channel + 1 for channel in payload.get(
+                        "signature", {}).get(
+                            "cognitiveLoad", {}).get("alphaChannels", [])],
+                "errpChannels": [
+                    channel + 1 for channel in payload.get(
+                        "signature", {}).get("errp", {}).get("channels", [])],
+            }
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            return {
+                "available": True,
+                "compatible": False,
+                "reason": f"저장 기준을 읽을 수 없습니다: {exc}",
+                "createdAt": None,
+                "path": self._baseline_path_label(),
+            }
+
+    def _save_baseline(self, load_state):
+        created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        with self._lock:
+            payload = {
+                "format": self.BASELINE_FORMAT,
+                "createdAt": created_at,
+                "warning": (
+                    "같은 피험자와 같은 전극/REF/GND 배치에서만 재사용하세요."),
+                "signature": self._baseline_signature_locked(),
+                "baseline": {
+                    "errpStdMv": float(self._errp_detector.baseline_std),
+                    "restTar": float(load_state.rest_tar),
+                    "thetaPowers": [
+                        float(value) for value in load_state.theta_powers],
+                    "alphaPowers": [
+                        float(value) for value in load_state.alpha_powers],
+                },
+            }
+        self._baseline_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self._baseline_path.with_suffix(".tmp")
+        with self._baseline_lock:
+            temporary.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8")
+            os.chmod(temporary, 0o600)
+            os.replace(temporary, self._baseline_path)
+        return created_at
+
+    def load_saved_baseline(self):
+        with self._lock:
+            if not self._running:
+                raise RuntimeError("저장 기준을 불러오기 전에 EEG 측정을 시작하세요")
+        try:
+            payload = self._read_saved_baseline()
+        except FileNotFoundError as exc:
+            raise RuntimeError("저장된 안정 기준이 없습니다") from exc
+        with self._lock:
+            reason = self._saved_baseline_compatibility_locked(payload)
+            if reason:
+                raise RuntimeError(f"저장 기준을 불러올 수 없습니다: {reason}")
+            baseline = payload["baseline"]
+            load_state = self._load_estimator.restore_baseline(
+                baseline["restTar"],
+                baseline["thetaPowers"],
+                baseline["alphaPowers"],
+            )
+            self._errp_detector.restore_baseline_std(baseline["errpStdMv"])
+            self._errp_baseline_ready = True
+            self._load_baseline_ready = True
+            self._load_state = load_state
+            self._load_last_update_mono = time.monotonic()
+            self._baseline_source = "saved"
+            self._baseline_created_at = payload.get("createdAt")
+            return {
+                "ready": True,
+                "source": self._baseline_source,
+                "createdAt": self._baseline_created_at,
+                "baselineStdMv": round(
+                    float(self._errp_detector.baseline_std), 6),
+                "restTar": float(load_state.rest_tar),
+            }
+
     def calibrate_errp(self, seconds=None):
         """Calibrate ErrP noise and resting TAR from one clean rest window."""
         seconds = float(config.COG_REST_S if seconds is None else seconds)
@@ -443,11 +621,14 @@ class EEGDashboardService:
                   "깨끗한 8초를 다시 확보하세요")
         load_state = self._load_estimator.calibrate(window)
         self._errp_detector.update_baseline(window)
+        created_at = self._save_baseline(load_state)
         with self._lock:
             self._errp_baseline_ready = True
             self._load_baseline_ready = True
             self._load_state = load_state
             self._load_last_update_mono = time.monotonic()
+            self._baseline_source = "fresh"
+            self._baseline_created_at = created_at
         return {
             "ready": True,
             "samples": len(window),
@@ -463,6 +644,11 @@ class EEGDashboardService:
                 "alphaChannels": [
                     channel + 1 for channel in config.COG_ALPHA_CHANNELS],
                 "restTar": float(load_state.rest_tar),
+            },
+            "savedBaseline": {
+                "saved": True,
+                "createdAt": created_at,
+                "path": self._baseline_path_label(),
             },
         }
 
@@ -698,6 +884,7 @@ class EEGDashboardService:
             }
             self._refresh_cognitive_load_locked(now)
             cognitive_load = self._cognitive_load_status_locked()
+            saved_baseline = self.saved_baseline_status()
             recording = self.recording_status_locked()
             last_age = now - self._last_report_mono if self._last_report_mono else None
             return {
@@ -735,10 +922,14 @@ class EEGDashboardService:
                     "notchHz": NOTCH_HZ,
                     "notchQ": NOTCH_Q,
                     "metricWindowSeconds": 2.0,
+                    "rawRailCounts": list(ADC_RAIL_COUNTS),
+                    "adcInputRangeMv": list(ADC_INPUT_RANGE_MV),
                     "calibrationMaxClippingPercent": (
                         MAX_TRANSIENT_CLIPPING_PERCENT),
                     "calibrationMaxAdcSpanFraction": (
                         MAX_STABLE_ADC_SPAN_FRACTION),
+                    "calibrationMaxFilteredSpanMv": (
+                        ADC_FULL_SPAN_MV * MAX_STABLE_ADC_SPAN_FRACTION),
                     "pgaGainIndex": self._gain_index,
                     "pgaGain": PGA_GAINS[self._gain_index],
                     "electrodeUvCalibrated": False,
@@ -746,6 +937,8 @@ class EEGDashboardService:
                 "recording": recording,
                 "errp": {
                     "baselineReady": self._errp_baseline_ready,
+                    "baselineSource": self._baseline_source,
+                    "baselineCreatedAt": self._baseline_created_at,
                     "backend": self._errp_detector.backend,
                     "threshold": config.ERRP_THRESHOLD,
                     "windowSeconds": config.ERRP_WINDOW_S,
@@ -760,6 +953,7 @@ class EEGDashboardService:
                     "lastDecision": self._errp_last,
                 },
                 "cognitiveLoad": cognitive_load,
+                "savedBaseline": saved_baseline,
                 "quality": qualities,
             }
 
@@ -931,6 +1125,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 payload = self.service.add_marker(body.get("label", ""))
             elif parsed.path == "/api/errp/calibrate":
                 payload = self.service.calibrate_errp(body.get("seconds"))
+            elif parsed.path == "/api/baseline/load":
+                payload = self.service.load_saved_baseline()
             elif parsed.path == "/api/errp/check":
                 payload = self.service.check_errp(body.get("marker", "SIM_DECISION"))
             elif parsed.path == "/api/simulation/start":

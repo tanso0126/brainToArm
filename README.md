@@ -529,7 +529,13 @@ brainToArm/
   raises robot weight and the ErrP veto threshold and spaces out application
   checkpoints; lower TAR gives the human/ErrP more weight. ErrP probability is
   still calculated at every action event, and a very strong response remains an
-  override. Invalid/flat PSD windows fail toward minimum robot authority.
+  override. Invalid/flat PSD windows fail toward minimum robot authority. Once a
+  clean rest window is accepted, the aggregate CH8 noise and CH1–4/CH8 power
+  baseline is atomically saved under ignored local `data/eeg_baselines/`. A later
+  session can explicitly restore it only when the device, PGA, sampling, channel,
+  filter, ErrP, and TAR signature matches. Reuse is only valid for the same
+  participant with the same electrode/REF/GND placement; raw EEG is not stored
+  in this baseline file.
 
 - **`record_errp.py`** — Collects training data. A goal is fixed for the session,
   then the script drives the arm through
@@ -717,6 +723,15 @@ notch and 4th-order 0.5–45 Hz band-pass. The D1WD10 coefficient supports accur
 not published or independently calibrated. RMS, peak-to-peak, DC offset and
 clipping are measurements, but they are not electrode impedance or clinical
 interpretations.
+
+The calibration progress display is `collected samples / minimum required
+samples`, not a calmness score. For example, `2030/1638` means enough data has
+already arrived; it does not need to decrease. If calibration is still blocked,
+the interface lists the actual channel state and clipping percentage. Sustained
+ADC-rail saturation is an electrode/reference/input problem, not evidence that
+the participant is insufficiently relaxed. A successfully accepted baseline is
+saved automatically; use **저장 안정 기준 불러오기** after restarting acquisition
+to reuse it under the exact compatible setup.
 
 ---
 

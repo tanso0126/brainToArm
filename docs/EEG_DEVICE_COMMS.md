@@ -212,6 +212,14 @@ USB transport와 ADC 입력 환산은 해결됐다. 로봇팔 ErrP에 쓰기 전
 피험자별 labeled ErrP 데이터를 별도로 검증해야 한다. 이 조건이 확인될
 때까지 `EEG_CONFIG_VERIFIED=False` 안전 gate는 유지한다.
 
+대시보드의 통합 보정 진행 숫자는 `최근 8초 수집 샘플/최소 필요 샘플`이다.
+예를 들어 `2030/1638`은 이미 수량이 충분하다는 뜻이며 안정도 점수가
+아니다. 이 상태에서 보정이 막히면 화면에 표시되는 채널별 `포화/불안정`과
+`clip %`가 원인이다. 정상 보정이 채택되면 CH8 휴식 잡음과 TAR 파워 기준을
+`data/eeg_baselines/latest.json`에 원자적으로 저장한다. 이후 같은 피험자,
+같은 전극/REF/GND 배치에서 장비·PGA·샘플링·필터 설정이 일치할 때만
+`POST /api/baseline/load`로 불러온다. 원시 EEG는 이 파일에 저장하지 않는다.
+
 ## 9. 출처
 
 - LAXTHA, `LXSM-D1WD10` developer manual:

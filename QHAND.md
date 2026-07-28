@@ -158,7 +158,7 @@ Preparation:
 3. Press **측정 시작** in that card.
 4. Verify CH1, CH2, CH3, CH4, and CH8 all say `신호 있음`, then remain still
    and relaxed for eight seconds.
-5. Choose **PolyG-I** and press **최근 8초로 ErrP + TAR 통합 보정**.
+5. Choose **PolyG-I** and press **최근 8초로 통합 보정·저장**.
 6. Start the 3D task and look at the selected object/robot action. Do not try to
    manufacture a generic blink or button-press signal; an ErrP trial is the
    time-locked response to perceiving the shown decision as wrong.
@@ -214,6 +214,16 @@ acquisition, lower PGA (start with ×1.00), reconnect the indicated channels plu
 reference/ground, restart, and wait for a new clean eight-second window. Do not
 bypass saturation: it cannot produce defensible ErrP or TAR baselines.
 
+The displayed `samples/requiredSamples` pair is a quantity gate, not a calmness
+score. A value such as `2030/1638` is already sufficient; when the button remains
+disabled, use the listed blocking channels, state, and `clip %` to diagnose the
+signal path. The accepted aggregate baseline is automatically written to the
+ignored local `data/eeg_baselines/latest.json`. On a later acquisition, press
+**저장 안정 기준 불러오기** to restore it. Loading is refused if device/PGA/rate/
+channel/filter/algorithm settings differ, and the operator must additionally
+ensure the same participant and electrode/REF/GND placement. The file contains
+baseline statistics, not raw EEG.
+
 Brief movement artefacts no longer invalidate the entire window: up to 5% of raw
 samples may touch an ADC rail if the filtered span remains valid. More than 5%
 is sustained saturation and stays blocked. The current hardware observation was
@@ -221,6 +231,9 @@ roughly 61–73% on the required channels, which indicates connection/reference
 trouble rather than ordinary participant distraction.
 
 ## 8. Local endpoints
+
+The dashboard exposes `POST /api/errp/calibrate` to accept and save a fresh rest
+window and `POST /api/baseline/load` to restore the compatible saved statistics.
 
 ```text
 GET  /api/simulation/status

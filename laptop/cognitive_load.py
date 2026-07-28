@@ -122,6 +122,31 @@ class CognitiveLoadEstimator:
             theta, alpha, theta_mean, alpha_mean, tar, tar, 0.0, 0.0)
         return self.last_state
 
+    def restore_baseline(self, rest_tar, theta_powers, alpha_powers):
+        rest_tar = float(rest_tar)
+        theta = tuple(float(value) for value in theta_powers)
+        alpha = tuple(float(value) for value in alpha_powers)
+        if len(theta) != len(self.theta_channels):
+            raise ValueError("saved theta baseline channel count is incompatible")
+        if len(alpha) != len(self.alpha_channels):
+            raise ValueError("saved alpha baseline channel count is incompatible")
+        if (not math.isfinite(rest_tar) or rest_tar <= 0
+                or not all(math.isfinite(value) and value >= 0 for value in theta + alpha)):
+            raise ValueError("saved TAR baseline contains an invalid power value")
+        theta_mean = sum(theta) / len(theta)
+        alpha_mean = sum(alpha) / len(alpha)
+        if alpha_mean <= config.COG_MIN_ALPHA_POWER:
+            raise ValueError("saved alpha baseline power is too small")
+        derived_tar = theta_mean / alpha_mean
+        if not math.isclose(derived_tar, rest_tar, rel_tol=1e-6, abs_tol=1e-12):
+            raise ValueError("saved TAR does not match its channel powers")
+        self.rest_tar = rest_tar
+        self._smoothed_relative = 0.0
+        self.last_state = CognitiveLoadState(
+            theta, alpha, theta_mean, alpha_mean,
+            rest_tar, rest_tar, 0.0, 0.0)
+        return self.last_state
+
     def update(self, window):
         if self.rest_tar is None:
             raise RuntimeError("calibrate resting TAR before continuous updates")

@@ -8,7 +8,9 @@ Exercises the real code paths (no mocks of the units under test):
   - ErrP detector separates a synthetic error epoch from a clean epoch.
 """
 import math
+import tempfile
 import time
+from pathlib import Path
 import config
 from lxsdf import LXSDFParser, build_packet
 import kinematics
@@ -16,7 +18,8 @@ from errp import ErrPDetector
 from eeg_bridge import EEGBridge
 from cognitive_load import AutonomyAllocator, CognitiveLoadEstimator
 from polyg_hid import (
-    ADC_VOLTS_PER_COUNT, PolyGIHID, command_report, counts_to_adc_mv, decode_report)
+    ADC_VOLTS_PER_COUNT, PGA_GAINS, PolyGIHID, command_report,
+    counts_to_adc_mv, decode_report)
 from eeg_dashboard import (
     MAX_TRANSIENT_CLIPPING_PERCENT, EEGDashboardService, EEGSignalProcessor,
     analyze_signal_quality, sanitize_recording_name)
@@ -471,44 +474,80 @@ def test_cognitive_load_and_autonomy():
 
 def test_dashboard_integrates_tar_allocation():
     print("[dashboard-load] one rest window drives live TAR + autonomy status")
-    service = EEGDashboardService(enumerate_fn=lambda: [])
 
-    def install_window(window):
+    def install_window(target, window):
         now = time.monotonic()
         first = now - (len(window) - 1) / config.EEG_FS
-        service._rows.clear()
+        target._rows.clear()
         for index, values in enumerate(window):
             counts = [int(round(value * 100)) for value in values]
-            service._rows.append((
+            target._rows.append((
                 index + 1,
                 first + index / config.EEG_FS,
                 counts,
                 list(values),
                 list(values),
             ))
-        service._running = True
-        service._started_mono = first
-        service._last_report_mono = now
+        target._running = True
+        target._started_mono = first
+        target._last_report_mono = now
 
-    try:
-        install_window(_synth_load_window(
-            theta_amplitude=4.0, alpha_amplitude=8.0, seconds=8.0))
-        calibrated = service.calibrate_errp(seconds=8.0)
-        check(calibrated["cognitiveLoad"]["thetaChannels"] == [1, 2, 3, 4]
-              and calibrated["cognitiveLoad"]["alphaChannels"] == [8],
-              "dashboard rest calibration uses theta CH1-4 and alpha CH8")
+    with tempfile.TemporaryDirectory() as temporary:
+        baseline_path = Path(temporary) / "latest.json"
+        service = EEGDashboardService(
+            enumerate_fn=lambda: [], baseline_path=baseline_path)
+        restored = EEGDashboardService(
+            enumerate_fn=lambda: [], baseline_path=baseline_path)
+        incompatible = EEGDashboardService(
+            enumerate_fn=lambda: [], baseline_path=baseline_path)
+        try:
+            install_window(service, _synth_load_window(
+                theta_amplitude=4.0, alpha_amplitude=8.0, seconds=8.0))
+            calibrated = service.calibrate_errp(seconds=8.0)
+            check(calibrated["cognitiveLoad"]["thetaChannels"] == [1, 2, 3, 4]
+                  and calibrated["cognitiveLoad"]["alphaChannels"] == [8],
+                  "dashboard rest calibration uses theta CH1-4 and alpha CH8")
+            check(baseline_path.exists()
+                  and service.saved_baseline_status()["compatible"],
+                  "accepted rest baseline is saved with a compatible signature")
+            check(baseline_path.stat().st_mode & 0o777 == 0o600,
+                  "saved participant baseline is private to the local user")
 
-        install_window(_synth_load_window(
-            theta_amplitude=8.0, alpha_amplitude=4.0, seconds=4.0))
-        service._load_last_update_mono = 0.0
-        payload = service.status()["cognitiveLoad"]
-        check(payload["smoothedRelativeTar"] > 0,
-              "dashboard publishes positive rest-relative TAR under higher load")
-        check(payload["robotWeight"] > config.AUTONOMY_ROBOT_BASE
-              and payload["errpApplyStride"] > 1,
-              "web simulation receives robot-biased adaptive allocation")
-    finally:
-        service.close()
+            install_window(restored, _synth_load_window(
+                theta_amplitude=4.0, alpha_amplitude=8.0, seconds=2.0))
+            loaded = restored.load_saved_baseline()
+            check(loaded["source"] == "saved"
+                  and restored.status()["cognitiveLoad"]["baselineReady"],
+                  "a restarted dashboard restores saved ErrP and TAR baselines")
+            check(math.isclose(
+                    loaded["restTar"],
+                    calibrated["cognitiveLoad"]["restTar"],
+                    rel_tol=1e-9),
+                  "restored TAR exactly matches the accepted rest calibration")
+
+            install_window(incompatible, _synth_load_window(
+                theta_amplitude=4.0, alpha_amplitude=8.0, seconds=2.0))
+            incompatible._gain_index = (
+                incompatible._gain_index + 1) % len(PGA_GAINS)
+            try:
+                incompatible.load_saved_baseline()
+                check(False, "PGA-mismatched saved baseline rejected")
+            except RuntimeError:
+                check(True, "PGA-mismatched saved baseline rejected")
+
+            install_window(service, _synth_load_window(
+                theta_amplitude=8.0, alpha_amplitude=4.0, seconds=4.0))
+            service._load_last_update_mono = 0.0
+            payload = service.status()["cognitiveLoad"]
+            check(payload["smoothedRelativeTar"] > 0,
+                  "dashboard publishes positive rest-relative TAR under higher load")
+            check(payload["robotWeight"] > config.AUTONOMY_ROBOT_BASE
+                  and payload["errpApplyStride"] > 1,
+                  "web simulation receives robot-biased adaptive allocation")
+        finally:
+            service.close()
+            restored.close()
+            incompatible.close()
 
 
 def test_errp():

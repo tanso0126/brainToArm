@@ -77,8 +77,11 @@ type DashboardStatus = {
     notchHz: number;
     notchQ: number;
     metricWindowSeconds: number;
+    rawRailCounts: [number, number];
+    adcInputRangeMv: [number, number];
     calibrationMaxClippingPercent: number;
     calibrationMaxAdcSpanFraction: number;
+    calibrationMaxFilteredSpanMv: number;
     pgaGainIndex: number;
     pgaGain: number;
     electrodeUvCalibrated: boolean;
@@ -91,6 +94,8 @@ type DashboardStatus = {
   };
   errp: {
     baselineReady: boolean;
+    baselineSource: "fresh" | "saved" | null;
+    baselineCreatedAt: string | null;
     backend: "baseline" | "model";
     threshold: number;
     windowSeconds: number;
@@ -150,6 +155,18 @@ type DashboardStatus = {
     errpApplyStride: number;
     strongErrpOverrideThreshold: number;
   };
+  savedBaseline: {
+    available: boolean;
+    compatible: boolean;
+    reason: string;
+    createdAt: string | null;
+    path: string;
+    gainIndex?: number;
+    samplingHz?: number;
+    thetaChannels?: number[];
+    alphaChannels?: number[];
+    errpChannels?: number[];
+  };
   quality: Quality[];
 };
 
@@ -185,6 +202,25 @@ function qualityLabel(state: QualityState) {
     saturated: "포화",
     unstable: "불안정",
   }[state];
+}
+
+function calibrationWindowLabel(window: DashboardStatus["errp"]["calibrationWindow"] | undefined) {
+  if (!window) return "EEG 데이터 대기";
+  if (window.samples < window.requiredSamples) {
+    return `데이터 수집 중 · ${window.samples}/${window.requiredSamples}`;
+  }
+  if (window.blockingChannels.length) {
+    const details = window.blockingChannels.map((channel) => {
+      const quality = window.channelQualities[channel];
+      if (!quality) return `CH${channel}`;
+      const clipping = quality.clippingPercent > 0
+        ? ` clip ${quality.clippingPercent.toFixed(1)}%`
+        : "";
+      return `CH${channel} ${qualityLabel(quality.state)}${clipping}`;
+    });
+    return `데이터 충분 · 신호 문제: ${details.join(" · ")}`;
+  }
+  return "깨끗한 8초 확보 · 보정 가능";
 }
 
 function apiError(error: unknown) {
@@ -755,6 +791,7 @@ export default function Home() {
   const deviceReady = Boolean(status?.device.available);
   const calibrationWindow = status?.errp.calibrationWindow;
   const loadStatus = status?.cognitiveLoad;
+  const savedBaseline = status?.savedBaseline;
   const simulationEegPanel = useMemo(() => (
     <article className="sim-card sim-eeg-live-card">
       <div className="sim-card-head">
@@ -804,7 +841,7 @@ export default function Home() {
         <span><b>ErrP 입력</b> CH8 단독 · 1–10 Hz</span>
         <span><b>TAR</b> {loadStatus?.tar != null ? `${loadStatus.tar.toFixed(3)} · Δ ${((loadStatus.smoothedRelativeTar ?? 0) * 100).toFixed(1)}%` : "휴식 보정 필요"}</span>
         <span><b>자율성</b> 로봇 {((loadStatus?.robotWeight ?? 0.5) * 100).toFixed(0)}% · 인간 {((loadStatus?.humanWeight ?? 0.5) * 100).toFixed(0)}%</span>
-        <span><b>ErrP 반영</b> {loadStatus?.baselineReady ? `매 ${loadStatus.errpApplyStride}번째 · 기준 ${(loadStatus.errpThreshold * 100).toFixed(0)}%` : calibrationWindow?.ready ? "통합 보정 가능" : `대기 ${calibrationWindow?.samples ?? 0}/${calibrationWindow?.requiredSamples ?? 1638}`}</span>
+        <span><b>ErrP 반영</b> {loadStatus?.baselineReady ? `매 ${loadStatus.errpApplyStride}번째 · 기준 ${(loadStatus.errpThreshold * 100).toFixed(0)}%` : calibrationWindowLabel(calibrationWindow)}</span>
       </div>
     </article>
   ), [
@@ -875,6 +912,7 @@ export default function Home() {
           apiOnline={apiOnline}
           errpStatus={status?.errp ?? null}
           loadStatus={loadStatus ?? null}
+          savedBaseline={savedBaseline ?? null}
           eegPanel={simulationEegPanel}
         />
       ) : (
@@ -984,10 +1022,17 @@ export default function Home() {
               <div><span>ErrP 행동 반영</span><strong>매 {loadStatus?.errpApplyStride ?? 1}번째</strong></div>
               <div><span>적응 임계값</span><strong>{((loadStatus?.errpThreshold ?? 0.5) * 100).toFixed(0)}%</strong></div>
             </div>
-            <button className="secondary-button load-calibrate" disabled={!isRunning || busy || !calibrationWindow?.ready} onClick={() => perform("/api/errp/calibrate", { seconds: 8 })}>
-              <Brain size={14} />{loadStatus?.baselineReady ? "ErrP + TAR 다시 보정" : calibrationWindow?.ready ? "깨끗한 8초로 ErrP + TAR 보정" : `CH1·2·3·4·8 대기 · ${calibrationWindow?.samples ?? 0}/${calibrationWindow?.requiredSamples ?? 1638}`}
-            </button>
-            <p className="fine-print">2초 Welch 창을 1초마다 갱신합니다. 8초 중 순간 rail 표본은 최대 {status?.signal.calibrationMaxClippingPercent ?? 5}%까지 허용하지만 지속 포화는 차단합니다. TAR 상승은 로봇 가중치·ErrP 임계값·반영 간격을 높이고, TAR 하락은 인간/ErrP 반영을 높입니다.</p>
+            <div className="baseline-actions">
+              <button className="secondary-button load-calibrate" disabled={!isRunning || busy || !calibrationWindow?.ready} onClick={() => perform("/api/errp/calibrate", { seconds: 8 })}>
+                <Brain size={14} />{loadStatus?.baselineReady ? "새 안정 기준으로 다시 보정·저장" : calibrationWindow?.ready ? "깨끗한 8초로 보정·저장" : "신호 확인 후 보정"}
+              </button>
+              {savedBaseline?.available && <button className="secondary-button load-calibrate" disabled={!isRunning || busy || !savedBaseline.compatible || loadStatus?.baselineReady} onClick={() => perform("/api/baseline/load")}>
+                <Download size={14} />저장 안정 기준 불러오기
+              </button>}
+            </div>
+            {!calibrationWindow?.ready && <p className="baseline-store-note warning">{calibrationWindowLabel(calibrationWindow)}. 샘플 수는 안정도 점수가 아니며, 포화는 마음 상태가 아니라 전극·REF/GND·입력 범위 문제입니다.</p>}
+            {savedBaseline?.available && <p className={`baseline-store-note ${savedBaseline.compatible ? "" : "warning"}`}>{savedBaseline.compatible ? `${savedBaseline.createdAt ? new Date(savedBaseline.createdAt).toLocaleString("ko-KR") : "이전 세션"} 기준 · PGA index ${savedBaseline.gainIndex ?? "—"} · 같은 피험자/전극 배치에서만 사용` : savedBaseline.reason}</p>}
+            <p className="fine-print">2초 Welch 창을 1초마다 갱신합니다. 원시 rail {status?.signal.rawRailCounts?.[0] ?? -32768}/{status?.signal.rawRailCounts?.[1] ?? 32766} (ADC 입력 약 ±1.25 V) 점유율은 최대 {status?.signal.calibrationMaxClippingPercent ?? 5}%까지, 필터 p-p는 최대 {(status?.signal.calibrationMaxFilteredSpanMv ?? 2375).toFixed(0)} mV까지 허용합니다. TAR 상승은 로봇 가중치·ErrP 임계값·반영 간격을 높이고, TAR 하락은 인간/ErrP 반영을 높입니다.</p>
           </article>
 
           <article className="panel quality-panel">

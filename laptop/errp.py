@@ -94,6 +94,13 @@ class ErrPDetector:
     def baseline_std(self):
         return self._baseline_std
 
+    def restore_baseline_std(self, value):
+        value = float(value)
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError("saved ErrP baseline std must be finite and positive")
+        self._baseline_std = value
+        return self._baseline_std
+
     def _validate_model_metadata(self, metadata, path):
         expected = self._model_metadata()
         mismatches = [

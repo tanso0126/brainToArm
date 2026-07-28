@@ -44,6 +44,8 @@ type SignalSource = "manual" | "mock" | "polyg";
 
 type ErrpStatus = {
   baselineReady: boolean;
+  baselineSource: "fresh" | "saved" | null;
+  baselineCreatedAt: string | null;
   backend: "baseline" | "model";
   threshold: number;
   windowSeconds: number;
@@ -116,6 +118,27 @@ type LoadStatus = {
   errpApplyStride: number;
   strongErrpOverrideThreshold: number;
 };
+
+type SavedBaseline = {
+  available: boolean;
+  compatible: boolean;
+  reason: string;
+  createdAt: string | null;
+  path: string;
+  gainIndex?: number;
+  samplingHz?: number;
+};
+
+function calibrationWindowLabel(window: ErrpStatus["calibrationWindow"] | undefined) {
+  if (!window) return "EEG 데이터 대기";
+  if (window.samples < window.requiredSamples) {
+    return `데이터 수집 중 ${window.samples}/${window.requiredSamples}`;
+  }
+  if (window.blockingChannels.length) {
+    return `데이터 충분 · 신호 문제 CH ${window.blockingChannels.join(", ")}`;
+  }
+  return "CH1·2·3·4·8 정상 · 보정 가능";
+}
 
 type SimObject = {
   id: string;
@@ -326,12 +349,14 @@ function SimulationLab({
   apiOnline,
   errpStatus,
   loadStatus,
+  savedBaseline,
   eegPanel,
 }: {
   eegRunning: boolean;
   apiOnline: boolean;
   errpStatus: ErrpStatus | null;
   loadStatus: LoadStatus | null;
+  savedBaseline: SavedBaseline | null;
   eegPanel: ReactNode;
 }) {
   const [status, setStatus] = useState<SimulationStatus | null>(null);
@@ -465,6 +490,29 @@ function SimulationLab({
       setErrpBusy(false);
     }
   }, [apiOnline, eegRunning]);
+
+  const loadSavedBaseline = useCallback(async () => {
+    if (!apiOnline || !eegRunning || !savedBaseline?.compatible) return;
+    setErrpBusy(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/baseline/load`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "저장 기준 불러오기 실패");
+      setLocalErrpReady(true);
+      setErrpError("");
+      setEngineError("");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setErrpError(message);
+      setEngineError(message);
+    } finally {
+      setErrpBusy(false);
+    }
+  }, [apiOnline, eegRunning, savedBaseline]);
 
   useEffect(() => {
     if (!status || signalSource !== "polyg" || !errpReady || !eegRunning) return;
@@ -700,14 +748,17 @@ function SimulationLab({
                 <div><span><Activity size={15} />PolyG-I</span><strong>{apiOnline && eegRunning ? "측정 중" : "준비 안 됨"}</strong></div>
                 <div><span><Zap size={15} />판정 입력</span><strong>CH8 단독 · 1–10 Hz</strong></div>
                 <div><span><Zap size={15} />연속 TAR</span><strong>θ CH1–4 / α CH8</strong></div>
-                <div><span><Zap size={15} />최근 8초 품질</span><strong>{calibrationWindow?.blockingChannels?.length ? `문제 CH ${calibrationWindow.blockingChannels.join(", ")}` : calibrationWindow?.ready ? "CH1·2·3·4·8 정상" : `${calibrationWindow?.samples ?? 0}/${calibrationWindow?.requiredSamples ?? 1638}`}</strong></div>
+                <div><span><Zap size={15} />최근 8초 품질</span><strong>{calibrationWindowLabel(calibrationWindow)}</strong></div>
                 <div><span><Zap size={15} />휴식 기준</span><strong>{errpReady ? "ErrP + TAR 완료" : "통합 보정 필요"}</strong></div>
                 {loadStatus?.baselineReady && <>
                   <div><span><Brain size={15} />TAR / 휴식 대비</span><strong>{loadStatus.tar?.toFixed(3) ?? "—"} / {loadStatus.smoothedRelativeTar != null ? `${loadStatus.smoothedRelativeTar >= 0 ? "+" : ""}${(loadStatus.smoothedRelativeTar * 100).toFixed(1)}%` : "—"}</strong></div>
                   <div><span><Brain size={15} />자율성 가중치</span><strong>로봇 {(loadStatus.robotWeight * 100).toFixed(0)} · 인간 {(loadStatus.humanWeight * 100).toFixed(0)}</strong></div>
                   <div><span><Zap size={15} />ErrP 행동 반영</span><strong>매 {loadStatus.errpApplyStride}번째 · {(loadStatus.errpThreshold * 100).toFixed(0)}%</strong></div>
                 </>}
-                <button onClick={calibrateErrp} disabled={!apiOnline || !eegRunning || errpBusy || !calibrationWindow?.ready}>{errpBusy ? "판정 중…" : calibrationWindow?.ready ? "최근 8초로 ErrP + TAR 통합 보정" : `깨끗한 통합 보정창 대기 · ${calibrationWindow?.samples ?? 0}/${calibrationWindow?.requiredSamples ?? 1638}`}</button>
+                <button onClick={calibrateErrp} disabled={!apiOnline || !eegRunning || errpBusy || !calibrationWindow?.ready}>{errpBusy ? "처리 중…" : calibrationWindow?.ready ? "최근 8초로 통합 보정·저장" : "신호 확인 후 보정"}</button>
+                {savedBaseline?.available && <button onClick={loadSavedBaseline} disabled={!apiOnline || !eegRunning || errpBusy || !savedBaseline.compatible || errpReady}>저장 안정 기준 불러오기</button>}
+                {savedBaseline?.available && <small>{savedBaseline.compatible ? `${savedBaseline.createdAt ? new Date(savedBaseline.createdAt).toLocaleString("ko-KR") : "이전"} · PGA index ${savedBaseline.gainIndex ?? "—"} · 같은 피험자/전극 배치 전용` : savedBaseline.reason}</small>}
+                {!calibrationWindow?.ready && <small>샘플 수는 안정도 점수가 아닙니다. 데이터가 충분한데 차단되면 전극·REF/GND·포화 상태를 확인하세요.</small>}
                 {errpError && <p className="sim-errp-error"><CircleAlert size={13} />{errpError}</p>}
                 {errpStatus?.lastDecision ? (
                   <div className={`sim-errp-decision ${errpStatus.lastDecision.isError ? "detected" : ""}`}>

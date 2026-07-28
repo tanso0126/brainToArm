@@ -38,6 +38,9 @@ test("starter preview is removed and localhost API is explicit", async () => {
   assert.match(page, /function independentAutoScale/);
   assert.match(page, /const quantum = magnitude \/ 10/);
   assert.match(page, /CH1–4 θ \/ CH8 α/);
+  assert.match(page, /저장 안정 기준 불러오기/);
+  assert.match(page, /샘플 수는 안정도 점수가 아니며/);
+  assert.match(page, /\/api\/baseline\/load/);
   assert.match(page, /requestAnimationFrame/);
   assert.match(page, /부드럽게 · 0\.45초/);
   assert.match(page, /SimulationLab/);

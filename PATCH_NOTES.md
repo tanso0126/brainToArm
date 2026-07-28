@@ -2617,3 +2617,44 @@ and the trained model backend.
   while 6% remains saturated.
 - Python compilation, Ruff, full pipeline, dashboard lint/build, and rendered
   UI tests pass.
+
+## Patch 66 — persist accepted rest baselines and explain the calibration gate
+
+### Gap found
+
+- An accepted CH8 ErrP-noise and CH1–4/CH8 TAR rest baseline lived only in
+  memory, so restarting acquisition required repeating calibration even under
+  the same participant and electrode setup.
+- The disabled calibration button displayed values such as `2030/1638` without
+  explaining that they were collected/minimum sample counts. This looked like a
+  mental-stability score that the participant had to lower, while the real
+  blocker was sustained ADC-rail saturation on the required channels.
+
+### Changes
+
+- A clean, accepted integrated calibration now atomically saves aggregate
+  `errpStdMv`, `restTar`, theta powers for CH1–CH4, and alpha power for CH8 to
+  ignored local `data/eeg_baselines/latest.json`. The temporary file and final
+  file are private (`0600`); raw EEG samples are not stored.
+- The saved record includes an exact compatibility signature for VID/PID, PGA,
+  sampling/channel settings, ADC coefficient, display filtering, ErrP backend/
+  channel/band/timing, and TAR channels/bands/window. Invalid values or a
+  mismatched signature are rejected instead of silently changing behavior.
+- Added `POST /api/baseline/load` and explicit **저장 안정 기준 불러오기**
+  controls in the EEG monitor and 3D simulation. Acquisition must be running,
+  and the UI warns that reuse is only valid for the same participant and the
+  same electrode/REF/GND placement. Session start still does not silently load
+  a previous person's baseline.
+- Replaced the ambiguous sample-count-only disabled state with separate
+  messages for data collection and signal quality. Once sample quantity is
+  sufficient, the UI lists the blocking channels, state, and rail-clipping
+  percentage, and states that the count is not a calmness score. The API/UI also
+  expose the exact raw rail codes (`-32768`, `+32766`), their approximately
+  ±1.25 V ADC-input range, the 5% occupancy limit, and the 95%-span limit.
+
+### Verification
+
+- Added hardware-free save/restart/load coverage proving that the restored
+  ErrP and TAR baseline exactly matches the accepted calibration.
+- Dashboard render coverage checks the saved-baseline action, endpoint, and
+  sample-count explanation.
