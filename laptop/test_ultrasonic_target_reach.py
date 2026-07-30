@@ -14,6 +14,7 @@ from ultrasonic_target_reach import (
     _retained_image_gate,
     _retained_corridor_candidate,
     _candidate_on_sonar_axis,
+    _sonar_aim_x,
     adaptive_advance_mm,
     approach_observation_pose,
     approach_stays_forward,
@@ -290,6 +291,15 @@ class ApproachStopTests(unittest.TestCase):
         background = SimpleNamespace(center=(546.0, 450.0))
         self.assertTrue(_candidate_on_sonar_axis(near_axis, 1280))
         self.assertFalse(_candidate_on_sonar_axis(background, 1280))
+
+    def test_live_gripper_center_tracks_mounted_sonar_axis(self):
+        scene = SimpleNamespace(
+            gripper=SimpleNamespace(center=(542.0, 708.0)))
+        measured_target = SimpleNamespace(center=(530.0, 335.0))
+
+        self.assertEqual(_sonar_aim_x(scene, 1280), 542.0)
+        self.assertTrue(_candidate_on_sonar_axis(
+            measured_target, 1280, scene))
 
     def test_vivid_fallback_is_hue_independent_and_axis_ranked(self):
         frame = np.full((720, 1280, 3), 215, dtype=np.uint8)

@@ -221,7 +221,7 @@ def _draw_preview(frame, scene, candidate, pose, distance_mm, step, decision,
     import cv2
 
     image = frame.copy()
-    aim = (int(round(SONAR_AIM_X_RATIO * image.shape[1])),
+    aim = (int(round(_sonar_aim_x(scene, image.shape[1]))),
            int(round(SONAR_AIM_Y_RATIO * image.shape[0])))
     cv2.drawMarker(image, aim, (255, 255, 255),
                    cv2.MARKER_CROSS, 34, 2)
@@ -465,10 +465,18 @@ def approach_stays_forward(start_x_mm, candidate_pose,
         float(start_x_mm) - float(max_inward_mm))
 
 
-def _candidate_on_sonar_axis(candidate, frame_width):
+def _sonar_aim_x(scene, frame_width):
+    """Use the live hand centre; fall back only when markers are unavailable."""
+    gripper = getattr(scene, "gripper", None) if scene is not None else None
+    if gripper is not None:
+        return float(gripper.center[0])
+    return SONAR_AIM_X_RATIO * float(frame_width)
+
+
+def _candidate_on_sonar_axis(candidate, frame_width, scene=None):
     if candidate is None:
         return False
-    aim_x = SONAR_AIM_X_RATIO * float(frame_width)
+    aim_x = _sonar_aim_x(scene, frame_width)
     return abs(float(candidate.center[0]) - aim_x) <= MAX_AIM_X_ERROR_PX
 
 
@@ -477,7 +485,7 @@ def _axis_scene(scene, frame_width):
     filtered = copy.copy(scene)
     filtered.ranked = [
         candidate for candidate in scene.ranked
-        if _candidate_on_sonar_axis(candidate, frame_width)
+        if _candidate_on_sonar_axis(candidate, frame_width, scene)
     ]
     return filtered
 
@@ -500,7 +508,8 @@ def select_after_external_decisions(
     selectable = _axis_scene(scene, frame_width)
     candidate = selector.current
     if (candidate is None
-            or not _candidate_on_sonar_axis(candidate, frame_width)):
+            or not _candidate_on_sonar_axis(
+                candidate, frame_width, selectable)):
         candidate = selector.choose(selectable, pose=pose)
     reset = False
     applied = 0
@@ -579,7 +588,7 @@ def _box_overlap_fraction(box, obstacle, padding=12):
     return intersection / float(max(1, width * height))
 
 
-def vivid_table_candidates(frame, marker_boxes=()):
+def vivid_table_candidates(frame, marker_boxes=(), aim_x=None):
     """Find compact, vividly distinct tabletop objects without a hue preset.
 
     FastSAM occasionally omits a narrow real object entirely.  This fallback
@@ -612,7 +621,8 @@ def vivid_table_candidates(frame, marker_boxes=()):
     frame_area = float(width * height)
     minimum_area = VIVID_MIN_AREA_RATIO * frame_area
     maximum_area = VIVID_MAX_AREA_RATIO * frame_area
-    aim_x = SONAR_AIM_X_RATIO * float(width)
+    aim_x = (SONAR_AIM_X_RATIO * float(width)
+             if aim_x is None else float(aim_x))
     detections = []
     for label in range(1, count):
         x, y, box_width, box_height, area = (
@@ -654,7 +664,9 @@ class VividFallbackDetector:
 
     def scene(self, frame):
         scene, observation = self.primary.scene(frame)
-        vivid = vivid_table_candidates(frame, scene.marker_boxes)
+        vivid = vivid_table_candidates(
+            frame, scene.marker_boxes,
+            aim_x=_sonar_aim_x(scene, frame.shape[1]))
         for candidate in vivid:
             if any(
                     abs(candidate.center[0] - existing.center[0]) < 12
@@ -668,8 +680,10 @@ class VividFallbackDetector:
 def _choose_vivid_on_axis(frame, scene, selector, pose):
     """Prefer a verified on-axis vivid component after a model miss."""
     candidates = [
-        item for item in vivid_table_candidates(frame, scene.marker_boxes)
-        if _candidate_on_sonar_axis(item, frame.shape[1])
+        item for item in vivid_table_candidates(
+            frame, scene.marker_boxes,
+            aim_x=_sonar_aim_x(scene, frame.shape[1]))
+        if _candidate_on_sonar_axis(item, frame.shape[1], scene)
     ]
     if not candidates:
         return None
@@ -724,7 +738,7 @@ def _open_and_find_target(
         _clear_target_lock(selector)
         frame, scene, candidate = acquire_initial_target(
             detector, target_selector=selector, pose=pose)
-        if _candidate_on_sonar_axis(candidate, frame.shape[1]):
+        if _candidate_on_sonar_axis(candidate, frame.shape[1], scene):
             return pose, frame, scene, candidate
         if candidate is not None:
             print(
@@ -735,11 +749,11 @@ def _open_and_find_target(
             _clear_target_lock(selector)
         candidate = _choose_on_axis(
             scene, selector, pose, frame.shape[1])
-        if _candidate_on_sonar_axis(candidate, frame.shape[1]):
+        if _candidate_on_sonar_axis(candidate, frame.shape[1], scene):
             return pose, frame, scene, candidate
         candidate = _choose_vivid_on_axis(
             frame, scene, selector, pose)
-        if _candidate_on_sonar_axis(candidate, frame.shape[1]):
+        if _candidate_on_sonar_axis(candidate, frame.shape[1], scene):
             print(
                 f"[sonar-reach] SEARCH vivid fallback locked "
                 f"center=({candidate.center[0]:.0f},"
@@ -770,13 +784,13 @@ def _enter_forward_observation(
     _clear_target_lock(selector)
     frame, scene, candidate = acquire_initial_target(
         detector, target_selector=selector, pose=pose)
-    if not _candidate_on_sonar_axis(candidate, frame.shape[1]):
+    if not _candidate_on_sonar_axis(candidate, frame.shape[1], scene):
         candidate = _choose_on_axis(
             scene, selector, pose, frame.shape[1])
-    if not _candidate_on_sonar_axis(candidate, frame.shape[1]):
+    if not _candidate_on_sonar_axis(candidate, frame.shape[1], scene):
         candidate = _choose_vivid_on_axis(
             frame, scene, selector, pose)
-    if not _candidate_on_sonar_axis(candidate, frame.shape[1]):
+    if not _candidate_on_sonar_axis(candidate, frame.shape[1], scene):
         _clear_target_lock(selector)
         return pose, frame, scene, None
     return pose, frame, scene, candidate
@@ -1005,7 +1019,7 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
             continue
         pose = list(client.request({"command": "status"})["pose"])
         last_visible_pose = list(pose)
-        aim_x = SONAR_AIM_X_RATIO * frame.shape[1]
+        aim_x = _sonar_aim_x(scene, frame.shape[1])
         aim_y = SONAR_AIM_Y_RATIO * frame.shape[0]
         x_error = float(candidate.center[0]) - aim_x
         if abs(x_error) > MAX_AIM_X_ERROR_PX:

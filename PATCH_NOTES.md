@@ -3668,3 +3668,22 @@ and the trained model backend.
   treated as a mailbox object.
 - Added regression coverage for disabled, enabled, and injected mailbox modes.
 - The bug failed before any arm motion; no physical command was sent.
+
+## Patch 101 — derive the approach axis from the live gripper centre
+
+### Physical finding
+
+- At the new venue pose, the real object was centred at about x=530 px and the
+  detected open gripper at x=542 px: only 12 px apart.
+- The old fixed x=640 px assumption incorrectly labelled the same object 110 px
+  off-axis and stopped before approach, even while sonar returned a nearby
+  157–168 mm echo.
+
+### Changes
+
+- The camera/sonar approach now derives its horizontal working axis from the
+  live midpoint of the blue and red finger markers.
+- Fixed image centre remains a fail-safe fallback only when markers are absent.
+- FastSAM candidates, hue-independent fallback candidates, selection, preview,
+  and the approach interlock all use the same dynamic axis.
+- Added regression coverage using the measured 530/542 px venue geometry.
