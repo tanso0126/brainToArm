@@ -251,6 +251,20 @@ def _reacquire(detector, selector, attempts=3):
     return frame, scene, None
 
 
+def _reacquire_with_gripper(detector, selector, attempts=4):
+    """Wait for one settled frame containing both target and finger evidence."""
+    frame = scene = candidate = None
+    for _ in range(int(attempts)):
+        frame, scene, candidate = _reacquire(
+            detector, selector, attempts=1)
+        if (
+            candidate is not None
+            and getattr(scene, "gripper", None) is not None
+        ):
+            return frame, scene, candidate
+    return frame, scene, candidate
+
+
 def _observe_sonar(client, near):
     """Take one bounded observation; never hold far-field motion for sonar."""
     if near:
@@ -1053,7 +1067,8 @@ def _clearance_grasp_and_verify(
             "pre-close clearance lift rejected: " + report.explain())
     mover.slow_move(preclose, final_settle=0.45)
 
-    _frame, scene, candidate = _reacquire(detector, selector, attempts=4)
+    _frame, scene, candidate = _reacquire_with_gripper(
+        detector, selector, attempts=6)
     if candidate is None:
         return {
             "state": "preclose-target-lost", "pose": preclose,
@@ -1073,8 +1088,8 @@ def _clearance_grasp_and_verify(
         )
         mover.slow_move(adjusted, final_settle=0.40)
         preclose = adjusted
-        _frame, scene, candidate = _reacquire(
-            detector, selector, attempts=4)
+        _frame, scene, candidate = _reacquire_with_gripper(
+            detector, selector, attempts=6)
         if candidate is None:
             return {
                 "state": "fine-lift-target-lost", "pose": preclose,

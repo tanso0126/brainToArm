@@ -3824,3 +3824,25 @@ and the trained model backend.
   instead of issuing repeated no-op returns to the same pose.
 - Added a regression containing the measured purple target and a larger white
   overlapping false body.
+
+## Patch 108 — wait for settled finger evidence before closing
+
+### Physical finding
+
+- The corrected tracker held the same object while sonar decreased from
+  `125 mm` to `118 mm` to `74 mm`, then stopped before the next transition
+  would cross the 10 mm floor guard.
+- After the 12 mm pre-close lift, the first segmented frame contained the
+  object but temporarily omitted the finger-marker pair, so the strict final
+  gate stopped without closing.
+- A settled frame at the unchanged pose then showed both markers, gripper
+  centre `(587.5, 709.2)`, and the object ending at row `696`, which is the
+  required straddle geometry.
+
+### Changes
+
+- Pre-close and fine-lift verification now wait for a frame containing both
+  the locked object and the live two-finger observation.
+- The wait remains bounded to six inference attempts and therefore still fails
+  closed if either marker truly stays unavailable.
+- No estimated hand profile can authorize the final close.
