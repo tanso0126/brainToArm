@@ -69,6 +69,7 @@ STREAM_MAX_JOINT_STEP_DEG = 5.0
 TASK_ADVANCE_MIN_MM = 2.5
 TASK_ADVANCE_MAX_MM = 8.0
 TASK_DAMPING = 0.18
+MAX_INWARD_CORRECTION_MM = 6.0
 TRACK_LOST_TIMEOUT_S = 0.75
 SEARCH_WRISTS = (170, 180)
 SEED_MIN_AREA_RATIO = 0.0004
@@ -477,7 +478,8 @@ def resolved_velocity_target(
         return None
     if (
         float(arm_fk.geometry(target).finger_tip[0])
-        < float(arm_fk.geometry(pose).finger_tip[0]) - 0.003
+        < float(arm_fk.geometry(pose).finger_tip[0])
+        - MAX_INWARD_CORRECTION_MM / 1000.0
     ):
         return None
     return {

@@ -4026,3 +4026,14 @@ and the trained model backend.
   measured mounted-camera response.
 - Added a regression for the measured pose: a target 300 px above the aim row
   must produce a safe forward next pose instead of exhausting the reach.
+
+## Patch 118 — permit bounded pitch-alignment correction near the object
+
+- At `[90,106,55,180,90,180]` the object was centred between the visible
+  fingers with `98 mm` sonar range and `126 mm` modelled floor clearance.
+- The next collision-safe Jacobian step lowered the hand while retracting its
+  fingertip only `3.2 mm`; the old `3 mm` directional guard rejected it by
+  `0.2 mm` even though this is a pitch-alignment correction, not retreat.
+- Allow at most `6 mm` inward correction per streamed step while retaining the
+  full swept collision check and 10 mm floor guard. Added the measured-pose
+  regression.

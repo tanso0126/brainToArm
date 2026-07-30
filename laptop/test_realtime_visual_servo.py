@@ -165,6 +165,19 @@ class RealtimeVisualServoTests(unittest.TestCase):
             arm_fk.geometry(pose).finger_tip[0],
         )
 
+    def test_near_aligned_pose_allows_small_inward_pitch_correction(self):
+        pose = [90, 106, 55, 180, 90, 180]
+
+        plan = resolved_velocity_target(
+            pose, vertical_error_px=46,
+            distance_mm=98.0, floor_clearance_mm=126.0)
+
+        self.assertIsNotNone(plan)
+        inward_mm = 1000.0 * (
+            arm_fk.geometry(pose).finger_tip[0]
+            - arm_fk.geometry(plan["pose"]).finger_tip[0])
+        self.assertLessEqual(inward_mm, 6.0)
+
 
 if __name__ == "__main__":
     unittest.main()
