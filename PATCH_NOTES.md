@@ -3925,3 +3925,20 @@ and the trained model backend.
   normal bounded centre, scale, and confidence gates for every later frame.
 - Added a regression in which the first live target moves completely outside
   its original seed box but remains inside the bounded reacquisition window.
+
+## Patch 112 — separate asynchronous motion completion from sonar
+
+### Physical finding
+
+- The first real-time setpoint moved motors 2/3/4 from `[70,90,170]` toward
+  `[72,92,174]` without waiting for arrival.
+- Its asynchronous `DONE` record remained in the serial input when the next
+  ultrasonic request began. The old `startswith("D")` check treated `DONE` as
+  a malformed distance and stopped the controller.
+
+### Changes
+
+- Accept only the exact `D ` record prefix as an ultrasonic response and
+  ignore interleaved `DONE` completion notifications.
+- Added a serial regression that feeds `DONE` followed by `D 123` and verifies
+  that the live sonar call returns `123 mm`.

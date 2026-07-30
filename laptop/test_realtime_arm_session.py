@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 import config
+from arm_serial import ArmSerial
 from arm_session import ArmSessionServer, REALTIME_MAX_TARGET_DELTA_DEG
 
 
@@ -29,6 +30,25 @@ class SafeTransitions:
 
 
 class RealtimeArmSessionTests(unittest.TestCase):
+    def test_ultrasonic_ignores_asynchronous_stream_done(self):
+        class SerialLines:
+            def __init__(self):
+                self.lines = [b"DONE\n", b"D 123\n"]
+                self.writes = []
+
+            def write(self, payload):
+                self.writes.append(payload)
+
+            def readline(self):
+                return self.lines.pop(0) if self.lines else b""
+
+        arm = ArmSerial.__new__(ArmSerial)
+        arm.mock = False
+        arm.ser = SerialLines()
+
+        self.assertEqual(arm.ultrasonic_distance_mm(samples=1), 123.0)
+        self.assertEqual(arm.ser.writes, [b"D\n"])
+
     def test_stream_replaces_target_without_waiting_for_done(self):
         arm = FakeArm()
         server = ArmSessionServer(arm=arm, safety=SafeTransitions())

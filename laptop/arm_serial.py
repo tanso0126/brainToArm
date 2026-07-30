@@ -275,7 +275,10 @@ class ArmSerial:
                 if line.startswith("ERR"):
                     raise RuntimeError(
                         f"arm firmware rejected ultrasonic request: {line}")
-                if line.startswith("D"):
+                # Streamed targets can finish while a distance request is in
+                # flight, leaving an asynchronous ``DONE`` in the same serial
+                # input. Only the exact distance record prefix is a reading.
+                if line.startswith("D "):
                     value = parse_distance_line(line)
                     reading_received = True
                     if value is not None:
