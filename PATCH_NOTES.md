@@ -3870,3 +3870,38 @@ and the trained model backend.
   annotated preview at 10 FPS.
 - Added tests proving streamed targets do not call a blocking completion wait
   and that discontinuous live jumps are rejected before serial output.
+
+## Patch 110 — continuous temporal tracking and Jacobian approach
+
+### Control correction
+
+- The failed close happened at `96.5 mm`, far outside the measured `46 mm`
+  insertion threshold. Reaching the floor guard is no longer permission to
+  close.
+- Matching the object's bounding-box bottom to the finger row placed the
+  fingers over the near edge instead of deeply around the physical centre.
+- The camera, sonar, and finger contact point are separate locations on the
+  wrist bracket and must not share one fixed image target.
+
+### Changes
+
+- Use FastSAM once to seed an arbitrary target, then switch to a fast CamShift
+  HSV histogram tracker on every fresh camera frame. FastSAM no longer blocks
+  every control iteration.
+- Run the approach at 10 Hz with replacement firmware targets while the servos
+  are still moving.
+- Compute a numerical task Jacobian for motors 2/3/4 and use damped
+  least-squares resolved velocity to coordinate forward position, height, and
+  wrist pitch.
+- At long range, keep the object centre safely inside the image. As sonar range
+  closes, continuously move the desired image row toward the live red/blue
+  gripper midpoint, explicitly compensating the camera-to-finger offset.
+- When fingertip clearance approaches the floor guard, remove downward task
+  velocity but preserve bounded forward motion. If no safe forward solution
+  remains, stop as unreachable instead of closing above the object.
+- Closing requires sonar at or below `46 mm`, physical centre error at or below
+  `55 px`, lateral centre inside one quarter of the live opening, and at least
+  `10 mm` modeled floor clearance.
+- Publish a continuously updated annotated controller preview.
+- Added synthetic temporal-tracking, dynamic-aim, dual grasp-gate, Jacobian,
+  and floor-guard regression tests.
