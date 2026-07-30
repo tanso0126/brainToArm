@@ -34,6 +34,7 @@ from floor_motion import floor_pose, floor_waypoints
 ROOT = Path(__file__).resolve().parents[1]
 WRIST_RAW_FRAME = ROOT / "data" / "vision" / "wrist_camera_latest_raw.jpg"
 DEEPEST_TABLE_TOUCH_Z_M = -0.020
+REALTIME_MAX_TARGET_DELTA_DEG = 8
 
 
 def session_socket_path(value=None):
@@ -105,6 +106,35 @@ class ArmSessionServer:
             current = pose
         return self.arm.status()
 
+    def _stream_target(self, pose, require_camera=True):
+        """Replace the live firmware target without waiting for ``DONE``."""
+        target = self._validated_sequence([pose])[0]
+        if require_camera:
+            self._assert_camera_live()
+        current = self.arm.status()
+        largest_delta = max(
+            abs(int(goal) - int(actual))
+            for actual, goal in zip(current, target)
+        )
+        if largest_delta > REALTIME_MAX_TARGET_DELTA_DEG:
+            raise RuntimeError(
+                "realtime target rejected: largest live delta "
+                f"{largest_delta}deg exceeds "
+                f"{REALTIME_MAX_TARGET_DELTA_DEG}deg")
+        report = self.safety.transition_report(current, target)
+        if not report.safe:
+            raise RuntimeError(
+                "realtime target rejected before serial write: "
+                + report.explain())
+        self.arm.send_angles(target)
+        return {
+            "ok": True,
+            "pose": current,
+            "target": target,
+            "minimum_clearance_mm": report.minimum_clearance_mm,
+            "streaming": True,
+        }
+
     def handle(self, request):
         command = request.get("command")
         if command == "ping":
@@ -141,6 +171,11 @@ class ArmSessionServer:
                 settle_s=request.get("settle_s", 0.0),
                 require_camera=bool(request.get("require_camera", False)))
             return {"ok": True, "pose": pose}
+        if command == "stream":
+            return self._stream_target(
+                request.get("pose"),
+                require_camera=bool(
+                    request.get("require_camera", True)))
         if command == "table_touch_move":
             table_z_m = float(request.get("table_z_m"))
             if not DEEPEST_TABLE_TOUCH_Z_M <= table_z_m <= 0.0:
@@ -289,6 +324,8 @@ def main():
     check.add_argument("angles", type=int, nargs=config.N_JOINTS)
     move = subparsers.add_parser("move")
     move.add_argument("angles", type=int, nargs=config.N_JOINTS)
+    stream = subparsers.add_parser("stream")
+    stream.add_argument("angles", type=int, nargs=config.N_JOINTS)
     floor = subparsers.add_parser("floor")
     floor.add_argument("level", choices=("hover", "grasp"))
     floor.add_argument("elbow", type=int, nargs="?",
@@ -330,6 +367,11 @@ def main():
         response = client.request({"command": "check", "pose": args.angles})
     elif args.action == "move":
         response = client.request({"command": "move", "pose": args.angles})
+    elif args.action == "stream":
+        response = client.request({
+            "command": "stream", "pose": args.angles,
+            "require_camera": True,
+        })
     elif args.action == "floor":
         response = client.request({
             "command": "floor", "level": args.level,

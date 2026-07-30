@@ -8,7 +8,8 @@ Every ffmpeg pipe read is bounded. If three seconds pass without a complete
 frame, the wedged child is killed and a fresh camera child is warmed up. A
 failed respawn raises out of ``main`` so launchd/the supervisor sees nonzero.
 """
-import sys, time
+import sys
+import time
 sys.path.insert(0, "laptop")
 
 import config
@@ -18,6 +19,8 @@ from wrist_vision import (
 
 
 FRAME_STALL_TIMEOUT_S = 3.0
+RAW_FRAME_INTERVAL_S = 1.0 / 30.0
+PREVIEW_FRAME_INTERVAL_S = 0.10
 
 
 def _warm_camera(camera, warmup_frames=None, timeout_s=FRAME_STALL_TIMEOUT_S):
@@ -58,19 +61,22 @@ def main(camera_factory=NamedAVFoundationCamera):
     cam = _open_warmed_camera(camera_factory)
     det = WristDetector()
     print("[publish] READY", flush=True)
-    last = 0.0
+    last_raw = 0.0
+    last_preview = 0.0
     try:
         while True:
             ok, frame = cam.read(timeout_s=FRAME_STALL_TIMEOUT_S)
             if not ok:
                 cam = _respawn_after_stall(cam, camera_factory)
                 continue
-            obs, _m = det.detect(frame)
             now = time.monotonic()
-            if now - last >= 0.15:
+            if now - last_raw >= RAW_FRAME_INTERVAL_S:
                 _atomic_write_jpeg(LATEST_RAW_PATH, frame)
+                last_raw = now
+            if now - last_preview >= PREVIEW_FRAME_INTERVAL_S:
+                obs, _m = det.detect(frame)
                 _atomic_write_jpeg(LATEST_PREVIEW_PATH, annotate(frame, obs))
-                last = now
+                last_preview = now
     finally:
         cam.release()
 

@@ -3846,3 +3846,27 @@ and the trained model backend.
 - The wait remains bounded to six inference attempts and therefore still fails
   closed if either marker truly stays unavailable.
 - No estimated hand profile can authorize the final close.
+
+## Patch 109 — remove stop-and-wait from the real-time I/O path
+
+### Root cause
+
+- The Uno firmware already accepts a replacement target while its servos are
+  moving, but the Mac session server waited for `DONE` after every pose.
+- The wrist publisher captured at 30 FPS but wrote the shared raw frame only
+  once per 150 ms, limiting controllers to roughly 6.7 observations/second.
+- This forced the old controller into a move, settle, segment, move staircase
+  even though neither the firmware nor camera required it.
+
+### Changes
+
+- Add a `stream` session command that collision-checks each target, limits it
+  to at most 8 degrees from the live physical pose, sends it to the Uno, and
+  returns immediately after the firmware acknowledgement without waiting for
+  arrival.
+- Keep the existing blocking `move` command unchanged for HOME, grasp, and
+  other discrete operations.
+- Publish raw wrist frames at up to 30 FPS while keeping the more expensive
+  annotated preview at 10 FPS.
+- Added tests proving streamed targets do not call a blocking completion wait
+  and that discontinuous live jumps are rejected before serial output.
