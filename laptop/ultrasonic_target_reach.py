@@ -259,19 +259,43 @@ def _draw_preview(frame, scene, candidate, pose, distance_mm, step, decision,
 def _jaw_metrics(scene, candidate):
     gripper = getattr(scene, "gripper", None)
     if gripper is None:
-        return False, "finger markers unavailable", None
-    horizontal = abs(float(candidate.center[0]) - float(gripper.center[0]))
+        height, width = scene.frame_shape[:2]
+        diagonal = float(np.hypot(width, height))
+        profile = config.WRIST_GRIPPER_OPEN_PROFILE
+        center = (
+            float(profile["center"][0]) * width,
+            float(profile["center"][1]) * height,
+        )
+        opening_px = float(profile["opening_ratio"]) * diagonal
+        estimated = True
+    else:
+        center = gripper.center
+        opening_px = float(gripper.opening_px)
+        estimated = False
+    horizontal = abs(float(candidate.center[0]) - float(center[0]))
     gap = float(gripper.center[1]) - float(
-        candidate.bbox[1] + candidate.bbox[3])
-    if horizontal > 0.42 * float(gripper.opening_px):
+        candidate.bbox[1] + candidate.bbox[3]) if gripper is not None else (
+            float(center[1]) - float(candidate.bbox[1] + candidate.bbox[3]))
+    if horizontal > 0.42 * opening_px:
         return (
             False,
-            f"object outside open-jaw corridor ({horizontal:.0f}px)",
+            f"object outside {'estimated ' if estimated else ''}"
+            f"open-jaw corridor ({horizontal:.0f}px)",
             gap,
         )
     if gap > 100.0:
-        return False, f"object has not reached finger row (gap {gap:.0f}px)", gap
-    return True, f"inside jaws; row gap {gap:.0f}px", gap
+        return (
+            False,
+            f"object has not reached {'estimated ' if estimated else ''}"
+            f"finger row (gap {gap:.0f}px)",
+            gap,
+        )
+    return (
+        True,
+        f"inside {'estimated ' if estimated else ''}jaws; "
+        f"row gap {gap:.0f}px",
+        gap,
+    )
 
 
 def _jaw_gate(scene, candidate):
@@ -557,7 +581,10 @@ def _sonar_aim_x(scene, frame_width):
     gripper = getattr(scene, "gripper", None) if scene is not None else None
     if gripper is not None:
         return float(gripper.center[0])
-    return SONAR_AIM_X_RATIO * float(frame_width)
+    return (
+        float(config.WRIST_GRIPPER_OPEN_PROFILE["center"][0])
+        * float(frame_width)
+    )
 
 
 def _candidate_on_sonar_axis(candidate, frame_width, scene=None):

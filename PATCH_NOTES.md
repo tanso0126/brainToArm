@@ -3754,3 +3754,23 @@ and the trained model backend.
   gates.
 - Added regression coverage using the measured complete, fragment, and
   unrelated venue detections.
+
+## Patch 105 — use the calibrated open-hand profile above the camera edge
+
+### Physical finding
+
+- The safe high search pose reacquired the real object, but both coloured
+  fingertips were below the image boundary. The controller stopped because its
+  initial row-gap calculation required live markers.
+
+### Changes
+
+- While the gripper is commanded fully open and markers are clipped, use the
+  previously measured open-hand centre and opening ratio for initial approach
+  geometry.
+- The sonar horizontal axis uses that calibrated hand centre rather than the
+  generic 50% image centre when markers are missing.
+- As soon as the coloured fingertips enter the frame, all calculations
+  automatically return to live marker geometry.
+- Final alignment, close, retention, and HOME proof still require real visual
+  evidence; the estimated profile cannot authorize a blind grasp.

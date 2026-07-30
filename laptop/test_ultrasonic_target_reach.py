@@ -11,6 +11,7 @@ from ultrasonic_target_reach import (
     _best_final_grasp_candidate,
     _complete_tracking_candidate,
     _final_grasp_gate,
+    _jaw_metrics,
     _preclose_needs_fine_lift,
     _retained_image_gate,
     _retained_corridor_candidate,
@@ -168,6 +169,18 @@ class ApproachStopTests(unittest.TestCase):
         self.assertTrue(_final_grasp_gate(scene, aligned)[0])
         self.assertFalse(_final_grasp_gate(scene, overshot)[0])
         self.assertTrue(_final_grasp_gate(scene, measured_perfect)[0])
+
+    def test_high_search_pose_uses_open_gripper_profile_for_approach(self):
+        scene = SimpleNamespace(
+            gripper=None, frame_shape=(720, 1280, 3))
+        target = SimpleNamespace(
+            center=(610.0, 560.0), bbox=(575, 440, 70, 210))
+
+        ready, reason, gap = _jaw_metrics(scene, target)
+
+        self.assertTrue(ready)
+        self.assertIn("estimated", reason)
+        self.assertIsNotNone(gap)
 
     def test_preclose_fine_lift_only_corrects_vertical_gap(self):
         scene = SimpleNamespace(gripper=SimpleNamespace(
@@ -332,7 +345,7 @@ class ApproachStopTests(unittest.TestCase):
 
     def test_search_rejects_home_background_outside_sonar_axis(self):
         near_axis = SimpleNamespace(center=(600.0, 450.0))
-        background = SimpleNamespace(center=(546.0, 450.0))
+        background = SimpleNamespace(center=(480.0, 450.0))
         self.assertTrue(_candidate_on_sonar_axis(near_axis, 1280))
         self.assertFalse(_candidate_on_sonar_axis(background, 1280))
 
@@ -344,6 +357,13 @@ class ApproachStopTests(unittest.TestCase):
         self.assertEqual(_sonar_aim_x(scene, 1280), 542.0)
         self.assertTrue(_candidate_on_sonar_axis(
             measured_target, 1280, scene))
+
+    def test_missing_markers_fall_back_to_calibrated_open_hand_axis(self):
+        scene = SimpleNamespace(gripper=None)
+
+        self.assertAlmostEqual(
+            _sonar_aim_x(scene, 1280),
+            config.WRIST_GRIPPER_OPEN_PROFILE["center"][0] * 1280)
 
     def test_vivid_fallback_is_hue_independent_and_axis_ranked(self):
         frame = np.full((720, 1280, 3), 215, dtype=np.uint8)
