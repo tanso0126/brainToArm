@@ -43,6 +43,23 @@ class RealtimeVisualServoTests(unittest.TestCase):
         self.assertIsNotNone(tracked)
         self.assertAlmostEqual(tracked.center[0], 155.0, delta=10.0)
 
+    def test_coloured_feature_preserves_whole_object_centre(self):
+        frame = np.full((240, 320, 3), 245, dtype=np.uint8)
+        # FastSAM's whole object box contains a small coloured feature and a
+        # mostly overexposed body, matching the physical ruler/eraser view.
+        cv2.rectangle(frame, (100, 50), (200, 190), (250, 250, 250), -1)
+        cv2.rectangle(frame, (160, 70), (185, 110), (180, 60, 120), -1)
+        tracker = HistogramTargetTracker()
+        tracker.initialize(frame, (100, 50, 100, 140))
+
+        tracked = tracker.update(frame)
+
+        self.assertIsNotNone(tracked)
+        self.assertAlmostEqual(tracked.center[0], 150.0, delta=8.0)
+        self.assertAlmostEqual(tracked.center[1], 120.0, delta=8.0)
+        self.assertGreater(tracked.bbox[2], 80)
+        self.assertGreater(tracked.bbox[3], 110)
+
     def test_dynamic_aim_moves_from_image_to_live_gripper_row(self):
         self.assertAlmostEqual(dynamic_aim_y(720, 300, 690), 403.2)
         self.assertAlmostEqual(dynamic_aim_y(720, 46, 690), 690.0)

@@ -56,7 +56,7 @@ PREVIEW_PATH = ROOT / "data" / "vision" / "realtime_visual_servo_latest.jpg"
 CONTROL_HZ = 10.0
 SONAR_HZ = 5.0
 PREVIEW_HZ = 10.0
-TRACKER_MIN_CONFIDENCE = 0.08
+TRACKER_MIN_CONFIDENCE = 0.05
 TRACKER_MAX_CENTER_JUMP_RATIO = 0.20
 TRACKER_SCALE_RANGE = (0.45, 2.20)
 TRACKER_INITIAL_SEARCH_MARGIN_PX = 80
@@ -125,6 +125,10 @@ class HistogramTargetTracker:
         self.window = None
         self.last_center = None
         self.last_area = None
+        self.seed_center = None
+        self.seed_size = None
+        self.anchor_offset = None
+        self.anchor_area = None
 
     @staticmethod
     def _clamp_box(box, shape, margin=0):
@@ -156,6 +160,25 @@ class HistogramTargetTracker:
             bbox, frame.shape, margin=TRACKER_INITIAL_SEARCH_MARGIN_PX)
         self.last_center = np.asarray(
             (x + 0.5 * width, y + 0.5 * height), dtype=float)
+        self.seed_center = self.last_center.copy()
+        self.seed_size = np.asarray((width, height), dtype=float)
+        nonzero = cv2.findNonZero(mask)
+        if nonzero is None:
+            anchor_center = self.seed_center.copy()
+            anchor_area = float(width * height)
+        else:
+            anchor_x, anchor_y, anchor_width, anchor_height = (
+                cv2.boundingRect(nonzero))
+            anchor_center = np.asarray(
+                (
+                    x + anchor_x + 0.5 * anchor_width,
+                    y + anchor_y + 0.5 * anchor_height,
+                ),
+                dtype=float,
+            )
+            anchor_area = float(anchor_width * anchor_height)
+        self.anchor_offset = self.seed_center - anchor_center
+        self.anchor_area = anchor_area
         # The first CamShift update intentionally collapses a wide reacquisition
         # window back onto the physical object, so it has no meaningful scale
         # ratio to the seed box.
@@ -200,10 +223,27 @@ class HistogramTargetTracker:
             or confidence < TRACKER_MIN_CONFIDENCE
         ):
             return None
+        object_scale = math.sqrt(
+            area / max(1.0, float(self.anchor_area)))
+        object_center = center + self.anchor_offset * object_scale
+        object_size = self.seed_size * object_scale
+        object_box = self._clamp_box(
+            (
+                object_center[0] - 0.5 * object_size[0],
+                object_center[1] - 0.5 * object_size[1],
+                object_size[0],
+                object_size[1],
+            ),
+            frame.shape,
+        )
         self.window = window
         self.last_center = center
         self.last_area = area
-        return TrackObservation(tuple(center), window, confidence)
+        return TrackObservation(
+            tuple(float(value) for value in object_center),
+            object_box,
+            confidence,
+        )
 
 
 def numeric_task_jacobian(pose):

@@ -3963,3 +3963,25 @@ and the trained model backend.
 - Finger-marker masks remain excluded by the wrist scene detector.
 - Added a regression proving that the measured row-284 real object wins over a
   higher background candidate without any hard-coded horizon.
+
+## Patch 114 — track the whole object through an internal colour anchor
+
+### Physical finding
+
+- CamShift found the correct purple feature with confidence `0.07963`, only
+  `0.00037` below the old `0.08` threshold.
+- Its returned 24×29 px window described an internal coloured feature, while
+  the FastSAM seed described the full 110×135 px physical object.
+- Driving the feature centre directly would repeat the camera/part-versus-
+  gripper-centre error even if temporal tracking remained stable.
+
+### Changes
+
+- Use `0.05` as the minimum bounded back-projection confidence for the
+  overexposed mounted camera.
+- On the first temporal frame, measure the transform from the internal colour
+  anchor to the full FastSAM object centre and size.
+- Track the fast colour anchor thereafter but reconstruct the whole object's
+  centre and bbox, including scale, for visual servo and grasp-depth control.
+- Added a regression with a mostly white object body and a small coloured
+  internal feature; the output must remain the full physical centre and size.
