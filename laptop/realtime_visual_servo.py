@@ -77,6 +77,7 @@ SEED_MAX_AREA_RATIO = 0.08
 SEED_MAX_AXIS_ERROR_RATIO = 0.16
 SEED_FINGER_EXCLUSION_Y_RATIO = 0.72
 SEED_FINGER_EXCLUSION_RADIUS_FRACTION = 0.28
+CURRENT_VIEW_RESUME_WRIST_MIN_DEG = 160
 
 
 @dataclass(frozen=True)
@@ -575,10 +576,11 @@ def _search_and_seed(
     # canned search pose discards successful approach progress and introduces
     # a large camera jump that can lose an otherwise visible target.
     frame, _stamp = frame_stream.read(timeout_s=1.0)
-    scene, _observation = detector.scene(frame)
-    candidate = select_realtime_seed(scene, frame)
-    if candidate is not None:
-        return pose, frame, candidate
+    if pose[config.J_WRIST] >= CURRENT_VIEW_RESUME_WRIST_MIN_DEG:
+        scene, _observation = detector.scene(frame)
+        candidate = select_realtime_seed(scene, frame)
+        if candidate is not None:
+            return pose, frame, candidate
     for wrist in SEARCH_WRISTS:
         target_pose = list(pose)
         target_pose[config.J_SHOULDER] = 70

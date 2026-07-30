@@ -6,6 +6,7 @@ import numpy as np
 
 import arm_fk
 from realtime_visual_servo import (
+    CURRENT_VIEW_RESUME_WRIST_MIN_DEG,
     HistogramTargetTracker,
     dynamic_aim_y,
     floor_limited_grasp_readiness,
@@ -17,6 +18,16 @@ from realtime_visual_servo import (
 
 
 class RealtimeVisualServoTests(unittest.TestCase):
+    def test_home_wrist_is_not_a_resumable_table_view(self):
+        self.assertLess(
+            140,
+            CURRENT_VIEW_RESUME_WRIST_MIN_DEG,
+        )
+        self.assertGreaterEqual(
+            164,
+            CURRENT_VIEW_RESUME_WRIST_MIN_DEG,
+        )
+
     def test_histogram_tracker_follows_a_translated_arbitrary_colour(self):
         first = np.full((240, 320, 3), 235, dtype=np.uint8)
         second = first.copy()

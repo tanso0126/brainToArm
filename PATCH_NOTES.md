@@ -4061,3 +4061,13 @@ and the trained model backend.
 - Sonar-close operation still requires the original ultrasonic gate; this
   fallback activates only when safe approach motion is exhausted near the
   floor. Added aligned/off-axis regressions.
+
+## Patch 121 — never seed the room/person from the HOME camera view
+
+- After battery recovery, the live HOME frame showed the room and operator
+  rather than the tabletop. The current-frame resume feature could otherwise
+  treat a centred background/person region as the target before moving to the
+  verified downward search pose.
+- Current-pose target continuation is now enabled only when wrist pitch is at
+  least 160°, covering the measured approach poses while excluding the 140°
+  HOME view. HOME therefore always enters the bounded downward search first.
