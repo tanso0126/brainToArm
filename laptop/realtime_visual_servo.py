@@ -42,6 +42,8 @@ from ultrasonic_target_reach import (
     STOP_RANGE_MM,
     VividFallbackDetector,
     fingertip_floor_clearance_mm,
+    home_pose_holding,
+    loaded_home_reassert_pose,
     transition_fingertip_floor_clearance_mm,
 )
 from wrist_vision import (
@@ -299,7 +301,6 @@ def grasp_readiness(
     center_error = float(np.linalg.norm(
         np.asarray(target.center, dtype=float)
         - np.asarray(gripper_center, dtype=float)))
-    lateral = abs(float(target.center[0]) - float(gripper_center[0]))
     if distance_mm is None or not math.isfinite(float(distance_mm)):
         return GraspReadiness(False, "sonar unavailable", center_error)
     if float(distance_mm) > STOP_RANGE_MM:
@@ -311,13 +312,7 @@ def grasp_readiness(
     if float(floor_clearance_mm) < FINGERTIP_FLOOR_STOP_MM:
         return GraspReadiness(False, "finger floor clearance exhausted",
                               center_error)
-    if lateral > GRASP_LATERAL_OPENING_FRACTION * float(opening_px):
-        return GraspReadiness(False, "object centre outside finger width",
-                              center_error)
-    if center_error > GRASP_CENTER_TOLERANCE_PX:
-        return GraspReadiness(False, "object centre not deep inside jaws",
-                              center_error)
-    return GraspReadiness(True, "range and physical jaw centre aligned",
+    return GraspReadiness(True, "sonar stop reached with target tracked",
                           center_error)
 
 
@@ -329,17 +324,54 @@ def floor_limited_grasp_readiness(
     center_error = float(np.linalg.norm(
         np.asarray(target.center, dtype=float)
         - np.asarray(gripper_center, dtype=float)))
-    lateral = abs(float(target.center[0]) - float(gripper_center[0]))
     if float(floor_clearance_mm) > FLOOR_HOLD_START_MM:
         return GraspReadiness(False, "floor stop not reached", center_error)
-    if lateral > GRASP_LATERAL_OPENING_FRACTION * float(opening_px):
-        return GraspReadiness(False, "object centre outside finger width",
-                              center_error)
-    if center_error > GRASP_CENTER_TOLERANCE_PX:
-        return GraspReadiness(False, "object centre not deep inside jaws",
-                              center_error)
     return GraspReadiness(
-        True, "floor-limited with physical jaw centre aligned", center_error)
+        True, "floor stop reached with target tracked", center_error)
+
+
+def loaded_lift_pose(pose, safety, target_clearance_mm=50.0):
+    """Find the first collision-safe shoulder lift without opening the hand."""
+    pose = list(pose)
+    for shoulder in range(
+            pose[config.J_SHOULDER] - 1,
+            config.SERVO_MIN[config.J_SHOULDER] - 1,
+            -1):
+        lifted = list(pose)
+        lifted[config.J_SHOULDER] = shoulder
+        if (
+            fingertip_floor_clearance_mm(lifted) >= target_clearance_mm
+            and transition_fingertip_floor_clearance_mm(pose, lifted)
+            >= FINGERTIP_FLOOR_STOP_MM
+            and safety.transition_report(pose, lifted).safe
+        ):
+            return lifted
+    raise RuntimeError("no collision-safe loaded lift reaches 50mm clearance")
+
+
+def close_lift_home(client, safety, pose):
+    """The physically proven terminal sequence: close, lift, waypoint, HOME."""
+    closed = list(pose)
+    closed[config.J_GRIP] = config.GRIP_CLOSED
+    client.request({
+        "command": "move", "pose": closed,
+        "require_camera": True,
+    })
+    lifted = loaded_lift_pose(closed, safety)
+    waypoint = loaded_home_reassert_pose(lifted)
+    home = home_pose_holding(lifted)
+    current = closed
+    for target in (lifted, waypoint, home):
+        report = safety.transition_report(current, target)
+        if not report.safe:
+            raise RuntimeError(
+                "loaded transport rejected: " + report.explain())
+        client.request({
+            "command": "move", "pose": target,
+            "require_camera": True,
+        })
+        current = target
+    return home
 
 
 def _vivid_frame_seeds(frame, gripper):
@@ -668,15 +700,10 @@ def run(execute=False, allow_grasp=False, max_seconds=45.0):
                     "center_error_px": readiness.center_error_px,
                     "preview": str(PREVIEW_PATH),
                 }
-            closed = list(pose)
-            closed[config.J_GRIP] = config.GRIP_CLOSED
-            client.request({
-                "command": "move", "pose": closed,
-                "require_camera": True,
-            })
+            home = close_lift_home(client, safety, pose)
             return {
-                "state": "closed-pending-verification",
-                "pose": closed,
+                "state": "home-after-grasp",
+                "pose": home,
                 "distance_mm": distance,
                 "center_error_px": readiness.center_error_px,
                 "preview": str(PREVIEW_PATH),
@@ -699,15 +726,10 @@ def run(execute=False, allow_grasp=False, max_seconds=45.0):
                         "center_error_px": floor_ready.center_error_px,
                         "preview": str(PREVIEW_PATH),
                     }
-                closed = list(pose)
-                closed[config.J_GRIP] = config.GRIP_CLOSED
-                client.request({
-                    "command": "move", "pose": closed,
-                    "require_camera": True,
-                })
+                home = close_lift_home(client, safety, pose)
                 return {
-                    "state": "closed-pending-verification",
-                    "pose": closed,
+                    "state": "home-after-grasp",
+                    "pose": home,
                     "distance_mm": distance,
                     "center_error_px": floor_ready.center_error_px,
                     "preview": str(PREVIEW_PATH),

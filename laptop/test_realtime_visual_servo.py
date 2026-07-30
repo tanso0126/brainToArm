@@ -11,6 +11,7 @@ from realtime_visual_servo import (
     dynamic_aim_y,
     floor_limited_grasp_readiness,
     grasp_readiness,
+    loaded_lift_pose,
     numeric_task_jacobian,
     resolved_velocity_target,
     select_realtime_seed,
@@ -77,7 +78,7 @@ class RealtimeVisualServoTests(unittest.TestCase):
         self.assertAlmostEqual(dynamic_aim_y(720, 300, 690), 403.2)
         self.assertAlmostEqual(dynamic_aim_y(720, 46, 690), 690.0)
 
-    def test_grasp_requires_both_sonar_and_deep_centre_alignment(self):
+    def test_grasp_fires_immediately_at_sonar_stop(self):
         target = SimpleNamespace(center=(610.0, 680.0))
 
         far = grasp_readiness(target, (600.0, 690.0), 280.0, 96.5, 15.0)
@@ -87,7 +88,7 @@ class RealtimeVisualServoTests(unittest.TestCase):
         self.assertIn("sonar", far.reason)
         self.assertTrue(ready.ready)
 
-    def test_floor_stop_accepts_only_deep_jaw_alignment(self):
+    def test_floor_stop_fires_immediately_with_tracked_target(self):
         target = SimpleNamespace(center=(585.0, 678.0))
 
         aligned = floor_limited_grasp_readiness(
@@ -97,7 +98,19 @@ class RealtimeVisualServoTests(unittest.TestCase):
             (613.0, 699.0), 290.0, 11.6)
 
         self.assertTrue(aligned.ready)
-        self.assertFalse(off_axis.ready)
+        self.assertTrue(off_axis.ready)
+
+    def test_loaded_lift_keeps_gripper_closed(self):
+        pose = [90, 143, 44, 178, 180, 180]
+        safety = SimpleNamespace(
+            transition_report=lambda _start, _target:
+            SimpleNamespace(safe=True))
+
+        lifted = loaded_lift_pose(pose, safety)
+
+        self.assertEqual(lifted[4], 180)
+        self.assertEqual(lifted[2:4], pose[2:4])
+        self.assertLess(lifted[1], pose[1])
 
     def test_realtime_seed_does_not_use_a_fixed_image_horizon(self):
         near_real_object = SimpleNamespace(

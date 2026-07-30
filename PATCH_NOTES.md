@@ -4071,3 +4071,18 @@ and the trained model backend.
 - Current-pose target continuation is now enabled only when wrist pitch is at
   least 160°, covering the measured approach poses while excluding the 140°
   HOME view. HOME therefore always enters the bounded downward search first.
+
+## Patch 122 — grasp immediately at approach stop, then go HOME
+
+- The new battery physically completed this exact sequence with the object:
+  close at `180°`, shoulder-only loaded lift, collision-safe loaded waypoint,
+  and HOME while keeping the gripper at `180°`.
+- Removed the extra centre-distance and lateral-opening grasp gates that caused
+  the controller to hesitate after it had already reached the object. Once a
+  target remains tracked and either the sonar stop or floor stop ends the
+  approach, the controller closes immediately.
+- Integrated the proven terminal sequence directly into the autonomous loop:
+  `close → >=50 mm loaded lift → loaded waypoint → HOME`. The 158° hold-angle
+  backoff is not used.
+- Collision-swept motion validation and the 10 mm floor protection remain as
+  the minimal hardware-damage safeguards.
