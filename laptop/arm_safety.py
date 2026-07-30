@@ -57,7 +57,7 @@ class SafetyReport:
 
     def explain(self):
         if self.safe:
-            return f"safe; minimum model clearance={self.minimum_clearance_mm:.1f} mm"
+            return f"안전함, 모델의 최소 여유={self.minimum_clearance_mm:.1f}mm"
         return "; ".join(
             f"{item.kind} ({item.clearance_mm:.1f} mm): {item.detail}"
             for item in self.violations)
@@ -142,19 +142,21 @@ class PhysicalArmSafety:
         self.slew_step_deg = float(slew_step_deg)
         self.table_z_m = float(table_z_m)
         if self.margin_m < 0 or self.slew_step_deg <= 0:
-            raise ValueError("safety margin must be nonnegative and step positive")
+            raise ValueError(
+                "안전 여유는 0 이상이고 이동 단계는 0보다 커야 합니다.")
         if not math.isfinite(self.table_z_m):
-            raise ValueError("table z must be finite")
+            raise ValueError("탁자 Z 높이는 유효한 숫자여야 합니다.")
 
     @staticmethod
     def _validate_pose(pose):
         values = np.asarray(tuple(pose), dtype=float)
         if values.shape != (config.N_JOINTS,) or not np.isfinite(values).all():
-            raise ValueError("pose must contain six finite servo values")
+            raise ValueError("로봇 자세에는 유효한 서보값 6개가 있어야 합니다.")
         for joint, value in enumerate(values):
             if not config.SERVO_MIN[joint] <= value <= config.SERVO_MAX[joint]:
                 raise ValueError(
-                    f"joint {joint + 1}={value:g} outside configured limits")
+                    f"{joint + 1}번 관절={value:g} 값이 설정 범위를 "
+                    "벗어났습니다.")
         return values
 
     def pose_report(self, pose):
@@ -177,24 +179,24 @@ class PhysicalArmSafety:
             distance = _segment_cylinder_distance(
                 start, end, BASE_RADIUS_M, 0.0, BASE_TOP_M)
             check("base-housing", distance - radius - self.margin_m,
-                  f"{name} enters conservative lower-body envelope")
+                  f"{name} 부분이 로봇 하부 몸체의 안전 영역에 들어갑니다.")
 
         # The webcam is larger than the wrist itself and must be checked as a
         # separate sphere against both housing and shoulder mast.
         camera_base = _point_capped_cylinder_distance(
             g.camera, BASE_RADIUS_M, 0.0, BASE_TOP_M)
         check("camera-base", camera_base - CAMERA_RADIUS_M - self.margin_m,
-              "mounted webcam enters lower-body envelope")
+              "장착한 웹캠이 로봇 하부 몸체의 안전 영역에 들어갑니다.")
 
         for name, start, end, radius in distal:
             distance = _segment_cylinder_distance(
                 start, end, MAST_RADIUS_M, MAST_BOTTOM_M, MAST_TOP_M)
             check("shoulder-mast", distance - radius - self.margin_m,
-                  f"{name} enters shoulder/servo envelope")
+                  f"{name} 부분이 어깨/서보의 안전 영역에 들어갑니다.")
         camera_mast = _point_capped_cylinder_distance(
             g.camera, MAST_RADIUS_M, MAST_BOTTOM_M, MAST_TOP_M)
         check("camera-mast", camera_mast - CAMERA_RADIUS_M - self.margin_m,
-              "mounted webcam enters shoulder/servo envelope")
+              "장착한 웹캠이 어깨/서보의 안전 영역에 들어갑니다.")
 
         # All rigid bodies except the fingertip contact centre stay above the
         # shared table.  The tool is permitted to reach the known floor plane,
@@ -206,17 +208,18 @@ class PhysicalArmSafety:
         ):
             clearance = (min(float(point[2]) for point in points)
                          - self.table_z_m - radius - self.margin_m)
-            check("table", clearance, f"{name} envelope reaches below table")
+            check("table", clearance,
+                  f"{name} 부분의 안전 영역이 탁자 아래까지 내려갑니다.")
         minimum_tool_z_m = self.table_z_m + MIN_TOOL_Z_M
         check("tool-through-table", float(g.tool[2]) - minimum_tool_z_m,
-              "grasp centre is commanded below calibrated floor tolerance")
+              "집기 중심이 보정된 바닥 허용 높이보다 아래로 명령됐습니다.")
         minimum_finger_z_m = self.table_z_m + MIN_FINGER_CLEARANCE_M
         check("finger-table", float(g.finger_tip[2]) - minimum_finger_z_m,
-              "physical finger endpoint lacks normal-motion table clearance")
+              "실물 집게 끝과 탁자 사이의 정상 이동 여유가 부족합니다.")
         check("camera-table",
               float(g.camera[2]) - self.table_z_m
               - CAMERA_RADIUS_M - self.margin_m,
-              "mounted webcam reaches the table")
+              "장착한 웹캠이 탁자에 닿습니다.")
 
         # Non-adjacent self-collision.  Adjacent links share their joint by
         # design and are therefore intentionally excluded.
@@ -224,11 +227,11 @@ class PhysicalArmSafety:
             g.shoulder, g.elbow, g.wrist_roll, g.finger_tip)
         check("self-upper-hand",
               upper_hand - UPPER_RADIUS_M - HAND_RADIUS_M - self.margin_m,
-              "gripper/hand folds into upper arm")
+              "집게 또는 손목이 위팔 안쪽으로 접혀 충돌합니다.")
         upper_camera = _point_segment_distance(g.camera, g.shoulder, g.elbow)
         check("self-upper-camera",
               upper_camera - UPPER_RADIUS_M - CAMERA_RADIUS_M - self.margin_m,
-              "mounted webcam folds into upper arm")
+              "장착한 웹캠이 위팔 안쪽으로 접혀 충돌합니다.")
         # Camera and forearm meet at the wrist-pitch assembly; their deliberately
         # inflated envelopes overlap in every valid pose, just like adjacent
         # link capsules at a hinge.  Only the non-adjacent upper-arm check is a
@@ -269,7 +272,7 @@ class PhysicalArmSafety:
             if not report.safe:
                 details = tuple(SafetyViolation(
                     item.kind, item.clearance_mm,
-                    f"trajectory step {index}: {item.detail}")
+                    f"이동 경로 {index}번째 단계: {item.detail}")
                     for item in report.violations)
                 return SafetyReport(False, minimum, details)
         return SafetyReport(True, minimum, ())
@@ -283,5 +286,7 @@ class PhysicalArmSafety:
     def assert_transition_safe(self, start, target):
         report = self.transition_report(start, target)
         if not report.safe:
-            raise RuntimeError(f"physical collision interlock: {report.explain()}")
+            raise RuntimeError(
+                f"실물 충돌 방지 조건이 움직임을 차단했습니다: "
+                f"{report.explain()}")
         return report

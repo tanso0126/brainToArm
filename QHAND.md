@@ -1,266 +1,213 @@
-# brainToArm quick handoff — MuJoCo 3D + EEG demo
+# brainToArm 빠른 인수인계 — MuJoCo 3차원 시뮬레이션과 뇌파
 
-Updated: 2026-07-28 (KST)
+최종 갱신: 2026-07-30 KST
 
-## 1. What the demo is now
+이 문서는 시뮬레이션과 뇌파 데모를 처음 실행하는 사람이 전체 구조를
+빠르게 이해하기 위한 인수인계서입니다. 실물 로봇팔 Windows 실행은
+`windows_release/README_WINDOWS.md`를 먼저 읽으세요.
 
-The earlier browser-only 2D simulator has been removed. The default dashboard
-workspace is a client for a live MuJoCo engine under `simul/`.
+## 1. 현재 데모가 하는 일
 
-The participant can:
+예전에 만들었던 브라우저 전용 2차원 모형은 제거했습니다. 현재 대시보드의
+시뮬레이션 화면은 `simul/` 아래의 실제 MuJoCo 물리 엔진과 연결됩니다.
 
-1. create and arrange several 3D objects and a destination tray;
-2. see the original robot STL assembly in a MuJoCo overview camera;
-3. see the robot's eye-in-hand RGB camera, including the blue-left/red-right
-   finger markers;
-4. run camera-gated search, contact-physics grasp, lift, carry, and release;
-5. send “wrong object” before grasp, during movement, after drop, or after the
-   task says complete;
-6. watch a late rejection physically re-grasp the delivered free body, return it
-   near its saved origin, remember the rejection, and choose another object;
-7. use the same rejection entry point from a manual button, mock ErrP, or the
-   PolyG-I onset-locked detector.
+사용자는 다음 작업을 할 수 있습니다.
 
-No physical serial port or webcam is opened by this simulation.
+1. 여러 개의 3차원 물체와 목적 바구니를 만들고 배치합니다.
+2. 원본 STL로 구성한 로봇팔을 전체 카메라로 봅니다.
+3. 파란색 왼쪽 집게와 빨간색 오른쪽 집게가 보이는 손목 RGB 카메라를
+   동시에 봅니다.
+4. 카메라로 물체를 확인하고 탐색, 접근, 접촉 물리 기반 잡기, 들어 올리기,
+   운반, 놓기를 실행합니다.
+5. 물체를 잡기 전, 이동 중, 바구니에 놓은 뒤, 완료 표시 뒤에도
+   “아님” 신호를 보낼 수 있습니다.
+6. 늦게 “아님” 신호가 오면 바구니에 놓은 물체를 다시 집어 저장한 원래
+   위치 근처로 돌려놓고 다른 물체를 선택합니다.
+7. 같은 거부 입력을 수동 버튼, 모의 ErrP, PolyG-I ErrP에서 사용할 수
+   있습니다.
 
-## 2. Start
+시뮬레이션은 실제 시리얼 포트나 웹캠을 열지 않습니다.
 
-From the repository root:
+## 2. 실행
+
+저장소 루트에서 다음 명령 하나를 실행합니다.
 
 ```bash
 python3 laptop/eeg_dashboard.py
 ```
 
-This starts:
+함께 시작되는 항목:
 
-- UI: `http://localhost:3000`
-- local API: `http://127.0.0.1:8765`
-- the EEG monitor
-- the MuJoCo studio API, loaded lazily on first simulation request
+- 화면: `http://localhost:3000`
+- 로컬 API: `http://127.0.0.1:8765`
+- 뇌파 모니터
+- 첫 시뮬레이션 요청 때 불러오는 MuJoCo 작업실 API
 
-Separate processes for debugging:
+개발 중 두 부분을 따로 실행할 때:
 
 ```bash
 python3 laptop/eeg_dashboard.py --api-only --no-browser
-cd dashboard && npm run dev -- --port 3000
+cd dashboard
+npm run dev -- --port 3000
 ```
 
-## 3. Files and boundaries
+## 3. 주요 파일
 
-| File | Responsibility |
+| 파일 | 역할 |
 |---|---|
-| `simul/studio.py` | editable MuJoCo scene, RGB detection, bounded motion, reversible physics task |
-| `simul/mujoco_robot.py` | original fixed-base training/evaluation robot and calibrated planar mapping |
-| `dashboard/app/SimulationLab.tsx` | 3D/wrist streams, scene controls, state/servo/event UI, ErrP bridge |
-| `laptop/eeg_dashboard.py` | local HTTP ownership of EEG and MuJoCo services |
-| `simul/test_studio.py` | scene, rendering, delivery, late rejection, and next-object regression tests |
+| `simul/studio.py` | 편집 가능한 MuJoCo 장면, RGB 인식, 제한된 이동, 되돌릴 수 있는 물리 작업 |
+| `simul/mujoco_robot.py` | 고정 베이스 실물 구조와 보정된 평면 관절 변환 |
+| `dashboard/app/SimulationLab.tsx` | 3차원/손목 화면, 장면 편집, 서보·사건·ErrP 화면 |
+| `laptop/eeg_dashboard.py` | 뇌파와 MuJoCo 로컬 서비스 관리 |
+| `simul/test_studio.py` | 장면, 렌더링, 운반, 늦은 거부, 다음 물체 회귀 검사 |
 
-The original `mujoco_robot.py`, trained TorchScript policy, and its reported
-fixed-base evaluation remain unchanged. `studio.py` builds a separate runtime
-MJCF from it and adds:
+1번 서보는 MuJoCo 관절이나 구동기가 없으며 모든 자세에서 90°로
+강제됩니다. 이는 현재 실물 베이스 모터가 움직이지 않는 조건과 같습니다.
+탐색은 2·3·4번 서보의 조합만 사용합니다.
 
-- editable box/cylinder/sphere free bodies;
-- a nearly floor-flush physical destination tray;
-- the same six MuJoCo controls as the fixed-base robot;
-- a single sagittal workspace line: depth 387–414 mm, lateral position 0.
+## 4. 화면 이해하기
 
-Servo 1 has no MuJoCo joint or actuator. Every pose forcibly reports and
-commands 90°, matching the currently non-responsive real base motor. Search
-uses only coordinated servo 2/3/4 movement.
+### MuJoCo 3차원 전체 화면
 
-## 4. What the screen means
+CSS나 Canvas로 그린 가짜 팔이 아니라 실제 물리 상태의 렌더링입니다.
+물체를 밀고, 집고, 들고, 떨어뜨릴 수 있습니다.
 
-### MuJoCo 3D overview
+### 손목 RGB 화면
 
-This is a live render of the physics state, not a CSS/Canvas arm drawing.
-Objects can be pushed, pinched, lifted, dropped, and retrieved through MuJoCo
-contact.
+선택 과정은 320×180 손목 RGB 영상에서 연결된 색 영역을 찾습니다. 이미
+알고 있는 파란색/빨간색 집게 테이프 주변 픽셀은 후보에서 제외됩니다.
+물체가 실제 탐색 프레임에 나타나지 않았다면 선택할 수 없습니다.
 
-### Wrist RGB camera
+편집한 물체의 RGB 색은 영상 영역과 작업용 물체 ID를 연결하는 데
+사용합니다. 깊이, 물체 자세, 접촉, 분할 버퍼는 제어기의 시각 입력으로
+주지 않습니다.
 
-The selection gate renders a 320×180 wrist image and finds connected color
-regions. Marker-colored pixels around the known blue/red finger tapes are
-excluded before candidate scoring. An object cannot be selected unless its
-pixels appeared in a scan frame.
+### 물체 배치 지도
 
-The detector does use the editable object's RGB color to associate the blob with
-the task identity. It does not receive depth, object pose, contact, or
-segmentation buffers. MuJoCo pose is still legitimately used by the physics
-engine, origin bookkeeping, delivery planning, and success verification.
+작은 위에서 본 지도는 시작 장면을 편집하는 도구일 뿐입니다. 물체나
+파란색 바구니를 선택해 앞뒤로 옮길 수 있습니다. 이 지도는 로봇의 인식이나
+성공 판정에 사용되지 않습니다.
 
-### Scene placement map
+### 성공 판정
 
-The small top-down SVG is only an authoring tool. Select a point or the blue
-tray and drag it left/right; the backend projects the request onto the reachable
-fixed-base depth interval and rebuilds the paused MuJoCo scene. It is
-deliberately not used for robot perception or task success.
+“잡음” 판정은 다음 두 조건을 모두 만족해야 합니다.
 
-### Success
+- 자유 물체가 최소 3mm 올라감
+- 물체의 XY 위치가 집게 도구를 55mm 안에서 따라감
 
-“Grasped” requires both:
+상태값 `held=true`만으로는 성공할 수 없습니다. 물체를 놓을 때도 집게를
+실제로 열어 접촉 물리로 떨어뜨립니다.
 
-- the free body rose at least 3 mm;
-- its XY position follows the gripper tool within 55 mm.
-
-A symbolic `held=true` alone cannot pass. Placement is also actual open/release
-physics. A measured local object-to-tool offset compensates the destination
-command so return error stays bounded instead of silently teleporting the body.
-
-## 5. Reversible state machine
+## 5. 되돌릴 수 있는 상태 흐름
 
 ```text
-SCANNING
-  -> TARGET / ErrP window
-  -> REACHING
-  -> GRASPING (contact + lift verification)
-  -> TRANSPORTING
-  -> EVALUATING / ErrP window
-  -> COMPLETED
+탐색
+→ 대상 표시 및 ErrP 확인
+→ 접근
+→ 잡기와 들어 올리기 검증
+→ 운반
+→ 결과 확인 및 ErrP 확인
+→ 완료
 ```
 
-`X` or the red button sends the same reject event at any time.
+언제든 `X` 키 또는 빨간색 버튼으로 같은 “아님” 사건을 보냅니다.
 
-- Before grasp: remember the rejection and scan another camera-visible object.
-- While held: return and release at the saved origin.
-- After tray drop or `COMPLETED`: go back to the tray, close on the free body,
-  lift it, return it, release it, then scan the next non-rejected object.
-- Rejected IDs cannot be chosen within the cycle.
-- If every eligible table object is rejected, clear the rejection memory,
-  increment the cycle, and search again.
+- 잡기 전: 해당 물체를 기억하고 카메라에 보이는 다른 물체를 찾습니다.
+- 잡고 있는 중: 저장한 원래 위치로 돌아가 물체를 놓습니다.
+- 바구니에 놓은 뒤 또는 완료 뒤: 바구니로 돌아가 자유 물체를 다시 잡고,
+  들어 올리고, 원래 위치로 돌려놓은 뒤 다른 물체를 찾습니다.
+- 한 주기에서 거부한 물체 ID는 다시 선택하지 않습니다.
+- 가능한 모든 물체를 거부하면 거부 기억을 초기화하고 첫 물체부터 새
+  주기를 시작합니다.
 
-## 6. Scene editing
+## 6. 장면 편집
 
-Editing is disabled while the physics task is running.
+물리 작업이 실행 중일 때는 편집할 수 없습니다.
 
-- Add: sphere, box, cylinder
-- Edit: name, shape, RGB color, half-size 4.5–8.0 mm
-- Place: depth 387–414 mm on the fixed y=0 line
-- Move tray: the same bounded line
-- Delete: selected table object
-- Reset: return every object to its authored origin and clear task memory
+- 추가: 구, 상자, 원기둥
+- 수정: 이름, 모양, RGB 색, 반크기 4.5–8.0mm
+- 배치: 고정된 `y=0` 선의 깊이 387–414mm
+- 바구니 이동: 같은 제한 선 안
+- 삭제: 선택한 바닥 물체
+- 초기화: 모든 물체를 작성한 원점으로 되돌리고 작업 기억 지우기
 
-The bounds are ceilings from the current simulated floor curve, not a claim
-that every real point is calibrated.
+이 범위는 현재 시뮬레이션 바닥 곡선에서 얻은 상한이며, 실물의 모든
+지점이 보정됐다는 뜻은 아닙니다.
 
-## 7. PolyG-I
+## 7. PolyG-I 연결과 ErrP
 
-Hardware path:
+장치 기본 정보:
 
 - VID `0x0F1F`, PID `0x0010`
-- D1WD10 HID reports
-- EEG CH1–CH8 at 256 Hz
+- D1WD10 HID 보고서
+- 뇌파 1–8번 채널, 256Hz
 
-Preparation:
+사용 순서:
 
-1. Connect PolyG-I and run the one-command launcher.
-2. Stay in **시뮬레이션 작업실**; its embedded EEG card now shows all eight
-   live channels beside the 3D scene.
-3. Press **측정 시작** in that card.
-4. Verify CH1, CH2, CH3, CH4, and CH8 all say `신호 있음`, then remain still
-   and relaxed for eight seconds.
-5. Choose **PolyG-I** and press **최근 8초로 통합 보정·저장**.
-6. Start the 3D task and look at the selected object/robot action. Do not try to
-   manufacture a generic blink or button-press signal; an ErrP trial is the
-   time-locked response to perceiving the shown decision as wrong.
+1. PolyG-I를 연결하고 대시보드를 실행합니다.
+2. `시뮬레이션 작업실`에서 3차원 장면 옆의 8채널 그래프를 확인합니다.
+3. `측정 시작`을 누릅니다.
+4. 1·2·3·4·8번 채널에 `신호 있음`이 표시되는지 보고, 8초 동안 움직이지
+   않고 편안하게 있습니다.
+5. `PolyG-I`를 선택하고 `최근 8초로 통합 보정·저장`을 누릅니다.
+6. 3차원 작업을 시작하고 선택된 물체와 로봇 행동을 봅니다.
 
-At `SIM_TARGET_PRESENTED` and `SIM_BASKET_DROP`, the API evaluates:
+ErrP는 일반적인 눈 깜빡임이나 버튼 누르기 신호가 아닙니다. 사용자가
+화면에 나타난 로봇 결정을 보고 “잘못됐다”고 인지할 때 그 사건 시점을
+기준으로 나타나는 반응을 측정합니다.
+
+`SIM_TARGET_PRESENTED`와 `SIM_BASKET_DROP` 시점에는 다음 구간을 평가합니다.
 
 ```text
-0.2 s pre-onset baseline + 0.8 s post-onset response
+사건 전 0.2초 기준선 + 사건 후 0.8초 반응
 ```
 
-At least 80% of the expected 256 Hz samples are required. A missing or short
-epoch fails closed and does not become a rejection. If CSV recording is active,
-the onset marker is written into the sample stream.
+예상되는 256Hz 표본의 80% 이상이 있어야 합니다. 표본이 부족하면 거부로
+잘못 바꾸지 않고 판정을 중단합니다.
 
-All eight channels are acquired and displayed. **ErrP uses CH8 only**, according
-to the project's electrode mapping. Continuous cognitive load is calculated
-separately every second from a two-second Welch window: mean theta power
-(4–8 Hz) on CH1–CH4 divided by alpha power (8–13 Hz) on CH8. The session value
-is `(current TAR - rest TAR) / rest TAR`, then smoothed by an EMA.
+모든 8개 채널을 측정하고 표시하지만 **ErrP 판정에는 8번 채널만
+사용합니다**. 인지 부하는 별도로 2초 Welch 창을 이용해 1–4번 채널의
+세타 파워(4–8Hz) 평균을 8번 채널의 알파 파워(8–13Hz)로 나눈
+TAR로 계산합니다.
 
-The web simulation now uses the same `AutonomyAllocator` as the standalone robot
-orchestrator. Higher relative TAR increases robot weight and the ordinary ErrP
-action-application stride. Lower TAR shifts weight toward the human and applies
-every checkpoint. The ordinary ErrP threshold is fixed at `P(error) >= 0.50`;
-TAR does not change it. CH8 ErrP probability is still calculated at every action
-checkpoint; a skipped checkpoint means observation-only, not that the EEG was
-ignored. The immediate override is `P(error) >= 0.75`; it bypasses the
-TAR-derived application stride.
+```text
+휴식 대비 변화 = (현재 TAR - 휴식 TAR) / 휴식 TAR
+```
 
-The default `baseline` backend is not a trained ErrP classifier. The eight-second
-button measures CH8 resting noise σ and the CH1–4/CH8 resting TAR. For each
-decision it:
+TAR가 높으면 로봇 판단 비중을 높이고 일반 ErrP 행동 반영 간격을 늘립니다.
+TAR가 낮으면 사람 판단 비중을 높여 모든 확인 지점에 ErrP를 적용합니다.
+일반 ErrP 기준은 `오류 확률 50% 이상`, 즉시 덮어쓰기 기준은
+`75% 이상`입니다.
 
-1. filters CH8 to 1–10 Hz;
-2. subtracts the 0.2-second pre-onset mean;
-3. searches the first 0.6 seconds after onset for the strongest sustained
-   150 ms negative deflection;
-4. divides that magnitude by resting σ;
-5. maps the z-score to probability; the current 50% threshold corresponds to
-   approximately z=3.3.
+현재 기본 판정기는 학습된 개인별 ErrP 분류기가 아니라 진단과 시연을 위한
+휴리스틱입니다. 휴식 8초에서 8번 채널 잡음 표준편차와 휴식 TAR를
+구하고, 사건 후 1–10Hz 신호의 지속적인 음의 변화를 휴식 잡음과
+비교합니다. 신뢰할 수 있는 참가자별 정확도를 얻으려면 정답/오류 라벨이
+있는 개인별 자료를 모아 `model` 판정기를 학습해야 합니다.
 
-The embedded panel shows TAR, rest-relative change, robot/human weights, action
-stride, CH8 probability, fixed 50% threshold, and whether the latest decision was
-applied or only observed. Flat/saturated required channels, insufficient samples,
-or an uncalibrated session produces an explicit error instead of a silent
-non-detection. Reliable participant use still requires collecting labeled
-correct/error trials and training the `model` backend; the baseline heuristic is
-a diagnostic/demo detector and must not be reported as validated subject
-accuracy.
+바구니에 놓은 뒤에는 사용자가 종료 버튼을 누를 때까지 계속 판정합니다.
+서버는 겹치는 1초 창을 62.5ms마다 이동해 8번 채널을 확인하며, 한 창이
+50%를 넘으면 즉시 거부합니다. 이는 0.8초마다 사진을 찍는 방식이 아니라
+연속 슬라이딩 판정입니다.
 
-The simulator keeps basket delivery in an unlimited review phase until the
-operator presses stop. A server-side CH8 asynchronous monitor advances an
-overlapping 1 s trailing window every 62.5 ms and rejects as soon as one window
-crosses 50%. This is a continuous sliding classifier, not a sequence of fake
-0.8-second action onsets. The baseline backend remains an explicitly untrained
-diagnostic heuristic; validated asynchronous use requires participant-specific
-labeled correct/error data and threshold tuning. A confirmed asynchronous
-detection is a direct correction signal and is not skipped by the TAR cadence.
-A detected rejection retrieves
-the delivered object, returns it to its recorded origin, and selects the next
-non-rejected object.
+통합 보정 버튼은 최근 8초 전체의 1·2·3·4·8번 채널을 검사합니다.
+`2030/1638` 같은 표시는 안정 점수가 아니라 `현재 표본 수/필요 표본 수`이므로
+이미 수량은 충분하다는 뜻입니다. 버튼이 비활성화되어 있다면 표시된 차단
+채널, 상태, 포화 비율을 확인해야 합니다.
 
-Research basis: Spüler and Niethammer (2015) used a 1 s window shifted by
-62.5 ms for asynchronous continuous-feedback classification; Lopes-Dias et al.
-(2019) used overlapping classifier windows and required two consecutive
-above-threshold outputs, while this project intentionally uses one at the
-operator's request for lower reaction latency. Both trained participant-specific classifiers from
-labeled error/correct data. The present CH8 rest heuristic copies the online
-windowing mechanics, not their validated classifier accuracy.
+안정 기준은 `data/eeg_baselines/latest.json`에 자동 저장되고 장치, PGA,
+표본률, 채널, 필터, 알고리즘 설정이 같을 때 다음 측정에서 불러옵니다.
+같은 참가자와 같은 전극/REF/GND 위치인지 사람이 추가로 확인해야 합니다.
 
-The calibration button uses its own full eight-second quality window, not the
-short two-second channel badge. It becomes enabled only when enough samples are
-present and the complete CH1·2·3·4·8 window is clean. If it stays disabled, stop
-acquisition, lower PGA (the current rail-clean default is ×0.40), reconnect the indicated channels plus
-reference/ground, restart, and wait for a new clean eight-second window. Do not
-bypass saturation: it cannot produce defensible ErrP or TAR baselines.
+순간적인 움직임 때문에 원본 표본의 최대 5%가 ADC 끝값에 닿는 것은
+허용하지만, 5%를 넘는 지속 포화는 차단합니다. 과거 61–73% 포화는 단순한
+산만함이 아니라 전극, 기준 전극 또는 접지 연결 문제를 뜻했습니다.
 
-The displayed `samples/requiredSamples` pair is a quantity gate, not a calmness
-score. A value such as `2030/1638` is already sufficient; when the button remains
-disabled, use the listed blocking channels, state, and `clip %` to diagnose the
-signal path. The accepted aggregate baseline is automatically written to the
-ignored local `data/eeg_baselines/latest.json`. A later acquisition automatically
-restores it when the compatibility signature matches; the manual
-**저장 안정 기준 불러오기** action remains as a fallback. Loading is refused if
-device/PGA/rate/channel/filter/algorithm settings differ, and the operator must additionally
-ensure the same participant and electrode/REF/GND placement. The file contains
-baseline statistics, not raw EEG.
-
-Brief movement artefacts no longer invalidate the entire window: up to 5% of raw
-samples may touch an ADC rail if the filtered span remains valid. More than 5%
-is sustained saturation and stays blocked. The current hardware observation was
-roughly 61–73% on the required channels, which indicates connection/reference
-trouble rather than ordinary participant distraction.
-
-## 8. Local endpoints
-
-The dashboard exposes `POST /api/errp/calibrate` to accept and save a fresh rest
-window and `POST /api/baseline/load` to restore the compatible saved statistics.
+## 8. 주요 로컬 API
 
 ```text
 GET  /api/simulation/status
-GET  /api/simulation/frame?camera=overview|wrist&width=...&height=...
+GET  /api/simulation/frame?camera=overview|wrist
 POST /api/simulation/start
 POST /api/simulation/stop
 POST /api/simulation/reset
@@ -269,57 +216,50 @@ POST /api/simulation/objects/add
 POST /api/simulation/objects/update
 POST /api/simulation/objects/delete
 POST /api/simulation/basket/update
-
 POST /api/errp/calibrate
 POST /api/errp/check
+POST /api/baseline/load
 ```
 
-## 9. Verification
+## 9. 검사
 
 ```bash
 PYTHONPATH=laptop:. python3 -m unittest simul.test_studio -v
-PYTHONPATH=laptop:. python3 -m unittest \
-  simul.test_mujoco_robot simul.test_full_task simul.test_studio -v
+PYTHONPATH=laptop:. python3 -m unittest simul.test_mujoco_robot simul.test_full_task simul.test_studio -v
 cd dashboard && npm run lint && npm test
 python3 -m py_compile simul/studio.py laptop/eeg_dashboard.py
 ```
 
-The studio regression suite covers:
+검사는 원본 STL 렌더링, 손목 영상, 1번 서보 고정, 장면 편집 제한,
+물체 운반, 완료 후 거부, 바구니에서 다시 집기, 원위치 복귀, 거부 기억,
+다른 다음 물체 선택을 확인합니다.
 
-- original STL arm plus overview/wrist JPEG rendering;
-- absent servo-1 yaw joint, six MuJoCo controls, and an invariant 90° base command;
-- scene edit clamping;
-- physical delivery;
-- rejection after completion;
-- physical tray retrieval and return;
-- rejection memory and a different next delivery.
+## 10. 현재 상태를 과장 없이 정리
 
-## 10. Honest status
+- 현재 화면은 실제 MuJoCo 강체/접촉 물리이며 제거된 2차원 모형이 아닙니다.
+- 시뮬레이션 성공은 실물 성공률이 아닙니다.
+- 현재 1번 베이스는 움직이지 않으므로 물체와 바구니는 좁은 앞뒤 한 줄
+  위에 있어야 합니다.
+- 1번 모터를 복구해도 별도 보정 없이 시뮬레이션에서 먼저 켜지 않습니다.
+- RGB 후보 확인은 실제로 수행하지만 전체 운반 경로는 작성된 물체 원점과
+  바구니 좌표를 사용합니다. 이 좌표를 단안 RGB에서 알아냈다고 주장하지
+  않습니다.
+- 이 시뮬레이션 코드는 Uno 명령을 보내지 않습니다.
 
-- This is now a real MuJoCo rigid-body/contact studio, not the removed 2D mock.
-- Its success is simulation evidence, not a real-arm success rate.
-- The current demo intentionally cannot yaw. Multiple objects and the tray must
-  share the narrow calibrated front/back lane, just as on the current real arm.
-- Restoring servo 1 later requires a separate calibration and patch; simulation
-  will not silently enable it ahead of the hardware.
-- RGB candidate gating is exercised, but the complete autonomous transport
-  planner still uses known authored origin/tray coordinates. That task metadata
-  is not claimed to be inferred from monocular RGB.
-- The physical arm remains separately safety-gated; this patch sends no Uno
-  commands.
+## 11. 손목 초음파 센서
 
-## 11. Wrist ultrasonic range sensor
+- 실물 장착 위치: 손목 카메라 바로 아래
+- Uno 배선: TRIG D7, ECHO D6
+- 펌웨어의 `D` 명령은 한 번 측정해 `D <밀리미터>`를 반환하고,
+  시간 초과 또는 범위 밖이면 `D -1`을 반환합니다.
+- `ArmSerial.ultrasonic_distance_mm()`는 세 번 읽고, 두 번 이상 정상일
+  때 중앙값을 사용합니다.
+- 측정만 하는 명령:
 
-- Physical mount: directly below the wrist camera.
-- Uno wiring: Trigger D7, Echo D6. Servo pins remain D13–D8, so there is no pin
-  overlap.
-- Firmware command `D` performs one bounded on-demand ranging pulse and returns
-  `D <millimetres>` or `D -1` for timeout/out-of-range. It does not range
-  continuously because `pulseIn()` would otherwise stall the servo slew loop
-  whenever an echo is missing.
-- `ArmSerial.ultrasonic_distance_mm()` takes three readings and returns their
-  median only when at least two are valid. The persistent session exposes this
-  as `python3 laptop/arm_session.py distance` without moving the arm.
-- The ultrasonic cone sees the nearest reflector. Treat the value as
-  camera-axis proximity/depth assistance, never as proof that the selected
-  visual object produced the echo.
+```bash
+python3 laptop/arm_session.py distance
+```
+
+초음파는 원뿔 범위 안의 가장 가까운 반사체를 측정합니다. 카메라 축의
+거리 보조 정보로만 사용하며, 그 반사가 현재 선택한 물체에서 왔다고
+단정하지 않습니다.

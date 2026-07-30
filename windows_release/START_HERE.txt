@@ -1,28 +1,38 @@
-brainToArm WINDOWS QUICK START
+brainToArm WINDOWS 빠른 시작
 ================================
 
-1) Arduino firmware
-   - Double-click OPEN_FIRMWARE.bat.
-   - Arduino IDE: Board = Arduino Uno, select its COM port, then Upload.
+처음 사용하는 경우 아래 순서대로 진행하세요.
 
-2) First PC setup (once)
-   - Double-click SETUP_WINDOWS.bat.
-   - Internet is needed only for this package-install step.
+1) Arduino 펌웨어
+   - OPEN_FIRMWARE.bat을 더블클릭합니다.
+   - Arduino IDE에서 보드를 Arduino Uno로 선택합니다.
+   - Uno의 COM 포트를 선택하고 업로드 버튼을 누릅니다.
+   - 업로드 후 Serial Monitor와 Serial Plotter를 닫습니다.
 
-3) Camera check (recommended after mounting/repair)
-   - Connect the wrist webcam.
-   - Double-click CHECK_CAMERA.bat.
-   - Confirm BOTH blue and red finger tapes are visible at the bottom.
-   - Press Q to exit.
+2) PC 최초 설치(처음 한 번만)
+   - 인터넷에 연결합니다.
+   - SETUP_WINDOWS.bat을 더블클릭합니다.
+   - 초록색 설치 완료 문구가 나올 때까지 창을 닫지 않습니다.
 
-4) Autonomous run
-   - Connect the Uno USB and CHARGED external servo battery.
-   - Remove hands, cables, and people from the arm workspace.
-   - Place one object on the flat table in front of the arm.
-   - Double-click RUN_AUTONOMOUS.bat.
+3) 카메라 확인
+   - 손목 웹캠을 연결합니다.
+   - CHECK_CAMERA.bat을 더블클릭합니다.
+   - 화면 하단에 파란색과 빨간색 집게가 모두 보이는지 확인합니다.
+   - Q 또는 Esc를 누르면 종료됩니다.
 
-If automatic camera or COM selection is wrong:
+4) 자동 실행
+   - Uno USB와 충전된 외부 서보 배터리를 연결합니다.
+   - 로봇팔 주변에서 사람의 손, 얼굴, 옷, 케이블을 치웁니다.
+   - 로봇팔 앞의 평평한 바닥에 물체 하나를 놓습니다.
+   - RUN_AUTONOMOUS.bat을 더블클릭합니다.
+
+카메라나 COM 포트를 자동으로 잘못 고르는 경우:
   RUN_AUTONOMOUS.bat --camera 1 --port COM5
 
-Full Korean instructions:
+문제가 생기면:
+  1. DIAGNOSE.bat을 실행합니다. 이 도구는 로봇팔을 움직이지 않습니다.
+  2. 창 전체가 나오게 사진을 찍습니다.
+  3. README_WINDOWS.md의 문제 해결 부분을 확인합니다.
+
+전체 한국어 설명:
   README_WINDOWS.md

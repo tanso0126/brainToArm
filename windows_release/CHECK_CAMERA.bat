@@ -1,14 +1,16 @@
 @echo off
+chcp 65001 >nul
 setlocal
 cd /d "%~dp0\.."
 set "PYTHON_EXE=%CD%\.venv-windows\Scripts\python.exe"
 if not exist "%PYTHON_EXE%" (
-  echo [ERROR] Run windows_release\SETUP_WINDOWS.bat first.
+  echo [오류] 먼저 windows_release\SETUP_WINDOWS.bat을 실행하세요.
   pause
   exit /b 2
 )
-echo A camera window will open. Both blue and red finger tapes must be visible.
-echo Press Q in the camera window to close it.
+echo 카메라 창이 열립니다.
+echo 화면 하단에 파란색과 빨간색 집게 테이프가 모두 보여야 합니다.
+echo 카메라 창에서 Q 또는 Esc를 누르면 종료됩니다.
 "%PYTHON_EXE%" -u "%CD%\windows_release\windows_camera.py" --camera auto %*
 set "RESULT=%ERRORLEVEL%"
 pause

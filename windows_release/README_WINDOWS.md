@@ -1,11 +1,14 @@
 # brainToArm Windows 실물 로봇팔 실행 가이드
 
 이 폴더는 기존 macOS 실험 코드를 건드리지 않고 만든 **Windows 전용
-배포판**입니다. 친구의 새 Windows PC에서 아래 두 파일만 순서대로
-실행하면 됩니다.
+배포판**입니다. 코딩을 몰라도 파일을 더블클릭해 진행할 수 있습니다.
+
+처음에는 `START_HERE.txt`를 열어 옆에 띄워 놓고 아래 순서대로 진행하세요.
 
 1. 최초 한 번: `SETUP_WINDOWS.bat`
-2. 매 실험: `RUN_AUTONOMOUS.bat`
+2. 펌웨어 업로드: `OPEN_FIRMWARE.bat`
+3. 카메라 확인: `CHECK_CAMERA.bat`
+4. 매 실험: `RUN_AUTONOMOUS.bat`
 
 자동 실행 순서는 현재 실물에서 사용한 것과 같습니다.
 
@@ -40,20 +43,10 @@
 > GND와 Uno GND는 반드시 공통으로 연결합니다. 방전된 배터리를 쓰면
 > Uno는 명령 완료를 보내도 실제 서보가 움직이지 않을 수 있습니다.
 
-## 1. Arduino 펌웨어 업로드
+## 1. Windows 최초 설치
 
-1. `OPEN_FIRMWARE.bat`을 더블클릭합니다.
-2. Arduino IDE에서 보드를 `Arduino Uno`로 선택합니다.
-3. `도구 → 포트`에서 Uno의 COM 포트를 고릅니다.
-4. 업로드 버튼을 누릅니다.
-5. 업로드 후 Arduino IDE의 `Serial Monitor`는 닫습니다. 다른 프로그램이
-   COM 포트를 잡고 있으면 자동 실행기가 연결할 수 없습니다.
-
-업로드할 스케치는 다음 파일입니다.
-
-`firmware/arm_controller/arm_controller.ino`
-
-## 2. Windows 최초 설치
+저장소 ZIP 파일 안에서 직접 실행하지 말고 먼저 압축을 완전히 풉니다.
+가능하면 `C:\brainToArm`처럼 짧고 단순한 위치에 둡니다.
 
 인터넷에 연결한 상태에서 `SETUP_WINDOWS.bat`을 더블클릭합니다.
 
@@ -65,8 +58,22 @@
 - 함께 제공된 FastSAM 모델 파일 검사
 - 로봇 없이 Python 실행환경 검사
 
-다른 프로젝트의 Python 환경은 변경하지 않습니다. 설치가 중단되면
-창에 나온 마지막 오류를 사진으로 남기면 됩니다.
+다른 프로젝트의 Python 환경은 변경하지 않습니다. 첫 설치는 PyTorch
+때문에 수 분 이상 걸릴 수 있습니다. 멈춘 것처럼 보여도 설치 창을 닫지
+마세요.
+
+## 2. Arduino 펌웨어 업로드
+
+1. `OPEN_FIRMWARE.bat`을 더블클릭합니다.
+2. Arduino IDE에서 보드를 `Arduino Uno`로 선택합니다.
+3. `도구 → 포트`에서 Uno의 COM 포트를 고릅니다.
+4. 업로드 버튼을 누릅니다.
+5. 업로드 후 Arduino IDE의 `Serial Monitor`는 닫습니다. 다른 프로그램이
+   COM 포트를 잡고 있으면 자동 실행기가 연결할 수 없습니다.
+
+업로드할 스케치는 다음 파일입니다.
+
+`firmware/arm_controller/arm_controller.ino`
 
 ## 3. 카메라 확인
 
@@ -116,11 +123,40 @@ windows_release\RUN_AUTONOMOUS.bat --camera 1 --port COM5
 
 ## 5. 문제 해결
 
-### `Arduino Uno/CH340 COM port was not found`
+### 설치 파일이 바로 닫히거나 Windows가 실행을 막음
+
+- ZIP 파일 안에서 직접 실행하지 말고 압축을 모두 풉니다.
+- 파일을 오른쪽 클릭하고 `속성 → 차단 해제`가 있으면 선택합니다.
+- SmartScreen이 나오면 `추가 정보 → 실행`을 선택합니다.
+- 폴더를 OneDrive 밖의 `C:\brainToArm` 같은 위치로 옮깁니다.
+- `Windows PowerShell`에서 다음처럼 실행하면 창이 닫히지 않아 오류를
+  읽기 쉽습니다.
+
+```powershell
+cd C:\brainToArm\windows_release
+.\SETUP_WINDOWS.bat
+```
+
+### Python 또는 winget을 찾지 못함
+
+`winget`이 없는 PC라면 python.org에서 Python 3.11 64비트를 설치합니다.
+설치 화면에서 반드시 `Add Python to PATH`를 선택합니다. 설치 후 열려
+있던 명령 창을 모두 닫고 `SETUP_WINDOWS.bat`을 다시 실행하세요.
+
+### 패키지 설치에 실패함
+
+- 인터넷 연결과 디스크 여유 공간을 확인합니다.
+- 학교·회사 방화벽, VPN, 프록시 때문에 다운로드가 막힐 수 있습니다.
+- 설치 파일을 다시 실행해도 됩니다. 이미 받은 패키지는 가능한 범위에서
+  재사용됩니다.
+
+### `Arduino Uno/CH340 COM 포트를 찾지 못했습니다`
 
 - 장치 관리자에서 `포트(COM 및 LPT)`를 확인합니다.
 - CH340 드라이버가 필요한 Uno 호환 보드일 수 있습니다.
-- Arduino Serial Monitor와 다른 시리얼 프로그램을 닫습니다.
+- Arduino Serial Monitor와 Serial Plotter, 다른 시리얼 프로그램을
+  모두 닫습니다.
+- 충전 전용이 아닌 데이터 통신 USB 케이블을 사용합니다.
 - `DIAGNOSE.bat`을 실행해 감지된 포트를 확인합니다.
 
 ### 카메라를 못 찾음
@@ -129,6 +165,8 @@ windows_release\RUN_AUTONOMOUS.bat --camera 1 --port COM5
   권한을 켭니다.
 - Zoom, Teams, OBS 등 카메라를 점유한 앱을 종료합니다.
 - 양쪽 테이프가 프레임 하단에 보이도록 웹캠 각도를 맞춥니다.
+- USB 허브 전력이 부족하면 Uno와 웹캠 중 하나가 끊길 수 있습니다.
+  가능하면 웹캠을 PC의 다른 USB 포트에 직접 연결합니다.
 - `CHECK_CAMERA.bat --camera 0`, `--camera 1` 순서로 확인합니다.
 
 ### Uno는 연결되지만 서보가 움직이지 않음
@@ -140,7 +178,7 @@ windows_release\RUN_AUTONOMOUS.bat --camera 1 --port COM5
 - 외부 전원 GND와 Uno GND 공통 연결 확인
 - Uno USB만 연결된 상태를 서보 전원 연결 상태로 착각하지 않기
 
-### `firmware HOME_POSE does not match`
+### `펌웨어 HOME 자세가 저장소와 다릅니다`
 
 다른 버전의 펌웨어가 Uno에 들어 있습니다. `OPEN_FIRMWARE.bat`으로 현재
 스케치를 다시 업로드합니다.
@@ -151,6 +189,31 @@ Windows에서 PyTorch/Ultralytics를 처음 설치하면 용량이 크고 시간
 걸릴 수 있습니다. 설치 창을 닫지 마세요. FastSAM 가중치 자체는
 `windows_release/assets/FastSAM-s.pt`에 포함되어 별도 다운로드하지
 않습니다.
+
+### 실행 중 카메라 영상이 멈춤
+
+- USB 허브의 전력 부족 여부를 확인합니다.
+- 웹캠과 Uno를 서로 다른 USB 포트에 연결합니다.
+- Zoom, Teams, OBS, 브라우저 카메라 탭을 닫습니다.
+- `CHECK_CAMERA.bat`만 단독 실행해도 끊기는지 확인합니다.
+- 저가형 USB 케이블이나 허브를 바꿔 봅니다.
+
+### Uno 명령은 정상인데 모터가 떨리거나 HOME에 못 감
+
+시리얼 통신 성공과 서보 전원 정상은 서로 다른 문제입니다. Uno가 명령을
+받았더라도 외부 배터리가 약하면 서보는 움직이지 않을 수 있습니다.
+
+1. 외부 배터리를 완전히 충전합니다.
+2. 배터리 전압이 서보와 전원 장치의 허용 범위인지 확인합니다.
+3. 외부 전원 GND와 Uno GND가 공통인지 확인합니다.
+4. 집게가 물체를 너무 강하게 누르거나 기구에 걸려 있지 않은지 봅니다.
+5. 케이블을 치운 뒤 전원을 다시 연결하고 HOME을 확인합니다.
+
+### 오류를 보고도 원인을 모르겠음
+
+`DIAGNOSE.bat`을 실행하면 로봇팔을 움직이지 않고 COM 포트와 카메라만
+검사합니다. 결과 창 전체와 자동 실행 창의 마지막 오류가 함께 보이도록
+사진을 찍어 전달하세요.
 
 ## 6. 수리 후 꼭 확인할 것
 
@@ -173,3 +236,14 @@ Windows 이식 전 실물/macOS 전체 상태는 Git 태그
 `physical-macos-baseline-2026-07-30`에 고정되어 있습니다. Windows용
 파일은 모두 `windows_release/` 안에 있으므로 기존 실험 코드는 그대로
 남아 있습니다.
+
+## 8. 실제 Windows 실험에서 확인해야 하는 범위
+
+Windows용 설치 검사, AI 모델 무결성, Python 모듈, 카메라/COM 자동 선택
+로직은 하드웨어 없이 검사했습니다. 하지만 친구의 Windows PC, USB 허브,
+수리된 모터와 링크, 외부 배터리를 합친 실물 조합은 그 PC에서 최종
+검증해야 합니다.
+
+프로그램이 성공 문구를 냈다는 이유만으로 물체를 실제로 잡았다고 단정하지
+마세요. 카메라 화면과 실물 집게, 들어 올리기, HOME 복귀를 직접 확인해야
+합니다.

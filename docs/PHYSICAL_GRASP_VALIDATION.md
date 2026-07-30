@@ -1,70 +1,84 @@
-# Physical floor-grasp validation — 2026-07-27
+# 실물 바닥 물체 파지 검증 기록 — 2026-07-27
 
-> Subsequent autonomous-from-HOME testing found that a 35 mm lift and the old
-> absolute jaw threshold were not sufficient proof of general retention: one
-> object slipped while still producing a small CONTACT residual. The original
-> fixed-position trial below remains useful evidence for its exact condition,
-> but it is no longer treated as general autonomous completion. See
-> `docs/AUTONOMOUS_GRASP_VALIDATION.md`.
+> 이후 HOME부터 시작한 더 엄격한 자동 실험에서, 35mm 들어 올리기와
+> 예전의 절대 집게 간격 기준만으로는 일반적인 물체 유지 성공을 증명할 수
+> 없다는 사실을 확인했습니다. 물체 하나가 빠졌는데도 작은 `접촉(CONTACT)`
+> 잔차가 남은 사례가 있었습니다. 아래의 고정 위치 실험은 그 정확한
+> 조건에서의 증거로는 유효하지만, 더 이상 일반적인 자동 파지 완료로
+> 취급하지 않습니다.
+> [HOME부터 시작한 자동 파지 검증 기록](AUTONOMOUS_GRASP_VALIDATION.md)도
+> 함께 확인하세요.
 
-This record separates the real-arm result from simulation and mock tests.
+이 문서는 실물 로봇팔에서 얻은 결과를 시뮬레이션 및 가짜 장치 테스트와
+구분해 기록합니다.
 
-## Verified setup
+## 확인한 실험 환경
 
-- Camera: PW315 wrist camera, 1280×720 live publisher.
-- Arm: Uno persistent session on `/dev/cu.usbserial-110`.
-- Base: fixed at 90°; wrist roll: 170°; gripper: 90° open / 180° closed.
-- Test object: the toy car visible between the blue-left and red-right finger
-  markers.
-- Initial open hover: `[90, 115, 90, 143, 90, 170]`.
+- 카메라: PW315 손목 카메라, 1280×720 실시간 영상
+- 로봇팔: `/dev/cu.usbserial-110`에 연결된 Uno 지속 세션
+- 베이스: 90° 고정
+- 집게 방향 회전: 170°
+- 집게: 90° 열림, 180° 닫힘
+- 시험 물체: 파란색 왼쪽 집게와 빨간색 오른쪽 집게 사이에 보이는
+  장난감 자동차
+- 처음 집게를 연 대기 자세: `[90, 115, 90, 143, 90, 170]`
 
-## Executed result
+## 실제 실행 결과
 
-1. FastSAM produced one consolidated physical candidate despite nested masks and
-   lower-frame clipping.
-2. The selected approach-side edge was `(636, 720)` px and the finger midpoint
-   was `(614, 699)` px: `du=21`, `dv=21` at hover.
-3. Forward reach was locked at 37 for the whole descent. The tool-height targets
-   were 30, 24, 18, 12, and 6 mm; the final observed alignment remained
-   `du=10`, `dv=23` instead of chasing an occluded replacement mask.
-4. The guarded policy authorized descend, close, and lift on fresh frames.
-5. At gripper command 180°, the empty-jaw baseline expected 89.25 px. The
-   observed jaw opening remained about 292 px immediately after close (203 px
-   residual) and about 285 px after lift (196 px residual), both far above the
-   7 px contact threshold.
-6. The arm lifted closed to `[90, 115, 90, 143, 180, 170]`; the second independent
-   jaw assessment remained `CONTACT`. This is physical obstruction retained
-   through a vertical lift, not merely an object centered in the image.
-7. The object was then lowered closed to the same fixed-reach floor point,
-   released, and the arm returned to open hover.
+1. FastSAM은 서로 겹친 마스크와 화면 하단 잘림이 있었지만, 실물 물체
+   후보 하나로 합쳐 인식했습니다.
+2. 선택한 접근 방향의 물체 모서리는 `(636, 720)`픽셀이었고, 두 집게
+   손가락의 중간점은 `(614, 699)`픽셀이었습니다. 대기 자세에서 오차는
+   `du=21`, `dv=21`이었습니다.
+3. 하강 전체에서 전진 도달값은 37로 고정했습니다. 도구 높이 목표는
+   30, 24, 18, 12, 6mm였고, 마지막으로 관찰한 정렬은
+   `du=10`, `dv=23`이었습니다. 가려진 물체를 대신해 새로 나타난 잘못된
+   마스크를 쫓지 않았습니다.
+4. 새 카메라 프레임을 이용한 조건 확인 정책이 하강, 집게 닫기,
+   들어 올리기를 허용했습니다.
+5. 집게 명령이 180°일 때 빈 집게 기준 간격은 89.25픽셀로 예상됐습니다.
+   실제 집게 간격은 닫은 직후 약 292픽셀(잔차 203픽셀), 들어 올린 뒤
+   약 285픽셀(잔차 196픽셀)로 유지됐습니다. 두 값 모두 당시 접촉 기준인
+   7픽셀보다 훨씬 컸습니다.
+6. 로봇팔은 집게를 닫은 채 `[90, 115, 90, 143, 180, 170]` 자세로
+   들어 올렸습니다. 두 번째 독립 집게 판정도 `접촉(CONTACT)`을
+   유지했습니다. 단순히 영상 중앙에 물체가 보인 것이 아니라, 수직으로
+   들어 올리는 동안 실물 방해가 유지된 결과입니다.
+7. 이후 같은 고정 도달 거리의 바닥 위치로 집게를 닫은 채 물체를 내리고,
+   물체를 놓은 다음 집게를 연 대기 자세로 돌아왔습니다.
 
-Result: this exact fixed-position trial produced persistent obstruction through
-its 35 mm lift. General goal 1 now requires the stricter autonomous 80 mm
-retention test; it is not marked complete yet. Goals 2 and 3 likewise require
-separate physical demonstrations. Software-only results are not counted.
+결과적으로 이 정확한 고정 위치 실험에서는 35mm 들어 올리는 동안 물체의
+방해 상태가 유지됐습니다. 그러나 일반적인 목표 1의 완료에는 더 엄격한
+80mm 자동 유지 실험이 필요했으므로 당시에는 완료로 표시하지 않았습니다.
+목표 2와 목표 3도 별도의 실물 시연이 필요했습니다. 소프트웨어만 사용한
+결과는 실물 성공으로 세지 않았습니다.
 
-## Root cause fixed
+## 수정한 근본 원인
 
-`laptop/arm_fk.py` still used an older pre-contact simulation joint map. At
-`[90, 109, 90, 143, …]` it therefore believed the fingers were at floor height
-while the current model put them roughly 57 mm high. The runtime joint map now
-matches `simul/mujoco_robot.py` to numerical precision over representative
-poses. With wrist pitch 143°, shoulder 115→138° lowers the modeled tool from
-34.7 to 5.4 mm. This explicitly compensates for the height gained while aiming
-the wrist upward.
+`laptop/arm_fk.py`에는 접촉 실험 이전의 오래된 시뮬레이션 관절 변환이
+남아 있었습니다. 따라서 `[90, 109, 90, 143, …]` 자세에서 실제 현재
+모델은 집게가 바닥보다 약 57mm 높다고 계산하는데도, 예전 코드는 바닥
+높이에 있다고 잘못 판단했습니다.
 
-## Reproduce
+실행 중 사용하는 관절 변환을 `simul/mujoco_robot.py`와 맞춰 대표 자세들에서
+수치상 같은 결과가 나오도록 수정했습니다. 손목 각도 143°에서는 어깨
+각도를 115°에서 138°로 바꾸면 모델의 도구 높이가 34.7mm에서 5.4mm로
+낮아집니다. 이는 물체를 향하도록 손목을 위로 조절할 때 집게 높이가 함께
+올라가는 현상을 명시적으로 보정합니다.
+
+## 재현 명령
 
 ```bash
-# List candidates, select nearest, align, and physically grasp.
+# 후보를 나열하고 가장 가까운 물체를 골라 정렬한 뒤 실물로 잡습니다.
 PYTHONPATH=laptop:. python3 laptop/floor_servo.py --start-reach 37
 
-# Select a different ranked object directly.
+# 후보 순위에서 다른 물체를 직접 선택합니다.
 PYTHONPATH=laptop:. python3 laptop/floor_servo.py --candidate-index 1
 
-# Apply one "not that one" veto, then grasp the next candidate.
+# 첫 물체에 “아님” 신호를 한 번 적용하고 다음 후보를 잡습니다.
 PYTHONPATH=laptop:. python3 laptop/floor_servo.py --reject-count 1
 ```
 
-The final two commands must be run only when two separately segmented reachable
-objects are visible. Missing candidates stop without moving the arm.
+마지막 두 명령은 서로 분리되어 인식되는, 도달 가능한 물체가 두 개 이상
+실제로 보일 때만 실행해야 합니다. 필요한 후보가 없으면 로봇팔을 움직이지
+않고 중단합니다.

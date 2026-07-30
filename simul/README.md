@@ -1,88 +1,82 @@
-# brainToArm sim-to-real workspace
+# brainToArm 시뮬레이션-실물 전환 작업 공간
 
-This directory contains the user-supplied printable robot sources and the
-simulation/training pipeline built from them.
+이 폴더에는 사용자가 제공한 로봇팔 3차원 원본 파일과, 그 구조를 이용해
+만든 MuJoCo 시뮬레이션 및 학습 코드가 있습니다.
 
-## Source geometry
+## 원본 3차원 형상
 
-- `Robotic+Arm+with+Servo+&+Arduino.3mf`: Bambu Studio print project with 22
-  mesh objects, embedded photos, millimeter units, and model metadata.
-- `Robotic+Arm+with+Servo+&+Arduino.zip`: 20 named STL source parts.
-- `model_manifest.json`: immutable hashes, measured mesh envelopes, current
-  six-servo semantics, camera constraints, and the role assigned to each part.
+- `Robotic+Arm+with+Servo+&+Arduino.3mf`: Bambu Studio 출력 프로젝트
+- `Robotic+Arm+with+Servo+&+Arduino.zip`: 이름이 붙은 STL 부품 20개
+- `model_manifest.json`: 원본 파일 확인값, 부품 크기, 6개 서보의 의미,
+  카메라 조건과 부품 역할
 
-The 3MF arranges parts for printing; it does **not** contain assembly joint
-frames or servo pivots. Simulation therefore uses the original meshes for visual
-identity and measured envelopes, while explicit calibrated kinematic frames and
-simple convex collision shapes define dynamics. Print-plate transforms must not
-be mistaken for assembly transforms.
+3MF 파일은 부품을 출력판 위에 배치한 자료일 뿐, 조립된 관절축과 서보
+회전 중심을 담고 있지 않습니다. 따라서 시뮬레이션은 원본 메시를 외형에
+사용하고, 실제 실험으로 보정한 관절 좌표와 단순한 충돌 형상을 물리에
+사용합니다. 출력판의 좌표를 조립 좌표로 해석하면 안 됩니다.
 
-Verify and extract the meshes needed by MuJoCo:
+필요한 메시를 확인하고 추출하는 명령:
 
 ```bash
 python3 simul/prepare_assets.py
 python3 simul/prepare_assets.py --extract
 ```
 
-Generated meshes, datasets, checkpoints, videos, and run logs are deliberately
-ignored by Git. The source archives and manifest remain tracked, so every
-generated artifact is reproducible.
+생성된 메시, 학습 자료, 체크포인트, 영상, 실행 기록은 Git에 넣지 않습니다.
+원본 압축 파일과 목록은 추적되므로 필요한 결과를 다시 만들 수 있습니다.
 
-## Transfer contract
+## 실물로 옮길 때 지켜야 할 입력 범위
 
-The eventual actor may observe only:
+최종 학습 모델이 관찰할 수 있는 정보는 실물에서도 얻을 수 있는 다음
+항목뿐입니다.
 
-- RGB from one gripper-mounted camera, randomized around the PW315 model;
-- commanded servo angles and its previous action, which the real host already
-  knows without adding a sensor.
+- 집게에 장착한 카메라의 RGB 영상
+- 이미 프로그램이 명령한 6개 서보 각도와 이전 행동
 
-Simulator-only object pose, depth, contacts, and segmentation labels may be used
-by rewards or a teacher, but must never enter the deployed actor observation.
-Motor 1 is locked at 90 degrees for the current planar task. The remaining
-servo commands use the same minima/maxima, 90/180 gripper convention, 170-degree
-level wrist roll, and floor reference poses as the real controller.
+시뮬레이터만 아는 물체의 실제 좌표, 깊이, 접촉, 분할 마스크는 보상이나
+교사 정책에는 사용할 수 있지만 실물에 배포할 모델의 입력에는 절대 넣지
+않습니다.
 
-## MuJoCo robot model
+실물에서 움직이지 않는 1번 베이스 모터는 90°로 고정됩니다. 나머지
+관절은 실물과 같은 최소·최대 각도, 집게 90° 열림/180° 닫힘, 집게 방향
+170° 수평 규칙을 사용합니다.
 
-`mujoco_robot.py` builds the assembled kinematic model. It does not guess joint
-pivots from the print-bed layout: named STL parts are non-colliding visuals,
-while capsules and boxes define stable collision geometry. Its public control
-boundary is always the physical six-value servo vector. There is no base joint,
-so a policy cannot accidentally learn a motion that failed motor 1 cannot make.
+## MuJoCo 로봇 모델
 
-The shoulder mapping is intentionally piecewise because the printed linkage is
-not a direct one-degree servo-to-joint mechanism. The near-floor portion is fit
-to both physically reproduced levels and the measured `-6/11` shoulder/elbow
-vector. Across elbow 78..110 degrees, each curve varies by under 4 mm in
-height while translating the tool by over 15 mm. This is a calibrated local
-model, not a claim that every unmeasured joint pose is already exact.
+`mujoco_robot.py`가 조립된 로봇 모델을 만듭니다. STL 부품은 외형으로
+사용하고, 캡슐과 상자로 안정적인 충돌 형상을 구성합니다.
 
-The gripper camera renders only RGB. At the 170-degree level wrist it reproduces
-the physical tape convention (blue left, red right), includes both fingers and
-the space between them, and never renders simulator sites, depth, masks, or
-object coordinates into the actor input.
+공개 제어 입력은 항상 실물과 같은 6개 서보 각도입니다. 베이스 관절과
+구동기는 모델에 존재하지 않으므로 학습 모델이 고장 난 1번 모터 움직임을
+배울 수 없습니다.
 
-Run the headless visual and numeric checks without opening the webcam or Uno:
+어깨 관절은 출력 링크 구조 때문에 서보 1°가 실제 관절 1°와 직접
+대응하지 않아 구간별 변환을 사용합니다. 바닥 근처 구간은 실물로 재현한
+자세와 측정한 어깨/팔꿈치 이동 벡터에 맞췄습니다. 이는 측정한 좁은
+작업구간의 보정 모델이며 모든 관절 자세가 완벽히 정확하다는 뜻은 아닙니다.
+
+집게 카메라는 RGB만 렌더링합니다. 집게가 수평인 170°에서 파란색 왼쪽,
+빨간색 오른쪽 테이프와 그 사이 공간이 보입니다. 깊이, 마스크, 물체 좌표를
+영상에 몰래 표시하지 않습니다.
+
+실물 웹캠이나 Uno를 열지 않고 검사하는 명령:
 
 ```bash
 python3 simul/smoke_mujoco.py
 python3 simul/test_mujoco_robot.py
 ```
 
-The smoke sheet is written to ignored
-`simul/generated/mujoco_smoke.png`. Expected tool-center heights are about 41 mm
-at the hover reference and 8 mm at the grasp reference.
+결과 이미지는 `simul/generated/mujoco_smoke.png`에 생성됩니다. 기준
+자세의 도구 중심 높이는 대기 자세 약 41mm, 잡기 자세 약 8mm입니다.
 
-## Interactive 3D studio
+## 사용자용 3차원 작업실
 
-`studio.py` is the stateful MuJoCo backend for the browser simulation tab. It
-uses the same STL visuals, calibrated arm model, servo limits, collision
-geometry, floor, and eye-in-hand RGB camera as the headless simulation. Objects
-and the destination tray are MuJoCo free bodies rather than canvas sprites.
-The small top-down editor in the browser only changes the initial 3D scene; it
-is not the simulator and is not used as robot perception.
+`studio.py`는 웹 화면의 3차원 시뮬레이션 탭에 연결되는 MuJoCo
+백엔드입니다. 원본 STL 외형, 보정된 관절 모델, 서보 제한, 충돌 형상,
+바닥, 손목 RGB 카메라를 사용합니다. 물체와 목적 바구니는 단순한 2차원
+그림이 아니라 실제 MuJoCo 자유 물체입니다.
 
-Start the API and UI:
+실행 방법:
 
 ```bash
 python3 -u laptop/eeg_dashboard.py --api-only --no-browser
@@ -90,40 +84,39 @@ cd dashboard
 npm run dev -- --port 3000
 ```
 
-Open `http://localhost:3000`, select **3D 시뮬레이션**, place several objects,
-and start the run. The page displays:
+`http://localhost:3000`을 열고 `3D 시뮬레이션`을 선택합니다. 물체를 여러
+개 배치한 뒤 실행을 시작할 수 있습니다.
 
-- a live MuJoCo overview camera and the exact RGB wrist-camera observation;
-- physical scan, reach, grasp, lift, delivery, and release phases;
-- manual/mock/PolyG-I ErrP rejection input and persistent rejected-object IDs;
-- late rejection recovery, including re-grasping an object already released in
-  the tray and returning it near its recorded origin;
-- commanded six-servo telemetry and an event trace.
+화면에는 다음 내용이 표시됩니다.
 
-The studio makes no serial or webcam connection and cannot move the real arm.
-Like the current real arm, it has no base-yaw joint or actuator: servo 1 is
-forced to 90° in every pose and search uses only servos 2/3/4. Objects and the
-tray are therefore constrained to one calibrated front/back line. The default
-scene contains two objects because the verified fixed-plane floor interval is
-only 27 mm long; pretending to arrange objects around the base would again
-create behavior that the hardware cannot execute.
+- 실시간 MuJoCo 전체 화면과 실제 제어기가 보는 손목 RGB 화면
+- 탐색, 접근, 잡기, 들어 올리기, 운반, 놓기 단계
+- 수동 버튼, 모의 ErrP, PolyG-I ErrP를 통한 “아님” 신호
+- 이미 놓은 물체를 다시 집어 원래 위치로 돌려놓는 늦은 거부 복구
+- 6개 서보 명령과 사건 기록
 
-Run the studio physics tests:
+이 작업실은 실제 시리얼 포트나 웹캠을 연결하지 않으며 실물 로봇팔을
+움직일 수 없습니다. 1번 베이스가 고정되므로 물체와 바구니는 보정된
+앞뒤 한 줄 범위에 배치됩니다.
+
+물리 회귀 검사:
 
 ```bash
 PYTHONPATH=laptop:. python3 -m unittest simul.test_studio -v
 ```
 
-## Domain-randomized complete-task policy
+## 전체 작업 학습 정책
 
-`full_task_env.py` trains search, target alignment, descent, close, lift, and
-recovery from 15 features that the real wrist-camera pipeline also provides. It
-randomizes sensor loss/noise and the measured floor Jacobian. `train_full_task.py`
-uses DAgger-style disturbed behavior cloning and exports TorchScript.
+`full_task_env.py`는 탐색, 정렬, 하강, 닫기, 들어 올리기, 복구를 학습합니다.
+입력은 실물 손목 카메라 처리 과정에서도 얻을 수 있는 15개 특징입니다.
+센서 끊김, 잡음, 측정한 바닥 자코비안을 무작위로 변화시켜 학습합니다.
 
-`evaluate_full_task_physics.py` then applies the policy to an independent free
-MuJoCo target body. Symbolic task completion cannot pass: the object must lose
-floor contact and physically follow the jaws upward. The reviewed artifact and
-exact metrics are tracked in `models/`. The earlier RGB local aligner remains
-for reproducibility but is superseded by this complete-task policy. See
-`TRAINING_REPORT.md` for results and the fail-closed real integration contract.
+`evaluate_full_task_physics.py`는 독립된 MuJoCo 자유 물체로 평가합니다.
+상태값만 성공으로 바꾸는 것은 통과할 수 없고, 물체가 바닥 접촉을 잃고
+집게를 따라 실제로 올라가야 합니다.
+
+검토된 모델과 정확한 수치는
+[학습 보고서](TRAINING_REPORT.md)에 있습니다.
+
+> 시뮬레이션 성공률은 실물 로봇팔 성공률이 아닙니다. 실제 장치에서는
+> 카메라, 초음파, 전원, 백래시, 조립 오차를 별도로 검증해야 합니다.

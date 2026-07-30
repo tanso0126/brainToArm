@@ -1,83 +1,99 @@
-# Full floor-pick policy v1
+# 바닥 물체 전체 파지 정책 v1 학습 보고서
 
-## Delivered scope
+## 제공 범위
 
-`models/full_task_policy_v1.ts` is the promoted complete-task macro policy. It
-owns the decision sequence `search -> align -> descend -> close -> lift ->
-recover`; deterministic safety code still converts each macro into bounded
-`floor_pose` commands and requires fresh camera evidence. The older
-`alignment_policy_v1.ts` is retained only for reproducibility and is superseded
-for integration.
+`models/full_task_policy_v1.ts`는 전체 작업용 상위 정책입니다. 다음
+결정 순서를 담당합니다.
 
-The artifact SHA-256 is
-`b4a5cf2b976b7571bf38b2b7e96d30d5159d00186e12d93569fe91cdfa4772b7`.
+```text
+탐색 → 정렬 → 하강 → 집게 닫기 → 들어 올리기 → 복구
+```
 
-## Transfer boundary
+결정론적 안전 코드는 각 상위 행동을 제한된 `floor_pose` 명령으로
+변환하고, 최신 카메라 근거를 요구합니다. 이전
+`alignment_policy_v1.ts`는 결과 재현용으로만 남겨 두었으며 현재
+통합에는 전체 작업 정책을 사용합니다.
 
-The network receives exactly 15 values that the real Mac pipeline has:
+모델 파일 SHA-256:
 
-1. frame quality, target visibility, both-marker visibility, and target
-   continuity;
-2. target-to-jaw depth and centerline image errors;
-3. normalized visual jaw opening and coherent lift motion;
-4. all six already-commanded servo angles and the previous macro action.
+```text
+b4a5cf2b976b7571bf38b2b7e96d30d5159d00186e12d93569fe91cdfa4772b7
+```
 
-True target pose, simulated depth, contacts, shape, size, target elbow, reward,
-and MuJoCo state never enter the actor. The depth response is randomized around
-the measured physical Jacobian `-12.9 px/degree`, rather than trusting a
-synthetic camera gain. `laptop/full_task_adapter.py` builds the identical vector
-from `WristScene`, `WristObservation`, and the host's commanded pose without
-opening a camera or serial port.
+## 실물로 옮길 수 있는 입력 경계
 
-## Training
+신경망 입력은 실물 Mac 제어 과정에서도 얻을 수 있는 15개 값입니다.
 
-DAgger-style behavior cloning collected 120,000 expert/noisy states plus three
-40,000-state policy-disturbance rounds (240,000 total). A 15->192->128->64->8
-MLP reached 98.2882% held-out action accuracy. Raw randomized closed-loop
-success was 95.55% over 2,000 episodes. The two-frame camera/pose safety guard
-completed 9,998/10,000 randomized episodes (99.98%, mean 11.4678 macro frames)
-and 1,000/1,000 deterministic episodes.
+1. 영상 품질, 물체 보임 여부, 두 집게 마커 보임 여부, 물체 추적 연속성
+2. 물체와 집게 사이의 영상상 깊이 오차 및 중심선 오차
+3. 정규화한 집게 열림 정도와 일관된 들어 올리기 움직임
+4. 이미 명령한 6개 서보 각도와 이전 상위 행동
 
-Training randomization now explicitly hides the target mask through most grasp
-poses, matching the real eye-in-hand occlusion. A selection locked by verified
-hover alignment may remain continuous through that occlusion; a missing mask
-without such a lock still cannot authorize close.
+물체의 실제 좌표, 시뮬레이션 깊이, 접촉, 모양, 크기, 목표 팔꿈치 각도,
+보상, MuJoCo 내부 상태는 모델 입력에 들어가지 않습니다. 깊이 반응은
+합성 카메라 값을 그대로 믿지 않고 실물에서 측정한
+`-12.9픽셀/도` 자코비안을 중심으로 무작위화했습니다.
 
-## Independent contact-physics evaluation
+`laptop/full_task_adapter.py`는 카메라나 시리얼 포트를 직접 열지 않고
+실물 관측과 명령 자세에서 같은 15개 입력을 만듭니다.
 
-`evaluate_full_task_physics.py` runs the learned/shielded decisions but judges
-success from the free MuJoCo body, not the symbolic environment. A pass requires
-all of the following: the object rises at least 3 mm, its bottom clears the
-floor, no target-floor contact remains, and its XY position follows the tool.
-The evaluator uses bounded servo trajectories, box/cylinder/sphere targets,
-14--22 mm half-size, random reachable depth and lateral error, sensor dropouts,
-and up to two camera-style reacquisition retries.
+## 학습 결과
 
-Final disjoint 2,000-seed result:
+DAgger 방식의 행동 복제 학습으로 전문가 및 잡음 상태 120,000개와,
+정책 교란 상태 40,000개씩 세 차례를 수집해 총 240,000개 상태를
+사용했습니다.
 
-| Set | Result |
+- 신경망 구조: `15 → 192 → 128 → 64 → 8`
+- 별도 검증 자료 행동 정확도: 98.2882%
+- 무작위 닫힌 고리 성공: 2,000회 중 95.55%
+- 두 프레임 카메라/자세 안전 조건:
+  10,000회 중 9,998회 완료(99.98%, 평균 11.4678 상위 프레임)
+- 결정론적 실험: 1,000회 중 1,000회 완료
+
+학습 무작위화는 실제 손목 카메라처럼 잡기 자세 대부분에서 물체 마스크가
+가려지도록 합니다. 대기 높이에서 정렬을 검증해 대상을 잠갔다면 가려진
+동안에도 연속 대상으로 유지할 수 있지만, 사전 잠금 없이 마스크가
+사라지면 집게 닫기를 허용하지 않습니다.
+
+## 독립 접촉 물리 평가
+
+성공하려면 다음 조건을 모두 만족해야 합니다.
+
+- 물체가 최소 3mm 올라감
+- 물체 아랫면이 바닥에서 떨어짐
+- 물체와 바닥 접촉이 사라짐
+- 물체 XY 위치가 도구를 따라감
+
+평가는 제한된 서보 궤적, 상자·원기둥·구 물체, 반크기 14–22mm,
+무작위 도달 깊이, 가로 오차, 센서 끊김, 최대 두 번의 카메라식 재탐색을
+사용했습니다.
+
+서로 겹치지 않는 최종 시드 2,000개의 결과:
+
+| 평가 항목 | 결과 |
 |---|---:|
-| symbolic task completion | 2,000/2,000 (100%) |
-| physical lift, all 28--44 mm objects | 1,959/2,000 (97.95%) |
-| first-attempt physical lift | 1,952/2,000 (97.6%) |
-| normal envelope, width <=40 mm | 1,488/1,488 (100%) |
-| 40--44 mm edge-size stress | 471/512 (91.9922%) |
+| 상태기계 작업 완료 | 2,000/2,000 (100%) |
+| 28–44mm 전체 물체의 물리적 들어 올리기 | 1,959/2,000 (97.95%) |
+| 첫 시도 물리적 들어 올리기 | 1,952/2,000 (97.6%) |
+| 폭 40mm 이하 일반 범위 | 1,488/1,488 (100%) |
+| 폭 40–44mm 한계 크기 스트레스 실험 | 471/512 (91.9922%) |
 
-All remaining failures were oversized edge-stress objects. They are reported as
-failures, not relabelled by lowering the lift threshold. The 40 mm normal
-envelope is therefore the current simulated jaw-capacity contract; it becomes a
-real limit only after measuring the physical fingers.
+남은 실패는 모두 크기가 큰 한계 물체였습니다. 들어 올리기 기준을 낮춰
+성공으로 바꾸지 않고 실패로 기록했습니다. 따라서 현재 시뮬레이션의
+정상 집게 용량 범위는 40mm 이하입니다. 실물 집게를 측정하기 전에는 이를
+실물 한계로 주장하지 않습니다.
 
-## Safety and reality boundary
+## 안전 및 현실과의 경계
 
-These percentages are simulation-only and are not presented as a real robot
-success rate. The guarded model was nevertheless used as a macro gate during
-the real 2026-07-27 trial; the fixed-reach controller then achieved one physical
-close-and-lift success with visual jaw contact retained after lift. See
-`docs/PHYSICAL_GRASP_VALIDATION.md`. No learned output bypasses the real marker,
-alignment, or jaw-contact checks.
+위 비율은 시뮬레이션 결과이며 실물 로봇팔 성공률이 아닙니다. 보호 조건이
+있는 모델은 2026-07-27 실물 실험에서 상위 행동 조건으로 사용됐고, 당시
+고정 도달 제어기는 집게 접촉이 들어 올린 뒤에도 남은 실물 성공 한 번을
+만들었습니다. 자세한 내용은
+[실물 검증 기록](../docs/PHYSICAL_GRASP_VALIDATION.md)에 있습니다.
 
-## Reproduce
+학습 결과가 실물의 마커, 정렬, 집게 접촉 확인을 건너뛰지는 않습니다.
+
+## 결과 재현
 
 ```bash
 python3 simul/prepare_assets.py --extract
@@ -87,5 +103,5 @@ python3 simul/evaluate_full_task_physics.py --policy simul/models/full_task_poli
 PYTHONPATH=laptop python3 laptop/test_pipeline.py
 ```
 
-Training output stays in ignored `simul/generated/`. Only reviewed artifacts,
-their exact metrics, and source needed to reproduce them are tracked.
+학습 출력은 Git에서 제외된 `simul/generated/`에 저장됩니다. 검토한 모델,
+정확한 평가 수치, 재현에 필요한 소스만 저장소에서 추적합니다.

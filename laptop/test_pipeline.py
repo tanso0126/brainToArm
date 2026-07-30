@@ -293,8 +293,8 @@ def test_arm_command_validation():
     check(config.ULTRASONIC_TRIGGER_PIN == 7
           and config.ULTRASONIC_ECHO_PIN == 6,
           "wrist ultrasonic trigger/echo pins do not overlap six servos")
-    check(config.HOME_POSE == [90, 70, 90, 140, 170, 170],
-          "six-servo HOME pose matches the latest raised camera pose")
+    check(config.HOME_POSE == [90, 70, 90, 140, 170, 180],
+          "6개 서보 HOME 자세가 현재 펌웨어 기준과 일치함")
     check(config.SERVO_MIN == [0, 0, 0, 130, 90, 0]
           and config.SERVO_MAX == [180, 150, 180, 180, 180, 180],
           "host limits match the physical wrist/gripper/roll ranges")
@@ -931,12 +931,12 @@ def test_floor_motion_and_persistent_session():
 
     hover = floor_pose(90, "hover")
     grasp = floor_pose(90, "grasp")
-    check(hover == [90, 124, 90, 180, 90, 170],
-          "reproduced floor hover uses the physically level 170-degree roll")
+    check(hover == [90, 110, 90, 180, 90, 170],
+          "현재 바닥 대기 자세와 실측 수평 170° 회전이 일치함")
     check(grasp == [90, 142, 90, 180, 90, 170],
           "reproduced floor grasp reaches the absolute floor reference")
     shifted = floor_pose(86, "hover")
-    check(shifted[config.J_SHOULDER] == 126
+    check(shifted[config.J_SHOULDER] == 112
           and shifted[config.J_ELBOW] == 86,
           "elbow motion receives simultaneous shoulder height compensation")
     shoulder_delta, elbow_delta = floor_vector(-4)

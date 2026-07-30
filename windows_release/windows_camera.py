@@ -1,4 +1,4 @@
-"""DirectShow wrist-camera auto-selection, publishing, and live preview."""
+"""손목 카메라를 자동 선택하고 실시간 영상과 인식 결과를 표시합니다."""
 
 from pathlib import Path
 import argparse
@@ -28,7 +28,7 @@ from wrist_vision import (  # noqa: E402
 READY_FILE = ROOT / "data" / "runtime" / "windows_camera.json"
 CONTROL_PREVIEW = (
     ROOT / "data" / "vision" / "realtime_visual_servo_latest.jpg")
-WINDOW_NAME = "brainToArm LIVE - Q to stop"
+WINDOW_NAME = "brainToArm 실시간 카메라 - Q 또는 Esc로 종료"
 
 
 def _backend():
@@ -72,11 +72,15 @@ def choose_camera(requested="auto", maximum_index=8):
         index = int(requested)
         camera = open_camera(index)
         if camera is None:
-            raise RuntimeError(f"camera index {index} could not be opened")
+            raise RuntimeError(
+                f"카메라 {index}번을 열 수 없습니다. Windows 카메라 권한과 "
+                "다른 카메라 앱이 실행 중인지 확인하세요.")
         frame = warm_frame(camera)
         if frame is None:
             camera.release()
-            raise RuntimeError(f"camera index {index} produced no frames")
+            raise RuntimeError(
+                f"카메라 {index}번에서 영상이 들어오지 않습니다. USB를 "
+                "다시 연결하거나 다른 카메라 번호를 사용하세요.")
         return index, camera, frame
 
     detector = WristDetector()
@@ -93,15 +97,19 @@ def choose_camera(requested="auto", maximum_index=8):
     if not marked:
         opened = ", ".join(str(index) for _score, index in candidates)
         raise RuntimeError(
-            "No camera showed both blue-left and red-right finger tapes. "
-            f"Opened indices: {opened or '(none)'}. Mount the wrist camera so "
-            "both tapes are visible, or run CHECK_CAMERA.bat with --camera N.")
+            "파란색 왼쪽 집게와 빨간색 오른쪽 집게가 동시에 보이는 "
+            "카메라를 찾지 못했습니다. "
+            f"열 수 있었던 카메라 번호: {opened or '(없음)'}.\n"
+            "웹캠 각도를 조절해 두 테이프가 화면 하단에 모두 보이게 "
+            "하거나 CHECK_CAMERA.bat --camera N으로 번호를 지정하세요.")
     _score, index = max(marked)
     camera = open_camera(index)
     frame = warm_frame(camera)
     if frame is None:
         camera.release()
-        raise RuntimeError(f"selected camera {index} stopped during reopen")
+        raise RuntimeError(
+            f"선택한 카메라 {index}번을 다시 여는 중 영상이 끊겼습니다. "
+            "USB 연결을 확인하세요.")
     return index, camera, frame
 
 
@@ -139,8 +147,8 @@ def publish(camera_arg="auto", headless=False):
     started_at = time.time()
     write_ready(index)
     print(
-        f"[camera] READY index={index} "
-        f"size={frame.shape[1]}x{frame.shape[0]}",
+        f"[카메라] 준비 완료: 번호={index}, "
+        f"화면 크기={frame.shape[1]}x{frame.shape[0]}",
         flush=True,
     )
     previous = time.monotonic()
@@ -149,7 +157,9 @@ def publish(camera_arg="auto", headless=False):
         while True:
             ok, frame = camera.read()
             if not ok or frame is None:
-                raise RuntimeError(f"camera {index} stopped producing frames")
+                raise RuntimeError(
+                    f"카메라 {index}번의 영상이 중간에 끊겼습니다. "
+                    "USB 허브 전력 부족이나 케이블 빠짐을 확인하세요.")
             now = time.monotonic()
             instant = 1.0 / max(now - previous, 1e-6)
             previous = now
@@ -163,13 +173,13 @@ def publish(camera_arg="auto", headless=False):
                 if display is None:
                     display = rendered
                 cv2.putText(
-                    display, f"Windows camera {index}",
+                    display, f"Windows camera {index} | Q/ESC: stop",
                     (18, display.shape[0] - 18),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55,
                     (255, 255, 255), 2, cv2.LINE_AA)
                 cv2.imshow(WINDOW_NAME, display)
                 if cv2.waitKey(1) & 0xFF in (27, ord("q")):
-                    print("[camera] operator closed preview", flush=True)
+                    print("[카메라] 사용자가 미리보기 창을 닫았습니다.", flush=True)
                     return 0
     finally:
         camera.release()
@@ -183,9 +193,9 @@ def publish(camera_arg="auto", headless=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--camera", default="auto",
-                        help="DirectShow camera index, or auto")
+                        help="카메라 번호 또는 자동 선택(auto)")
     parser.add_argument("--headless", action="store_true",
-                        help="publish frames without opening a preview window")
+                        help="미리보기 창 없이 영상만 전달")
     args = parser.parse_args()
     return publish(args.camera, args.headless)
 

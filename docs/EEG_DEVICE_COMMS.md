@@ -1,4 +1,4 @@
-# PolyG-I EEG — device communication findings
+# PolyG-I 뇌파 장치 통신 조사 결과
 
 LAXTHA PolyG-I를 macOS에서 TeleScan 없이 직접 구동하기 위해 확인한 USB,
 HID 명령, 표본 형식, 전압 환산 및 표시 규칙이다. 이전 조사에서
@@ -15,9 +15,9 @@ HID 명령, 표본 형식, 전압 환산 및 표시 규칙이다. 이전 조사�
 |---|---|
 | 제품 | `PolyG-I LAXTHA Inc.` |
 | VID / PID | `0x0F1F` / `0x0010` (16) |
-| USB interface | vendor-defined HID, usage page `0xFF00` |
-| HID OUTPUT | 8 bytes (명령) |
-| HID INPUT | 1,024 bytes (512 ADC words) |
+| USB 인터페이스 | 제조사 정의 HID, 사용 페이지 `0xFF00` |
+| HID 출력 | 8바이트(명령) |
+| HID 입력 | 1,024바이트(ADC 워드 512개) |
 | 물리 채널 | 16 |
 | EEG 채널 | 물리 채널 1–8 |
 | 보고서당 시간행 | 512 words / 16 = 32 rows |
@@ -43,7 +43,7 @@ python3 -m pip install hidapi
 python3 laptop/eeg_detect.py --seconds 5
 ```
 
-## 2. HID report descriptor
+## 2. HID 보고서 서술자
 
 장치 descriptor의 핵심은 다음과 같다.
 
@@ -103,7 +103,7 @@ PGA ×0.40이다. 대시보드에서 측정 정지 중 0–15를 선택할 수 �
 정확한 256 Hz를 사용한다. 화면의 measured rate는 별도로 보여 전송 상태를
 감시한다.
 
-## 4. INPUT decoder
+## 4. 입력 데이터 해석기
 
 설치된 다음 파일을 정적으로 분석했다.
 

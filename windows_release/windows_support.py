@@ -1,8 +1,8 @@
-"""Windows COM-port adapter for the proven real-time arm controller.
+"""Windows에서 Arduino Uno COM 포트를 연결하는 어댑터입니다.
 
-The macOS runtime owns the Uno through a Unix-domain socket. Windows does not
-need that extra process: this adapter owns the COM port in the same process as
-the autonomous controller and exposes the same small ``request`` contract.
+macOS 실행판은 별도의 Unix 소켓 프로그램을 거치지만 Windows에서는 자동
+제어 프로그램이 COM 포트를 직접 사용합니다. 내부 요청 형식은 기존 제어기와
+같게 유지합니다.
 """
 
 from pathlib import Path
@@ -51,7 +51,7 @@ def _port_score(port):
 
 
 def find_arm_port(preferred=None, ports=None):
-    """Select the Uno/CH340 while explicitly excluding the ESP32 CP210x."""
+    """ESP32를 제외하고 Uno 또는 CH340 COM 포트를 선택합니다."""
     if preferred and str(preferred).lower() != "auto":
         return str(preferred).upper()
     ports = list(list_ports.comports() if ports is None else ports)
@@ -64,21 +64,23 @@ def find_arm_port(preferred=None, ports=None):
     if not usable:
         listing = "\n  ".join(port_description(port) for port in ports)
         raise RuntimeError(
-            "Arduino Uno/CH340 COM port was not found. Connect the Uno, close "
-            "Arduino Serial Monitor, and retry. Detected ports:\n  "
-            + (listing or "(none)"))
+            "Arduino Uno/CH340 COM 포트를 찾지 못했습니다. Uno USB를 "
+            "연결하고 Arduino IDE의 Serial Monitor와 Serial Plotter를 "
+            "닫은 뒤 다시 시도하세요.\n감지된 포트:\n  "
+            + (listing or "(없음)"))
     best_score = usable[0][0]
     best = [port for score, port in usable if score == best_score]
     if len(best) != 1:
         listing = ", ".join(str(port.device) for port in best)
         raise RuntimeError(
-            "Multiple likely arm ports were found: "
-            f"{listing}. Run with --port COMx.")
+            "로봇팔로 보이는 COM 포트가 여러 개입니다: "
+            f"{listing}. RUN_AUTONOMOUS.bat --port COM번호 형식으로 "
+            "사용할 포트를 지정하세요.")
     return str(best[0].device)
 
 
 def open_arm(port):
-    """Open ArmSerial without passing POSIX-only ``exclusive`` on Windows."""
+    """Windows에서 지원하지 않는 옵션을 빼고 Uno를 연결합니다."""
     original_serial = arm_serial.serial.Serial
     if os.name == "nt":
         def windows_serial(*args, **kwargs):
@@ -92,7 +94,7 @@ def open_arm(port):
 
 
 class DirectArmClient:
-    """In-process equivalent of ``ArmSessionClient`` for Windows."""
+    """Windows 자동 제어기에서 Uno를 직접 사용하는 연결 객체입니다."""
 
     def __init__(self, arm, safety=None, camera_path=WRIST_RAW_FRAME):
         self.arm = arm
@@ -104,16 +106,18 @@ class DirectArmClient:
             age = time.time() - self.camera_path.stat().st_mtime
         except FileNotFoundError as exc:
             raise RuntimeError(
-                "wrist camera is not publishing frames") from exc
+                "손목 카메라 영상 파일이 만들어지지 않고 있습니다. "
+                "CHECK_CAMERA.bat으로 카메라를 먼저 확인하세요.") from exc
         if age < -1.0 or age > config.WRIST_CAMERA_MAX_FRAME_AGE_S:
             raise RuntimeError(
-                f"wrist camera frame is stale ({age:.1f}s old)")
+                f"손목 카메라 영상이 {age:.1f}초 동안 갱신되지 않았습니다. "
+                "USB 연결 또는 USB 허브 전력 부족을 확인하세요.")
 
     @staticmethod
     def _pose(payload):
         pose = payload.get("pose")
         if not isinstance(pose, list) or len(pose) != config.N_JOINTS:
-            raise ValueError("pose must contain six joint angles")
+            raise ValueError("로봇 자세에는 관절 각도 6개가 있어야 합니다.")
         return [int(value) for value in pose]
 
     def _checked_move(self, target, require_camera=True, wait=True,
@@ -124,7 +128,8 @@ class DirectArmClient:
         report = self.safety.transition_report(current, target)
         if not report.safe:
             raise RuntimeError(
-                "motion rejected before COM write: " + report.explain())
+                "허용된 관절 범위 또는 충돌 조건을 벗어나 COM 명령을 "
+                "보내지 않았습니다: " + report.explain())
         self.arm.send_angles(target)
         if wait:
             self.arm.wait_done(timeout=float(timeout))
@@ -167,8 +172,8 @@ class DirectArmClient:
                 for goal, actual in zip(target, current))
             if largest > REALTIME_MAX_TARGET_DELTA_DEG:
                 raise RuntimeError(
-                    f"stream step {largest}deg exceeds "
-                    f"{REALTIME_MAX_TARGET_DELTA_DEG}deg")
+                    f"한 번에 움직이려는 최대 각도 {largest}°가 실시간 "
+                    f"허용값 {REALTIME_MAX_TARGET_DELTA_DEG}°를 넘었습니다.")
             pose = self._checked_move(
                 target,
                 require_camera=bool(payload.get("require_camera", True)),
@@ -180,7 +185,8 @@ class DirectArmClient:
                 "target": target,
                 "streaming": True,
             }
-        raise ValueError(f"unsupported Windows arm command: {command!r}")
+        raise ValueError(
+            f"지원하지 않는 Windows 로봇팔 명령입니다: {command!r}")
 
     def close(self):
         self.arm.close()

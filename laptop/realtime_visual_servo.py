@@ -129,7 +129,9 @@ class LatestFrameStream:
                 continue
             self.last_mtime_ns = stat.st_mtime_ns
             return frame, stat.st_mtime_ns
-        raise TimeoutError("no fresh wrist frame")
+        raise TimeoutError(
+            "새 손목 카메라 영상이 들어오지 않습니다. 웹캠 USB와 카메라 "
+            "프로그램을 확인하세요.")
 
 
 class HistogramTargetTracker:
@@ -203,7 +205,7 @@ class HistogramTargetTracker:
 
     def update(self, frame):
         if self.histogram is None or self.window is None:
-            raise RuntimeError("target tracker has not been initialized")
+            raise RuntimeError("물체 추적기가 아직 시작되지 않았습니다.")
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         probability = cv2.calcBackProject(
             [hsv], [0, 1], self.histogram, [0, 180, 0, 256], 1)
@@ -297,22 +299,23 @@ def grasp_readiness(
         target, gripper_center, opening_px, distance_mm,
         floor_clearance_mm):
     if target is None:
-        return GraspReadiness(False, "target not tracked", float("inf"))
+        return GraspReadiness(False, "물체를 추적하지 못함", float("inf"))
     center_error = float(np.linalg.norm(
         np.asarray(target.center, dtype=float)
         - np.asarray(gripper_center, dtype=float)))
     if distance_mm is None or not math.isfinite(float(distance_mm)):
-        return GraspReadiness(False, "sonar unavailable", center_error)
+        return GraspReadiness(False, "초음파 거리 사용 불가", center_error)
     if float(distance_mm) > STOP_RANGE_MM:
         return GraspReadiness(
             False,
-            f"sonar {float(distance_mm):.1f}mm > {STOP_RANGE_MM:.1f}mm",
+            f"초음파 거리 {float(distance_mm):.1f}mm가 정지 기준 "
+            f"{STOP_RANGE_MM:.1f}mm보다 큼",
             center_error,
         )
     if float(floor_clearance_mm) < FINGERTIP_FLOOR_STOP_MM:
-        return GraspReadiness(False, "finger floor clearance exhausted",
+        return GraspReadiness(False, "집게 끝의 바닥 여유가 부족함",
                               center_error)
-    return GraspReadiness(True, "sonar stop reached with target tracked",
+    return GraspReadiness(True, "물체 추적 중 초음파 정지 거리에 도달함",
                           center_error)
 
 
@@ -320,14 +323,15 @@ def floor_limited_grasp_readiness(
         target, gripper_center, opening_px, floor_clearance_mm):
     """Allow the user's floor-stop branch when sonar misses the small object."""
     if target is None:
-        return GraspReadiness(False, "target not tracked", float("inf"))
+        return GraspReadiness(False, "물체를 추적하지 못함", float("inf"))
     center_error = float(np.linalg.norm(
         np.asarray(target.center, dtype=float)
         - np.asarray(gripper_center, dtype=float)))
     if float(floor_clearance_mm) > FLOOR_HOLD_START_MM:
-        return GraspReadiness(False, "floor stop not reached", center_error)
+        return GraspReadiness(False, "아직 바닥 정지 높이에 도달하지 않음",
+                              center_error)
     return GraspReadiness(
-        True, "floor stop reached with target tracked", center_error)
+        True, "물체 추적 중 바닥 정지 높이에 도달함", center_error)
 
 
 def loaded_lift_pose(pose, safety, target_clearance_mm=50.0):
@@ -346,7 +350,9 @@ def loaded_lift_pose(pose, safety, target_clearance_mm=50.0):
             and safety.transition_report(pose, lifted).safe
         ):
             return lifted
-    raise RuntimeError("no collision-safe loaded lift reaches 50mm clearance")
+    raise RuntimeError(
+        "물체를 든 채 충돌 없이 바닥 여유 50mm까지 올릴 수 있는 자세를 "
+        "찾지 못했습니다.")
 
 
 def close_lift_home(client, safety, pose):
@@ -365,7 +371,8 @@ def close_lift_home(client, safety, pose):
         report = safety.transition_report(current, target)
         if not report.safe:
             raise RuntimeError(
-                "loaded transport rejected: " + report.explain())
+                "물체를 든 운반 경로가 안전 검사에서 거부되었습니다: "
+                + report.explain())
         client.request({
             "command": "move", "pose": target,
             "require_camera": True,
@@ -766,18 +773,22 @@ def run(execute=False, allow_grasp=False, max_seconds=45.0):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run", action="store_true")
-    parser.add_argument("--grasp", action="store_true")
-    parser.add_argument("--max-seconds", type=float, default=45.0)
+    parser.add_argument(
+        "--run", action="store_true", help="실물 로봇팔을 실제로 움직임")
+    parser.add_argument(
+        "--grasp", action="store_true", help="접근 뒤 물체를 잡고 HOME 복귀")
+    parser.add_argument(
+        "--max-seconds", type=float, default=45.0,
+        help="자동 접근 제한 시간(초)")
     args = parser.parse_args()
     if args.grasp and not args.run:
-        parser.error("--grasp requires --run")
+        parser.error("--grasp를 사용하려면 --run도 함께 지정해야 합니다.")
     result = run(
         execute=args.run,
         allow_grasp=args.grasp,
         max_seconds=args.max_seconds,
     )
-    print(f"[realtime-servo] RESULT {result}", flush=True)
+    print(f"[실시간 제어 결과] {result}", flush=True)
 
 
 if __name__ == "__main__":

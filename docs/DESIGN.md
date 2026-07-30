@@ -57,11 +57,11 @@ lang: ko
 logo: https://getdesign.kr/logos/class101.png
 ---
 
-# 클래스101 — design.md
+# 클래스101 디자인 기준
 
 > 클래스101(CLASS101)은 크리에이터가 온라인 클래스를 열고 수익을 얻는 클래스 플랫폼이며 [src:7], 그 공개 디자인 시스템이 **Vibrant Design System(VDS)** 이다 [src:1]. React DOM과 React Native를 단일 `<VibrantProvider>`로 감싸는 크로스플랫폼 오픈소스 모노레포로 개발된다 [src:12][src:10][src:4].
 
-## Brand & Style
+## 브랜드와 스타일
 
 클래스101은 취미부터 커리어까지 25개 카테고리의 온라인 클래스를 다루는 플랫폼으로, 2022년 8월 말 "클래스101+"라는 이름의 월 구독 모델(25개 카테고리 무제한 수강)로 전환했다 [src:8]. 영문 사이트가 CLASS101+ 브랜드로 운영되는 글로벌 서비스이고 [src:6], 컴포넌트 내장 텍스트의 기본 언어는 한국어이며 `ConfigProvider`가 한국어·영어·일본어 번역 사전을 제공한다 — 한국어 우선에 글로벌 확장을 얹은 구조가 시스템 레벨에 새겨져 있다 [src:11]. 브랜드의 축은 크리에이터 이코노미 서사다: 크리에이터의 콘텐츠가 정당한 가치를 받는 생태계 지속가능성을 2018년부터 명문화해 왔다 [src:7].
 
@@ -71,14 +71,14 @@ Vibrant Design System은 "Class101의 사용자들이 보다 일관적인 서비
 
 보이스는 층위가 명확하다. 브랜드 카피는 "원하는 모든 것, 나답게 배우다"처럼 배움을 자기다움으로 잇는 선언형이고 [src:5], 제품 UI 카피는 "커스텀 문구가 적용되었습니다" 같은 존댓말 안내형이다 [src:22]. 어드민 액션 라벨은 "새로고침"·"추가" 같은 2–4자 동사형으로 짧다 [src:34]. 넛지는 "지금 이 페이지를 나가시면 혜택을 받을 수 없어요!" 같은 손실 회피형 한 줄까지 허용되지만 [src:23], "고객을 속이지 않고 가치 그대로를 보여줍니다"라는 원칙이 과장을 걸러낸다 [src:8].
 
-## Colors
+## 색상
 
 VDS 색 체계는 92개 시맨틱 토큰이 라이트/다크 값 쌍으로 정의된 단일 사전이다 [src:3]. "Vibrant color token 은 다크/라이트 모드에 맞추어 제작되었습니다"가 공식 전제이고 [src:2], 라이트 값은 공식 Color Token 문서와 npm `@vibrant-ui/theme@0.94.37` 실측이 전 항목 일치한다 [src:2][src:3]. 아래 OKLCH 값은 그 공식 hex를 변환한 것이며 원본 hex를 트레일링 주석으로 병기한다.
 
 구조 원칙은 세 가지다. (1) 강조는 primary 오렌지 하나로 수렴하고, 라이트/다크 어디서든 같은 값을 유지한다 — 다크 캔버스에서도 버튼이 같은 오렌지로 렌더된다 [src:2][src:3][src:9]. (2) 상태는 informative/error/success/warning 4색이 담당하며, 각자 옅은 container 틴트를 동반한다 [src:2]. (3) 텍스트 위계는 `onView1→onView2→onView3` 3단으로 토큰화되어 "항상 onView1" 식으로 컴포넌트 규칙에 직접 인용된다 [src:2][src:32].
 
 ```yaml
-# Basic — 브랜드·상태 (라이트 모드 값 [src:2][src:3])
+# 기본 — 브랜드·상태 (라이트 모드 값 [src:2][src:3])
 primary: oklch(0.685 0.211 41) # #ff5d00 — 유일한 히어로 컬러, 다크에서도 동일값
 onPrimary: oklch(1 0 0) # #ffffff
 primaryContainer: oklch(0.974 0.009 52) # #fcf5f1
@@ -95,7 +95,7 @@ warningContainer: oklch(0.966 0.018 70) # #fcf2e7
 ```
 
 ```yaml
-# Surface / Outline / Text (라이트 모드 값 [src:2][src:3])
+# 표면 / 외곽선 / 글자 (라이트 모드 값 [src:2][src:3])
 background: oklch(1 0 0) # #ffffff
 surface1: oklch(0 0 0 / 3%) # #00000008 — 3% 검정 워시
 surface2: oklch(1 0 0) # #ffffff
@@ -154,7 +154,7 @@ orangeMuted: oklch(0.930 0.031 45) # #fbe2d7 (라이트) — 다크에서는 okl
 
 `~Muted`/`~Inverse` 계열은 라이트↔다크에서 값이 서로 뒤집히는 대칭 설계다 [src:3].
 
-## Typography
+## 글자 체계
 
 공식 서체 토큰은 존재하지 않는다 — `@vibrant-ui/theme`에 fontFamily 토큰이 없고 [src:3], 시스템 프롭 `fontFamily`는 자유 문자열 타입으로만 열려 있다 [src:18]. 자체 디스플레이/브랜드 전용 서체의 증거도 없어 별도 웹폰트 소스가 필요 없다. 아래 스택은 한글 커버리지를 위한 카탈로그 폴백이다:
 
@@ -193,7 +193,7 @@ paragraph4: 14 / 20 # 0.875rem / 1.25rem
 
 **오버라이드.** 시스템 프롭 `typography`(TypographyKindToken)·`fontWeight`(TypographyWeightToken)·`fontSize`·`lineHeight`(number)로 컴포넌트 단위 세부 조정이 가능하다 [src:18]. letter-spacing 토큰은 정의되지 않는다 [src:3].
 
-## Spacing
+## 간격
 
 명명 스페이싱 스케일이 없다 — 스페이싱은 시스템 프롭이 raw px number를 받는 체계다. 마진 `m/mt/mr/mb/ml/mx/my`와 패딩 `p/pt/pr/pb/pl/px/py`가 전부 number 타입이고 [src:16], Stack류의 `spacing`·`rowGap/columnGap`도 number를 받는다 [src:15].
 
@@ -205,7 +205,7 @@ paragraph4: 14 / 20 # 0.875rem / 1.25rem
 
 관찰값이 4의 배수로 수렴하기는 하지만, "4px 그리드"라는 규정은 공식 문서에 없다(≈ 재구성 관찰). 공개된 명명 스페이싱 토큰이 없으므로, 위 숫자가 문서화된 실사용 예의 전부다.
 
-## Rounded
+## 모서리 둥글기
 
 코너 라운드는 명명 스케일로 토큰화되어 있다. 프롭 enum은 `rounded: none|sm|md|lg|xl|xxl`이고 [src:17], px 값은 npm 실측 기준이다 [src:3].
 
@@ -221,7 +221,7 @@ full: 10000px # pill·원형 전용 (npm 원문 10000)
 
 `full`은 테마에 존재하며 `ImageThumbnail`의 `rounded` 기본값으로 문서화되어 있다 [src:3][src:35]. 스크린샷 관찰로는 md 버튼 코너가 ≈8px({rounded.md} 상당)이고, FilterChip과 Toast는 완전한 pill 실루엣이다 [src:9].
 
-## Elevation & Depth
+## 높이와 깊이 표현
 
 그림자 수치는 공개 문서에 없다 — 컴포넌트는 `elevationLevel` 프롭으로 테마 정의 그림자를 참조하는 구조이고 [src:41], npm 패키지에는 light/darkModeElevation 모듈의 존재만 확인된다 [src:3]. (공개된 그림자 값 없음 — 관찰상 깊이 연출보다 헤어라인·표면 위계가 우선하는 플랫 시스템이다 [src:2].)
 
@@ -239,7 +239,7 @@ popover: 4
 
 바텀바·플로팅 액션 버튼·바텀시트가 1급 레이어로 명명된 것 자체가 모바일 앱 우선 구조의 증거다 [src:3].
 
-## Shapes
+## 형태
 
 곡률 언어는 0→20px 계단과 pill의 조합이다. 버튼은 ≈8px 코너, FilterChip·Toast는 완전한 pill 실루엣으로 관찰되고 [src:9], 오버레이 썸네일 컴포넌트 `ImageThumbnail`은 기본값이 `full`(원형·pill)이다 [src:35]. 곡선은 부드럽되 유기적 blob이나 사선 분할 같은 표현은 시스템 어휘에 없다.
 
@@ -247,7 +247,7 @@ popover: 4
 
 이모지는 마케팅 순간에만 등장하고 [src:1], 제품 UI의 상태 표현은 아이콘과 컬러가 담당한다 [src:9]. 모션은 `<Motion>`/`<Transition>` 컴포넌트가 duration(ms)과 `loop: true|reverse`를 받으며, 이징은 `linear / easeInQuad / easeOutQuad` 3종만 공식 지원한다 — 스프링·바운스류 곡선은 시스템 어휘 밖이다 [src:31].
 
-## Components
+## 구성요소
 
 모든 컴포넌트는 동일한 토큰 사전과 시스템 프롭(스페이싱 number, 타이포 kind, 프롭 단위 반응형 배열)을 공유한다 [src:15]. 레이아웃 프리미티브는 Box / Stack / HStack / VStack(flex 고정)이다 [src:15][src:12].
 
@@ -366,7 +366,7 @@ Table + VirtualizedTable + TableFilterGroup/TableHeader/TableFooter로 구성된
 
 이 밖에 Avatar(`xs|sm|md|lg` + 로드 실패 플레이스홀더) [src:37], Divider(`default|dashed|thick` × margin `none|md|lg`) [src:38], Spinner(배경색에 따라 `onColor` 자동 결정) [src:39], Paper(rounded·elevationLevel·gradient 표면 컨테이너) [src:41], Body(level×weight 텍스트) [src:29], Icon(3웨이트) [src:30], Motion/Transition [src:31]이 같은 토큰 위에서 동작한다.
 
-## Do's and Don'ts
+## 권장 사항과 금지 사항
 
 **Do**
 
@@ -389,9 +389,9 @@ Table + VirtualizedTable + TableFilterGroup/TableHeader/TableFooter로 구성된
 - **(도메인 경계)** 클래스101의 도메인 개념 — 클래스 구독(클래스101+)·크리에이터 수익 구조·수강 신청 흐름·"월 19,000원" 류 구독 가격 카피·클래스 카드 레일의 상품 구성 — 을 그대로 가져오지 않는다. 차용할 것은 단일 오렌지 악센트, onView 텍스트 위계, 바텀시트 우선 반응형이라는 시각 언어이지 클래스 플랫폼의 제품 개념이 아니다.
 - **(벤더 중립)** "Vibrant"/"Vibrant Design System" 워드마크, `@vibrant-ui/*` 패키지명, `<VibrantProvider>` 같은 시스템 식별자를 생성하는 제품 UI의 카피·헤더·타이틀·라벨·클래스명에 넣지 않는다 — 차용할 것은 시각 언어이지 시스템 이름이 아니다.
 
-## Responsive Behavior
+## 반응형 동작
 
-### Breakpoints
+### 화면 크기 기준점
 
 테마 기본 브레이크포인트는 `[640, 1024, 1312]`px이다 [src:3]. "모든 System Prop은 기본적으로 반응형을 지원합니다" — 웹은 css media query로, 네이티브는 현재 화면 너비로 분기하며 [src:15], 값은 `<Stack direction={['vertical', 'horizontal']} />`처럼 브레이크포인트별 배열로 전달한다 [src:14].
 
@@ -404,7 +404,7 @@ Table + VirtualizedTable + TableFilterGroup/TableHeader/TableFooter로 구성된
 
 단, 시트↔모달 전환이 일어나는 "모바일/PC"의 정확한 임계 폭은 문서에 공개되어 있지 않다 [src:25][src:26].
 
-### Collapsing Strategy
+### 좁은 화면에서 줄이는 방법
 
 - Dropdown: PC 드롭다운 → 모바일 바텀 시트 [src:26].
 - ModalBottomSheet: PC 센터 모달(`size: lg|md`) → 모바일 바텀 시트, Android 시스템 뒤로가기로 닫힘 [src:25].
@@ -412,17 +412,17 @@ Table + VirtualizedTable + TableFilterGroup/TableHeader/TableFooter로 구성된
 - TopBar: 모바일 전용 페이지 헤더 — emphasis kind가 메인 페이지 상단을 담당한다 [src:27].
 - BreadCrumbs: 부족한 폭에서 Separator 단위 래핑 + ellipsis [src:32].
 
-### Touch Targets
+### 터치 영역
 
 공개된 터치 타깃 수치는 없다(문서·패키지 모두 미공개). 다만 바텀바·FAB·바텀시트가 zIndex 1급 토큰으로 존재하고 [src:3] Android BackHandler가 명세에 포함되는 [src:25] 모바일 앱 우선 시스템이므로, 다운스트림에서는 플랫폼 관례(44×44px 상당)를 적용하는 것이 안전하다.
 
-### Image Behavior
+### 이미지 동작
 
 - ImageThumbnail: 기본 `rounded: full` + dim 오버레이 — 폭과 무관하게 실루엣이 유지된다 [src:35].
 - Slider: `panelsPerView|panelWidth`로 폭별 노출 카드 수를 제어하는 가로 캐러셀 [src:45].
 - 제공 스크린샷이 데스크톱 폭 라이트/다크 쌍뿐이라, 모바일 리플로우의 시각 대조는 위 문서·토큰 근거에 의존한다 [src:9].
 
-## Known Gaps
+## 현재 알려진 부족한 점
 
 - 서체 패밀리가 공식 미공개다 — fontFamily 토큰이 없고 [src:3], 본 문서의 Pretendard Variable 스택은 카탈로그 폴백 가정(≈)이다.
 - 그림자(elevation) 구체값이 미공개다 — `elevationLevel` 프롭 구조 [src:41]와 npm 모듈 존재 [src:3]만 확인된다.
@@ -430,7 +430,7 @@ Table + VirtualizedTable + TableFilterGroup/TableHeader/TableFooter로 구성된
 - letter-spacing 토큰과 모션 duration 프리셋이 정의되지 않는다 — 이징도 3종만 공식 지원이다 [src:3][src:31].
 - 아이콘 총수가 공식 미공개다 — 리서치 추출 집계 ≈270종(818개 SVG)은 검증된 공식 수치가 아니다.
 
-## References
+## 참고 자료
 
 1. https://vibrant-design.com/ — Vibrant Design System 소개(정의·핵심 가치 Performant/Productive/Consistent)
 2. https://vibrant-design.com/docs/theme/colors/color-token/ — Color Token 문서(시맨틱 토큰 라이트 값·다크/라이트 모드 전제)

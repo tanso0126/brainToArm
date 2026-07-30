@@ -1,9 +1,8 @@
-"""Laptop -> Arduino serial link for the robot arm.
+"""노트북과 Arduino 로봇팔 사이의 USB 시리얼 연결입니다.
 
-Sends target joint angles, reads ACK/DONE. No router, no UDP — just USB serial.
-Mock operation is explicit through config.ARM_MOCK. When a real arm is requested,
-missing dependencies, a missing port, bad acknowledgements, and motion timeouts
-raise instead of silently pretending that the command succeeded.
+목표 관절 각도를 보내고 ACK/DONE 응답을 읽습니다. 실물 모드에서 필요한
+패키지, 포트, 정상 응답이 없거나 움직임 시간이 초과되면 성공한 것처럼
+넘어가지 않고 오류를 냅니다.
 """
 import time
 import glob
@@ -29,15 +28,17 @@ def parse_status_line(line):
     """Parse firmware ``C a1..a6`` status without accepting partial data."""
     parts = str(line).strip().split()
     if len(parts) != config.N_JOINTS + 1 or parts[0] != "C":
-        raise ValueError(f"malformed arm status: {line!r}")
+        raise ValueError(f"로봇팔 상태 응답 형식이 잘못되었습니다: {line!r}")
     try:
         values = [int(value) for value in parts[1:]]
     except ValueError as exc:
-        raise ValueError(f"non-integer arm status: {line!r}") from exc
+        raise ValueError(
+            f"로봇팔 상태에 정수가 아닌 값이 있습니다: {line!r}") from exc
     for index, value in enumerate(values):
         if not config.SERVO_MIN[index] <= value <= config.SERVO_MAX[index]:
             raise ValueError(
-                f"arm status joint {index + 1}={value} outside configured range")
+                f"로봇팔 상태의 {index + 1}번 관절={value} 값이 설정된 "
+                "범위를 벗어났습니다.")
     return values
 
 
@@ -45,13 +46,14 @@ def parse_home_pose_line(line):
     """Parse the ``H a1..a6`` pose compiled into the connected Uno."""
     parts = str(line).strip().split()
     if len(parts) != config.N_JOINTS + 1 or parts[0] != "H":
-        raise ValueError(f"malformed firmware home pose: {line!r}")
+        raise ValueError(f"펌웨어 HOME 응답 형식이 잘못되었습니다: {line!r}")
     try:
         values = [int(value) for value in parts[1:]]
     except ValueError as exc:
-        raise ValueError(f"non-integer firmware home pose: {line!r}") from exc
+        raise ValueError(
+            f"펌웨어 HOME에 정수가 아닌 값이 있습니다: {line!r}") from exc
     if any(not 0 <= value <= 180 for value in values):
-        raise ValueError(f"firmware home pose outside 0..180: {line!r}")
+        raise ValueError(f"펌웨어 HOME 각도가 0~180°를 벗어났습니다: {line!r}")
     return values
 
 
@@ -59,15 +61,16 @@ def parse_distance_line(line):
     """Parse firmware ``D millimetres``; ``D -1`` represents no valid echo."""
     parts = str(line).strip().split()
     if len(parts) != 2 or parts[0] != "D":
-        raise ValueError(f"malformed ultrasonic distance: {line!r}")
+        raise ValueError(f"초음파 거리 응답 형식이 잘못되었습니다: {line!r}")
     try:
         value = int(parts[1])
     except ValueError as exc:
-        raise ValueError(f"non-integer ultrasonic distance: {line!r}") from exc
+        raise ValueError(
+            f"초음파 거리가 정수가 아닙니다: {line!r}") from exc
     if value == -1:
         return None
     if not config.ULTRASONIC_MIN_MM <= value <= config.ULTRASONIC_MAX_MM:
-        raise ValueError(f"ultrasonic distance outside valid range: {value} mm")
+        raise ValueError(f"초음파 거리 {value}mm가 유효 범위를 벗어났습니다.")
     return value
 
 
@@ -77,9 +80,10 @@ def assert_home_pose_match(compiled_pose, local_pose=None):
     compiled_pose = list(compiled_pose)
     if compiled_pose != local_pose:
         raise RuntimeError(
-            "Uno firmware HOME_POSE does not match local home_pose.h: "
-            f"firmware={compiled_pose}, local={local_pose}. "
-            "Run `python3 laptop/arm_jog.py --upload` before moving the arm.")
+            "Uno 펌웨어 HOME 자세가 현재 home_pose.h와 다릅니다: "
+            f"펌웨어={compiled_pose}, 현재 코드={local_pose}. "
+            "로봇팔을 움직이기 전에 Windows에서는 OPEN_FIRMWARE.bat으로 "
+            "현재 펌웨어를 업로드하세요.")
     return True
 
 
@@ -90,30 +94,37 @@ class ArmSerial:
         self.ser = None
         self.mock = config.ARM_MOCK if mock is None else bool(mock)
         if self.mock:
-            print("[arm] MOCK mode (ARM_MOCK=True). Commands will be printed only.")
+            print("[로봇팔] 모의 모드입니다. 실제로 움직이지 않고 명령만 표시합니다.")
         else:
             if not _HAVE_SERIAL:
-                raise RuntimeError("real arm requested but pyserial is missing")
+                raise RuntimeError(
+                    "실물 로봇팔을 사용하려면 PySerial이 필요합니다. "
+                    "SETUP_WINDOWS.bat을 다시 실행하세요.")
             if self.port == "auto":
                 candidates = _serial_candidates()
                 if len(candidates) > 1:
                     raise RuntimeError(
-                        "multiple non-excluded serial devices found; "
-                        "set ARM_PORT or ARM_PORT_EXCLUDE explicitly: "
+                        "사용 가능한 시리얼 장치가 여러 개입니다. ARM_PORT "
+                        "또는 ARM_PORT_EXCLUDE를 직접 지정하세요: "
                         + ", ".join(candidates))
                 self.port = candidates[0] if candidates else None
             if not self.port:
-                raise RuntimeError("real arm requested but no serial board was found")
+                raise RuntimeError(
+                    "실물 로봇팔을 요청했지만 시리얼 보드를 찾지 못했습니다. "
+                    "Uno USB와 데이터 케이블을 확인하세요.")
             try:
                 # TIOCEXCL prevents a second process from reopening this Uno and
                 # toggling DTR while a persistent arm session owns the board.
                 self.ser = serial.Serial(
                     self.port, self.baud, timeout=0.2, exclusive=True)
             except Exception as exc:
-                raise RuntimeError(f"cannot open arm serial port {self.port}: {exc}") from exc
+                raise RuntimeError(
+                    f"로봇팔 시리얼 포트 {self.port}을(를) 열 수 없습니다: "
+                    f"{exc}. Arduino Serial Monitor를 닫았는지 확인하세요."
+                ) from exc
             time.sleep(2.0)  # wait out the auto-reset on connect
             self._drain()
-            print(f"[arm] connected {self.port} @ {self.baud}")
+            print(f"[로봇팔] {self.port}에 {self.baud}bps로 연결했습니다.")
             try:
                 self.verify_firmware_home_pose()
             except Exception:
@@ -128,22 +139,26 @@ class ArmSerial:
     def send_angles(self, angles):
         """angles: list of 6 ints (0..180), or -1 to hold a joint."""
         if len(angles) != config.N_JOINTS:
-            raise ValueError(f"expected {config.N_JOINTS} joint values, got {len(angles)}")
+            raise ValueError(
+                f"관절값 {config.N_JOINTS}개가 필요하지만 "
+                f"{len(angles)}개를 받았습니다.")
         values = []
         for i, value in enumerate(angles):
             if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise TypeError(f"joint {i + 1} angle must be numeric")
+                raise TypeError(f"{i + 1}번 관절 각도는 숫자여야 합니다.")
             if not float(value).is_integer():
-                raise ValueError(f"joint {i + 1} angle must be an integer, got {value}")
+                raise ValueError(
+                    f"{i + 1}번 관절 각도는 정수여야 합니다. 받은 값: {value}")
             value = int(value)
             if value != -1 and not (config.SERVO_MIN[i] <= value <= config.SERVO_MAX[i]):
                 raise ValueError(
-                    f"joint {i + 1} angle {value} outside configured safe range "
-                    f"[{config.SERVO_MIN[i]}, {config.SERVO_MAX[i]}]")
+                    f"{i + 1}번 관절 각도 {value}°가 안전 범위 "
+                    f"[{config.SERVO_MIN[i]}, {config.SERVO_MAX[i]}]°를 "
+                    "벗어났습니다.")
             values.append(value)
         line = "A " + " ".join(str(a) for a in values) + "\n"
         if self.mock:
-            print(f"[arm] -> {line.strip()}")
+            print(f"[로봇팔 모의 명령] {line.strip()}")
             return "OK"
         self.ser.write(line.encode())
         reply = self._wait_for({"OK"}, timeout=2.0)
@@ -157,10 +172,12 @@ class ArmSerial:
                 continue
             line = raw.decode(errors="replace").strip()
             if line.startswith("ERR"):
-                raise RuntimeError(f"arm firmware rejected command: {line}")
+                raise RuntimeError(f"로봇팔 펌웨어가 명령을 거부했습니다: {line}")
             if line in expected:
                 return line
-        raise TimeoutError(f"arm serial timeout waiting for {sorted(expected)}")
+        raise TimeoutError(
+            f"로봇팔에서 {sorted(expected)} 응답을 기다리다 시간이 "
+            "초과되었습니다. 전원과 USB 연결을 확인하세요.")
 
     def wait_done(self, timeout=8.0):
         """Block until firmware reports DONE (all joints reached) or timeout."""
@@ -188,10 +205,11 @@ class ArmSerial:
                 continue
             line = raw.decode(errors="replace").strip()
             if line.startswith("ERR"):
-                raise RuntimeError(f"arm firmware rejected status request: {line}")
+                raise RuntimeError(
+                    f"로봇팔 펌웨어가 상태 요청을 거부했습니다: {line}")
             if line.startswith("C"):
                 return parse_status_line(line)
-        raise TimeoutError("arm serial timeout waiting for status")
+        raise TimeoutError("로봇팔 상태 응답을 기다리다 시간이 초과되었습니다.")
 
     def firmware_home_pose(self):
         """Return the HOME pose compiled into the connected firmware."""
@@ -206,20 +224,19 @@ class ArmSerial:
             line = raw.decode(errors="replace").strip()
             if line.startswith("ERR"):
                 raise RuntimeError(
-                    "connected Uno firmware cannot report its HOME_POSE; "
-                    "upload the current sketch with "
-                    "`python3 laptop/arm_jog.py --upload`")
+                    "연결된 Uno 펌웨어가 HOME 자세를 알려주지 못합니다. "
+                    "OPEN_FIRMWARE.bat으로 현재 스케치를 업로드하세요.")
             if line.startswith("H"):
                 try:
                     return parse_home_pose_line(line)
                 except ValueError as exc:
                     raise RuntimeError(
-                        "connected Uno uses a different arm layout/protocol; "
-                        "upload the current six-servo sketch with "
-                        "`python3 laptop/arm_jog.py --upload`") from exc
+                        "연결된 Uno가 다른 관절 배치 또는 통신 규칙을 "
+                        "사용합니다. OPEN_FIRMWARE.bat으로 현재 6서보 "
+                        "스케치를 업로드하세요.") from exc
         raise TimeoutError(
-            "arm firmware did not report HOME_POSE; upload the current sketch "
-            "with `python3 laptop/arm_jog.py --upload`")
+            "로봇팔 펌웨어가 HOME 자세를 보내지 않았습니다. "
+            "OPEN_FIRMWARE.bat으로 현재 스케치를 업로드하세요.")
 
     def verify_firmware_home_pose(self):
         """Require the connected firmware to match local ``home_pose.h``."""
@@ -237,18 +254,21 @@ class ArmSerial:
                 continue
             line = raw.decode(errors="replace").strip()
             if line.startswith("ERR"):
-                raise RuntimeError(f"arm firmware rejected feedback request: {line}")
+                raise RuntimeError(
+                    f"로봇팔 펌웨어가 집게 피드백 요청을 거부했습니다: {line}")
             if line.startswith("F "):
                 try:
                     value = int(line.split()[1])
                 except (ValueError, IndexError) as exc:
-                    raise ValueError(f"malformed grip feedback: {line!r}") from exc
+                    raise ValueError(
+                        f"집게 피드백 형식이 잘못되었습니다: {line!r}") from exc
                 if value == -1:
                     return None
                 if not 0 <= value <= 1023:
-                    raise ValueError(f"grip feedback outside ADC range: {value}")
+                    raise ValueError(
+                        f"집게 피드백 {value}가 ADC 범위를 벗어났습니다.")
                 return value
-        raise TimeoutError("arm serial timeout waiting for grip feedback")
+        raise TimeoutError("집게 피드백을 기다리다 시간이 초과되었습니다.")
 
     def ultrasonic_distance_mm(self, samples=None):
         """Return a median wrist-sonar distance, or ``None`` without enough echoes.
@@ -259,7 +279,7 @@ class ArmSerial:
         """
         samples = config.ULTRASONIC_SAMPLES if samples is None else int(samples)
         if not 1 <= samples <= 9:
-            raise ValueError("ultrasonic samples must be between 1 and 9")
+            raise ValueError("초음파 측정 횟수는 1~9 사이여야 합니다.")
         if self.mock:
             return None
         valid = []
@@ -274,7 +294,7 @@ class ArmSerial:
                 line = raw.decode(errors="replace").strip()
                 if line.startswith("ERR"):
                     raise RuntimeError(
-                        f"arm firmware rejected ultrasonic request: {line}")
+                        f"로봇팔 펌웨어가 초음파 요청을 거부했습니다: {line}")
                 # Streamed targets can finish while a distance request is in
                 # flight, leaving an asynchronous ``DONE`` in the same serial
                 # input. Only the exact distance record prefix is a reading.
@@ -286,7 +306,8 @@ class ArmSerial:
                     break
             if not reading_received:
                 raise TimeoutError(
-                    "arm serial timeout waiting for ultrasonic distance")
+                    "초음파 거리 응답을 기다리다 시간이 초과되었습니다. "
+                    "TRIG D7, ECHO D6 배선을 확인하세요.")
             if index + 1 < samples:
                 time.sleep(config.ULTRASONIC_SAMPLE_INTERVAL_S)
         required = min(samples, config.ULTRASONIC_MIN_VALID_SAMPLES)

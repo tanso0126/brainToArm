@@ -41,7 +41,7 @@ def _box_iou(a, b):
 def estimate_camera_transform(reference, frame):
     """Estimate camera auto-framing change from the arm's fixed base region."""
     if reference is None or frame is None or reference.shape != frame.shape:
-        raise ValueError("camera geometry frames must have matching shapes")
+        raise ValueError("카메라 기하 비교 영상의 크기가 서로 같아야 합니다.")
     height, width = frame.shape[:2]
     mask = np.zeros((height, width), dtype=np.uint8)
     mask[int(height * 0.52):height, :int(width * 0.58)] = 255
@@ -49,18 +49,20 @@ def estimate_camera_transform(reference, frame):
     key_a, desc_a = sift.detectAndCompute(reference, mask)
     key_b, desc_b = sift.detectAndCompute(frame, mask)
     if desc_a is None or desc_b is None:
-        raise RuntimeError("not enough fixed-base features for camera preflight")
+        raise RuntimeError(
+            "카메라 사전 검사에 필요한 고정 베이스 특징점이 부족합니다.")
     matches = cv2.BFMatcher().knnMatch(desc_a, desc_b, k=2)
     good = [first for first, second in matches
             if first.distance < 0.72 * second.distance]
     if len(good) < 12:
-        raise RuntimeError("not enough fixed-base matches for camera preflight")
+        raise RuntimeError(
+            "카메라 사전 검사에서 고정 베이스 일치점이 부족합니다.")
     source = np.float32([key_a[item.queryIdx].pt for item in good])
     target = np.float32([key_b[item.trainIdx].pt for item in good])
     matrix, inliers = cv2.estimateAffinePartial2D(
         source, target, method=cv2.RANSAC, ransacReprojThreshold=3.0)
     if matrix is None or inliers is None or int(inliers.sum()) < 10:
-        raise RuntimeError("fixed-base camera transform is unreliable")
+        raise RuntimeError("고정 베이스를 이용한 카메라 변환값을 신뢰할 수 없습니다.")
     a, b = float(matrix[0, 0]), float(matrix[0, 1])
     scale = math.hypot(a, b)
     rotation = math.degrees(math.atan2(-b, a))
@@ -98,7 +100,8 @@ def select_pick_target(candidates, frame_shape, previous=None):
                      + 0.50 * similarity + 0.25 * _box_iou(item, previous))
         valid.append((score, item))
     if not valid:
-        raise RuntimeError("no compact pick target found in the current frame")
+        raise RuntimeError(
+            "현재 화면에서 집을 수 있는 크기의 물체를 찾지 못했습니다.")
     return max(valid, key=lambda pair: pair[0])[1]
 
 
@@ -127,7 +130,6 @@ def select_gripper(candidates, target, frame_shape):
         horizontal_error = abs(item.center[0] - target.center[0])
         if horizontal_error > 100:
             continue
-        gap = max(0, ty - bottom)
         # The fingers are often split into a lower, lower-confidence mask than
         # the white wrist joint. Prefer the physically lowest valid segment;
         # confidence is only a weak tie-breaker.
@@ -135,7 +137,7 @@ def select_gripper(candidates, target, frame_shape):
                  + 0.05 * item.confidence)
         valid.append((score, item))
     if not valid:
-        raise RuntimeError("gripper could not be located above the target")
+        raise RuntimeError("물체 위에서 집게 위치를 찾지 못했습니다.")
     return max(valid, key=lambda pair: pair[0])[1]
 
 
@@ -147,7 +149,8 @@ class FastSAMDetector:
             from ultralytics import FastSAM
         except ImportError as exc:
             raise RuntimeError(
-                "FastSAM is required; run: pip install -r requirements.txt") from exc
+                "물체 인식에 FastSAM이 필요합니다. SETUP_WINDOWS.bat을 "
+                "다시 실행하세요.") from exc
         root = Path(__file__).resolve().parents[1]
         self.model_path = Path(model_path or config.PLANAR_VISION_MODEL)
         if not self.model_path.is_absolute():

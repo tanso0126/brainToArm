@@ -94,7 +94,7 @@ class WindowsReleaseTests(unittest.TestCase):
                 safety=mock.Mock(),
                 camera_path=frame,
             )
-            with self.assertRaisesRegex(RuntimeError, "stale"):
+            with self.assertRaisesRegex(RuntimeError, "갱신되지 않았습니다"):
                 client.request({
                     "command": "move",
                     "pose": list(config.HOME_POSE),

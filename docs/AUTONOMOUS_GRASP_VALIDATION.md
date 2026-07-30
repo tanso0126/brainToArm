@@ -1,62 +1,85 @@
-# Autonomous-from-HOME grasp validation — 2026-07-27
+# HOME부터 시작한 자동 파지 검증 기록 — 2026-07-27
 
-This report records failures as failures. The requirement is one command from
-the literal firmware HOME pose, with no remembered reach, target coordinate, or
-human correction after start.
+> 이 문서는 2026년 7월 27일 당시의 역사적 실험 기록입니다. 이후 코드가
+> 변경되었더라도 당시 실패를 성공으로 고쳐 쓰지 않았습니다.
 
-## Command
+이 기록은 실패한 실험을 그대로 실패로 남깁니다. 이때 검증하려던 조건은
+펌웨어의 실제 HOME 자세에서 명령 한 번만 실행하고, 실행 후에는 미리
+기억한 도달 거리, 목표 좌표, 사람의 수동 보정을 전혀 사용하지 않는
+것이었습니다.
+
+## 실행 명령
 
 ```bash
 PYTHONPATH=laptop:. python3 laptop/floor_servo.py --autonomous-from-home
 ```
 
-The command performs HOME → open ready → verified floor-hover search → two-frame
-candidate confirmation → strict alignment → fixed-reach descent → guarded close
-→ contact check → 80 mm lift → retention check.
+이 명령이 수행하도록 설계된 전체 순서는 다음과 같습니다.
 
-## Observed trials
+```text
+HOME
+→ 집게를 연 준비 자세
+→ 검증된 바닥 위 탐색 자세
+→ 두 프레임에서 물체 후보 재확인
+→ 엄격한 위치 정렬
+→ 고정 도달 거리로 하강
+→ 조건을 확인한 뒤 집게 닫기
+→ 접촉 여부 확인
+→ 80mm 들어 올리기
+→ 물체 유지 여부 확인
+```
 
-1. The first autonomous trial found the object at reach 0, aligned itself to
-   reach 9, closed, and reported contact. At 35 mm it still reported a 15.9 px
-   residual. A diagnostic 70 mm lift showed the car on the table and the empty
-   gripper at a 16.8 px residual: the object had slipped and the old 7 px
-   absolute threshold produced a false success. **Failure.**
-2. The controller was changed to align a 35%-inset interior pinch line at a
-   55 mm hover, lift to 80 mm, and require at least 50% of the initial close
-   obstruction after lift. Strict alignment also replaced the old 160 px
-   best-seen fallback. One run reached `dv=-27` but was interrupted before any
-   descent; no success is claimed.
-3. A run converged on repeated bottom-clipped geometry but the policy correctly
-   blocked descent because its raw depth meaning had not yet been normalized.
-   **Safe stop.**
-4. After the geometry/policy meanings were unified, a run reached the floor but
-   lost tape markers. Close did not regain the markers, contact became UNKNOWN,
-   and recovery opened the arm. **Safe failure.**
-5. A later run exposed lateral drift (`du=-42→-129`) during descent. Contact was
-   UNKNOWN and no lift was permitted. The object was displaced outside the
-   current wrist view during these failed trials. **Failure.**
+## 관찰한 실험
 
-## Improvements retained
+1. 첫 자동 실험은 도달 거리 0에서 물체를 찾고 도달 거리 9까지 스스로
+   정렬한 뒤 집게를 닫아 접촉으로 판정했습니다. 35mm 높이에서도
+   15.9픽셀의 잔차가 남아 있었습니다. 그러나 확인을 위해 70mm까지
+   들어 올리자 자동차는 탁자에 남아 있었고 빈 집게의 잔차는
+   16.8픽셀이었습니다. 물체가 빠졌는데도 예전의 절대 7픽셀 기준이
+   잘못된 성공을 만든 것입니다. **실패.**
+2. 이후 제어기를 수정했습니다. 55mm 대기 높이에서 물체 내부 35% 지점의
+   집기 선을 정렬하고, 80mm까지 들어 올리며, 들어 올린 뒤에도 처음
+   닫을 때 생긴 방해량의 최소 50%가 유지되어야 성공하도록 했습니다.
+   예전에 사용하던 160픽셀 범위의 “지금까지 본 것 중 가장 나은 위치”
+   대체 조건도 없애고 엄격한 정렬로 교체했습니다. 한 번의 실행은
+   `dv=-27`까지 도달했지만 하강 전에 중단됐으므로 성공으로 기록하지
+   않습니다.
+3. 한 실험은 화면 아래에 일부가 잘린 형상으로 반복 수렴했습니다.
+   하지만 원본 깊이값의 뜻이 아직 통일되지 않았기 때문에 제어 정책이
+   하강을 올바르게 차단했습니다. **안전 중단.**
+4. 형상값과 제어 정책의 의미를 통일한 뒤 진행한 실험에서는 바닥까지
+   도달했지만 집게의 색 테이프를 잃었습니다. 집게를 닫은 뒤에도
+   테이프를 다시 찾지 못해 접촉 상태가 `알 수 없음(UNKNOWN)`이 되었고,
+   복구 과정에서 집게를 다시 열었습니다. **안전하게 실패 처리.**
+5. 이후 실험에서는 하강 중 가로 방향 오차가
+   `du=-42→-129`로 커지는 현상이 나타났습니다. 접촉 상태가
+   `알 수 없음(UNKNOWN)`이어서 들어 올리기를 허용하지 않았습니다.
+   이 실패 과정에서 물체가 현재 손목 카메라 화면 밖으로 밀렸습니다.
+   **실패.**
 
-- Literal HOME is part of the autonomous command.
-- Search uses only the physically exercised 55 mm floor-hover manifold and
-  selects candidates entering the fixed-base jaw corridor in two fresh frames.
-- FastSAM background fragments cannot trigger descent merely by being ranked.
-- No best-seen alignment fallback remains; exact or stable clipped geometry is
-  required.
-- A target and tape may be occluded at the final open grasp pose only after a
-  verified pre-descent lock. Post-close marker loss remains UNKNOWN and blocks
-  lift.
-- Contact uses a same-run empty endpoint at the selected wrist pitch. The empty
-  calibration pose is 100 mm high so the calibration close cannot touch the
-  target.
-- An 80 mm lift must retain at least half of the initial obstruction. The weak
-  slipped-object residual that fooled the old threshold now fails.
+## 이 실험에서 유지한 개선 사항
 
-## Current conclusion
+- 실제 HOME 복귀가 자동 명령 자체에 포함됩니다.
+- 탐색은 실물로 확인한 바닥 위 55mm 자세 범위만 사용하며, 고정 베이스의
+  집게 통로 안으로 들어오는 후보를 연속된 새 프레임 두 장에서 확인합니다.
+- FastSAM이 만든 배경 조각은 단순히 후보 순위가 높다는 이유만으로 하강을
+  시작시킬 수 없습니다.
+- “지금까지 본 위치 중 가장 나은 곳”으로 대신하는 조건을 없앴습니다.
+  정확한 정렬 또는 안정적으로 화면이 잘린 형상만 허용합니다.
+- 하강 전에 정확히 잠근 대상이라면 최종적으로 집게가 열린 자세에서 물체나
+  테이프가 가려지는 것을 허용합니다. 하지만 집게를 닫은 뒤 테이프를
+  잃으면 상태를 `알 수 없음(UNKNOWN)`으로 두고 들어 올리지 않습니다.
+- 같은 실행에서 선택한 손목 각도의 빈 집게 끝점을 접촉 기준으로
+  사용합니다. 빈 집게 보정 자세는 물체와 닿지 않도록 100mm 높이입니다.
+- 80mm 들어 올린 뒤에도 처음 방해량의 절반 이상이 남아야 합니다. 예전
+  기준을 속였던 약한 잔차는 이제 실패로 처리됩니다.
 
-The autonomous search and fail-closed behavior are working, but a general
-unassisted physical grasp is **not yet validated**. The next physical trial needs
-the object placed at an arbitrary reachable starting location because the
-previous object was displaced out of view. No target coordinate or reach should
-be provided after placement.
+## 당시 결론
+
+당시에는 자동 탐색과 실패 시 닫힌 상태로 진행하지 않는 동작은
+작동했지만, 일반적인 위치의 물체를 사람 도움 없이 잡는 기능은
+**아직 검증되지 않았습니다**.
+
+다음 실물 실험에서는 이전 실험 때문에 화면 밖으로 밀린 물체를 로봇팔이
+도달 가능한 임의의 위치에 다시 놓아야 했습니다. 물체를 놓은 뒤에는 목표
+좌표나 도달 거리를 프로그램에 따로 알려주지 않는 조건이었습니다.
