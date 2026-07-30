@@ -34,7 +34,6 @@ from arm_session import ArmSessionClient
 from arm_safety import PhysicalArmSafety
 from floor_grasp import WristSceneDetector
 from look_reach import (
-    LookReachTargetSelector,
     optical_axis_xz,
     task_state,
 )
@@ -72,6 +71,9 @@ TASK_ADVANCE_MAX_MM = 8.0
 TASK_DAMPING = 0.18
 TRACK_LOST_TIMEOUT_S = 0.75
 SEARCH_WRISTS = (170, 180)
+SEED_MIN_AREA_RATIO = 0.0004
+SEED_MAX_AREA_RATIO = 0.08
+SEED_MAX_AXIS_ERROR_RATIO = 0.16
 
 
 @dataclass(frozen=True)
@@ -266,6 +268,36 @@ def grasp_readiness(
                           center_error)
 
 
+def select_realtime_seed(scene):
+    """Select a compact object without a pose-dependent fixed horizon row."""
+    height, width = scene.frame_shape[:2]
+    gripper = getattr(scene, "gripper", None)
+    aim_x = (
+        float(gripper.center[0])
+        if gripper is not None
+        else float(config.WRIST_GRIPPER_OPEN_PROFILE["center"][0]) * width
+    )
+    valid = []
+    for candidate in scene.ranked:
+        ratio = float(candidate.area) / float(width * height)
+        axis_error = abs(float(candidate.center[0]) - aim_x)
+        if not SEED_MIN_AREA_RATIO <= ratio <= SEED_MAX_AREA_RATIO:
+            continue
+        if axis_error > SEED_MAX_AXIS_ERROR_RATIO * width:
+            continue
+        if float(getattr(candidate, "confidence", 1.0)) < 0.20:
+            continue
+        score = (
+            1.6 * float(candidate.center[1]) / height
+            - 1.2 * axis_error / width
+            + 0.25 * float(
+                getattr(candidate, "median_saturation", 0.0)) / 255.0
+            + 0.20 * float(getattr(candidate, "confidence", 1.0))
+        )
+        valid.append((score, candidate))
+    return max(valid, key=lambda pair: pair[0])[1] if valid else None
+
+
 def resolved_velocity_target(
         pose, vertical_error_px, distance_mm, floor_clearance_mm):
     """One damped-Jacobian target for the streaming 2/3/4 controller."""
@@ -383,12 +415,12 @@ def _draw_preview(frame, target, gripper_center, aim_y, distance_mm,
 
 
 def _search_and_seed(
-        client, frame_stream, detector, selector, safety, execute):
+        client, frame_stream, detector, safety, execute):
     pose = list(client.request({"command": "status"})["pose"])
     if not execute:
         frame, _stamp = frame_stream.read(timeout_s=1.0)
         scene, _observation = detector.scene(frame)
-        return pose, frame, selector.choose(scene, pose=pose)
+        return pose, frame, select_realtime_seed(scene)
     opened = list(pose)
     opened[config.J_GRIP] = config.GRIP_OPEN
     if opened != pose:
@@ -412,7 +444,7 @@ def _search_and_seed(
         pose = target_pose
         frame, _stamp = frame_stream.read(timeout_s=1.0)
         scene, _observation = detector.scene(frame)
-        candidate = selector.choose(scene, pose=pose)
+        candidate = select_realtime_seed(scene)
         if candidate is not None:
             return pose, frame, candidate
     return pose, frame, None
@@ -423,10 +455,9 @@ def run(execute=False, allow_grasp=False, max_seconds=45.0):
     safety = PhysicalArmSafety()
     frames = LatestFrameStream()
     detector = VividFallbackDetector(WristSceneDetector())
-    selector = LookReachTargetSelector()
     wrist_detector = WristDetector()
     pose, frame, candidate = _search_and_seed(
-        client, frames, detector, selector, safety, execute)
+        client, frames, detector, safety, execute)
     if candidate is None:
         return {"state": "no-target", "pose": pose}
     tracker = HistogramTargetTracker()

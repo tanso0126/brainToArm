@@ -3942,3 +3942,24 @@ and the trained model backend.
   ignore interleaved `DONE` completion notifications.
 - Added a serial regression that feeds `DONE` followed by `D 123` and verifies
   that the live sonar call returns `123 mm`.
+
+## Patch 113 — remove the fixed horizon from eye-in-hand seeding
+
+### Physical finding
+
+- At the closer object placement, FastSAM detected the real object around
+  `(599, 284)` but the legacy selector rejected it only because its bbox ended
+  at row `363`, 26 px above a fixed row-389 table horizon.
+- The wrist camera changes pose with motors 2/3/4, so a single image-row horizon
+  cannot remain a valid world/table boundary.
+
+### Changes
+
+- Real-time seeding no longer calls the legacy pose-specific fixed-horizon
+  selector.
+- Select a compact FastSAM/vivid candidate using live gripper-axis proximity,
+  portable area, confidence, saturation as a weak cue, and relative depth
+  ranking.
+- Finger-marker masks remain excluded by the wrist scene detector.
+- Added a regression proving that the measured row-284 real object wins over a
+  higher background candidate without any hard-coded horizon.

@@ -10,6 +10,7 @@ from realtime_visual_servo import (
     grasp_readiness,
     numeric_task_jacobian,
     resolved_velocity_target,
+    select_realtime_seed,
 )
 
 
@@ -55,6 +56,21 @@ class RealtimeVisualServoTests(unittest.TestCase):
         self.assertFalse(far.ready)
         self.assertIn("sonar", far.reason)
         self.assertTrue(ready.ready)
+
+    def test_realtime_seed_does_not_use_a_fixed_image_horizon(self):
+        near_real_object = SimpleNamespace(
+            center=(600.0, 284.0), area=4200.0,
+            confidence=0.85, median_saturation=70.0)
+        higher_background = SimpleNamespace(
+            center=(592.0, 169.0), area=4200.0,
+            confidence=0.85, median_saturation=70.0)
+        scene = SimpleNamespace(
+            ranked=[higher_background, near_real_object],
+            frame_shape=(720, 1280, 3),
+            gripper=None,
+        )
+
+        self.assertIs(select_realtime_seed(scene), near_real_object)
 
     def test_numeric_jacobian_and_resolved_target_are_bounded(self):
         pose = [90, 107, 84, 178, 90, 170]
