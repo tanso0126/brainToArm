@@ -9,6 +9,7 @@ import numpy as np
 import config
 from ultrasonic_target_reach import (
     _best_final_grasp_candidate,
+    _complete_tracking_candidate,
     _final_grasp_gate,
     _preclose_needs_fine_lift,
     _retained_image_gate,
@@ -203,6 +204,22 @@ class ApproachStopTests(unittest.TestCase):
 
         self.assertIs(selected, complete)
         self.assertTrue(_final_grasp_gate(scene, selected)[0])
+
+    def test_approach_tracking_keeps_complete_object_not_barcode_part(self):
+        fragment = SimpleNamespace(
+            center=(516.0, 362.0), bbox=(509, 265, 35, 194),
+            area=6790.0, confidence=0.27)
+        complete = SimpleNamespace(
+            center=(576.0, 323.0), bbox=(541, 190, 68, 266),
+            area=18088.0, confidence=0.83)
+        unrelated = SimpleNamespace(
+            center=(756.0, 629.0), bbox=(721, 593, 69, 73),
+            area=5037.0, confidence=0.33)
+        scene = SimpleNamespace(ranked=[fragment, complete, unrelated])
+
+        selected = _complete_tracking_candidate(scene, fragment)
+
+        self.assertIs(selected, complete)
 
     def test_motor_four_uses_measured_pixel_error_with_large_headroom(self):
         self.assertEqual(tracking_wrist_target(178, -60), 168)

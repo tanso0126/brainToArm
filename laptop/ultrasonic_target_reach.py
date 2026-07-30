@@ -189,6 +189,10 @@ def _reacquire(detector, selector, attempts=3):
         scene, _observation = detector.scene(frame)
         candidate = selector.match(scene)
         if candidate is not None:
+            candidate = _complete_tracking_candidate(scene, candidate)
+            if getattr(selector, "lock", None) is not None:
+                selector.lock.update(candidate)
+                selector.current = candidate
             return frame, scene, candidate
     return frame, scene, None
 
@@ -340,6 +344,47 @@ def _best_final_grasp_candidate(scene, locked):
         float(item.bbox[1] + item.bbox[3]),
         float(item.area),
     ))
+
+
+def _complete_tracking_candidate(scene, locked):
+    """Prefer the complete body over nested part masks during approach."""
+    if locked is None:
+        return None
+    lx, ly, lwidth, lheight = locked.bbox
+    locked_area = float(max(1, lwidth * lheight))
+    compatible = [locked]
+    for item in getattr(scene, "ranked", ()):
+        ix, iy, iwidth, iheight = item.bbox
+        left = max(lx, ix)
+        top = max(ly, iy)
+        right = min(lx + lwidth, ix + iwidth)
+        bottom = min(ly + lheight, iy + iheight)
+        intersection = max(0, right - left) * max(0, bottom - top)
+        item_area = float(max(1, iwidth * iheight))
+        nested_overlap = intersection / min(locked_area, item_area)
+        horizontal_gap = max(
+            0, max(lx, ix) - min(lx + lwidth, ix + iwidth))
+        vertical_overlap = (
+            max(0, bottom - top) / float(max(1, min(lheight, iheight))))
+        centre_distance = float(np.linalg.norm(
+            np.asarray(item.center, dtype=float)
+            - np.asarray(locked.center, dtype=float)))
+        same_body = (
+            nested_overlap >= 0.55
+            or (horizontal_gap <= 12 and vertical_overlap >= 0.65)
+        )
+        if not same_body or centre_distance > 110.0:
+            continue
+        if not 0.20 <= float(getattr(item, "confidence", 1.0)):
+            continue
+        compatible.append(item)
+    return max(
+        compatible,
+        key=lambda item: (
+            float(item.bbox[2] * item.bbox[3]),
+            float(item.area),
+        ),
+    )
 
 
 def _vertical_lift_pose(pose, lift_mm):

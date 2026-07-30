@@ -3734,3 +3734,23 @@ and the trained model backend.
 - The fallback never promotes the cable or guesses a new off-axis target. If
   the object is not independently detected again at the preserved pose, motion
   remains stopped.
+
+## Patch 104 — keep the complete object mask during live approach
+
+### Physical finding
+
+- Three stopped frames contained the real purple object and no cable candidate.
+- FastSAM alternated between the complete object around x=576 px and nested
+  barcode/side fragments, including a fragment around x=516 px. The latter
+  created a false 124 px lateral error and stopped before approach.
+
+### Changes
+
+- After every locked-target reacquisition, compare strongly nested masks of the
+  same local object and retain the largest complete bounding body.
+- Update the persistent lock to that complete body so the next frame cannot
+  repeatedly fall back to a barcode fragment.
+- Keep unrelated nearby detections excluded by overlap and centre-distance
+  gates.
+- Added regression coverage using the measured complete, fragment, and
+  unrelated venue detections.
