@@ -24,6 +24,7 @@ same object but never ends an otherwise valid approach.
 from dataclasses import dataclass
 from pathlib import Path
 import argparse
+import copy
 
 import cv2
 import numpy as np
@@ -32,6 +33,7 @@ import arm_fk
 import config
 from arm_safety import PhysicalArmSafety
 from arm_session import ArmSessionClient
+from decision_signal import DecisionMailbox
 from floor_grasp import WristSceneDetector
 from floor_servo import FloorServo, _fresh_frame
 from look_reach import (
@@ -104,6 +106,7 @@ APPROACH_MAX_JOINT_STEP_DEG = 12
 # bound prevents an unrelated tool-centre clamp from ending the approach early.
 MIN_TOOL_CENTER_Z_M = 0.010
 MAX_STEPS = 24
+DEFAULT_DECISION_WAIT_S = 8.0
 
 
 @dataclass(frozen=True)
@@ -469,6 +472,83 @@ def _candidate_on_sonar_axis(candidate, frame_width):
     return abs(float(candidate.center[0]) - aim_x) <= MAX_AIM_X_ERROR_PX
 
 
+def _axis_scene(scene, frame_width):
+    """Shallow scene view containing only fixed-base reachable bearings."""
+    filtered = copy.copy(scene)
+    filtered.ranked = [
+        candidate for candidate in scene.ranked
+        if _candidate_on_sonar_axis(candidate, frame_width)
+    ]
+    return filtered
+
+
+def _choose_on_axis(scene, selector, pose, frame_width):
+    """Choose from every segmented on-axis object, independent of its colour."""
+    _clear_target_lock(selector)
+    return selector.choose(
+        _axis_scene(scene, frame_width), pose=pose)
+
+
+def select_after_external_decisions(
+        scene, selector, pose, frame_width, decisions):
+    """Apply external decisions and return the active fixed-base candidate.
+
+    Rejections are stored by the existing persistent selector. When every
+    visible candidate has been rejected, the veto stack is reset and selection
+    restarts from the first candidate, matching the simulation semantics.
+    """
+    selectable = _axis_scene(scene, frame_width)
+    candidate = selector.current
+    if (candidate is None
+            or not _candidate_on_sonar_axis(candidate, frame_width)):
+        candidate = selector.choose(selectable, pose=pose)
+    reset = False
+    applied = 0
+    for decision in decisions:
+        decision = str(decision).lower()
+        if decision == "accept":
+            break
+        if decision != "reject":
+            raise ValueError(f"unsupported target decision: {decision}")
+        applied += 1
+        candidate = selector.reject_current(selectable, pose=pose)
+        if candidate is None:
+            selector.selector.reset()
+            candidate = selector.choose(selectable, pose=pose)
+            reset = True
+    return {
+        "candidate": candidate,
+        "rejectionsApplied": applied,
+        "cycleReset": reset,
+        "candidateCount": len(selectable.ranked),
+    }
+
+
+def _await_target_decision(
+        mailbox, cursor, wait_s, scene, selector, pose, frame_width):
+    """Wait for one fresh manual/dashboard/ErrP decision for this proposal."""
+    if mailbox is None or float(wait_s) <= 0:
+        return selector.current, cursor, False
+    decision = mailbox.wait_after(cursor, wait_s)
+    if decision is None:
+        print(
+            f"[sonar-reach] decision timeout after {float(wait_s):.1f}s; "
+            "continuing with proposed target",
+            flush=True,
+        )
+        return selector.current, cursor, False
+    result = select_after_external_decisions(
+        scene, selector, pose, frame_width, [decision.decision])
+    print(
+        f"[sonar-reach] external {decision.decision.upper()} "
+        f"seq={decision.sequence} source={decision.source}; "
+        f"candidates={result['candidateCount']} "
+        f"cycle-reset={result['cycleReset']}",
+        flush=True,
+    )
+    return result["candidate"], decision.sequence, decision.decision == "reject"
+
+
 def _clear_target_lock(selector):
     """Discard a background lock while retaining explicit ErrP vetoes."""
     selector.current = None
@@ -644,6 +724,10 @@ def _open_and_find_target(
                 flush=True,
             )
             _clear_target_lock(selector)
+        candidate = _choose_on_axis(
+            scene, selector, pose, frame.shape[1])
+        if _candidate_on_sonar_axis(candidate, frame.shape[1]):
+            return pose, frame, scene, candidate
         candidate = _choose_vivid_on_axis(
             frame, scene, selector, pose)
         if _candidate_on_sonar_axis(candidate, frame.shape[1]):
@@ -678,8 +762,9 @@ def _enter_forward_observation(
     frame, scene, candidate = acquire_initial_target(
         detector, target_selector=selector, pose=pose)
     if not _candidate_on_sonar_axis(candidate, frame.shape[1]):
-        if candidate is not None:
-            _clear_target_lock(selector)
+        candidate = _choose_on_axis(
+            scene, selector, pose, frame.shape[1])
+    if not _candidate_on_sonar_axis(candidate, frame.shape[1]):
         candidate = _choose_vivid_on_axis(
             frame, scene, selector, pose)
     if not _candidate_on_sonar_axis(candidate, frame.shape[1]):
@@ -834,12 +919,17 @@ def _clearance_grasp_and_verify(
 
 
 def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
-        detector=None, selector=None):
+        detector=None, selector=None, decision_mailbox=None,
+        decision_wait_s=DEFAULT_DECISION_WAIT_S):
     client = client or ArmSessionClient()
     detector = detector or WristSceneDetector()
     if not isinstance(detector, VividFallbackDetector):
         detector = VividFallbackDetector(detector)
     selector = selector or LookReachTargetSelector()
+    decision_mailbox = (
+        DecisionMailbox() if decision_mailbox is True else decision_mailbox)
+    decision_cursor = (
+        decision_mailbox.cursor() if decision_mailbox is not None else 0)
     safety = PhysicalArmSafety()
     mover = FloorServo(client, calib=None)
     pose = list(client.request({"command": "status"})["pose"])
@@ -855,6 +945,26 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
             "state": "target-not-visible-from-forward-observation",
             "pose": pose,
         }
+    candidate, decision_cursor, rejected = _await_target_decision(
+        decision_mailbox, decision_cursor, decision_wait_s,
+        scene, selector, pose, frame.shape[1])
+    while rejected:
+        if candidate is None:
+            return {
+                "state": "no-fixed-base-candidate-after-reject",
+                "pose": pose,
+            }
+        print(
+            f"[sonar-reach] NEXT target proposed at "
+            f"({candidate.center[0]:.0f},{candidate.center[1]:.0f}); "
+            "waiting for external decision",
+            flush=True,
+        )
+        candidate, decision_cursor, rejected = _await_target_decision(
+            decision_mailbox, decision_cursor, decision_wait_s,
+            scene, selector, pose, frame.shape[1])
+    if candidate is None:
+        return {"state": "no-fixed-base-candidate", "pose": pose}
     jaw_ready, jaw_reason, row_gap = _jaw_metrics(scene, candidate)
     if row_gap is None:
         raise RuntimeError(jaw_reason)
@@ -1002,11 +1112,19 @@ def main():
     parser.add_argument("--run", action="store_true")
     parser.add_argument("--grasp", action="store_true")
     parser.add_argument("--max-steps", type=int, default=MAX_STEPS)
+    parser.add_argument(
+        "--decision-mailbox", action="store_true",
+        help="listen for accept/reject decisions from decision_signal.py")
+    parser.add_argument(
+        "--decision-wait", type=float, default=DEFAULT_DECISION_WAIT_S,
+        help="seconds to wait for a fresh decision at each target proposal")
     args = parser.parse_args()
     if args.grasp and not args.run:
         parser.error("--grasp requires --run")
     result = run(
-        execute=args.run, allow_grasp=args.grasp, max_steps=args.max_steps)
+        execute=args.run, allow_grasp=args.grasp, max_steps=args.max_steps,
+        decision_mailbox=args.decision_mailbox,
+        decision_wait_s=args.decision_wait)
     print(f"[sonar-reach] RESULT {result}")
 
 

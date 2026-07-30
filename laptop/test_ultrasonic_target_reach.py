@@ -1,5 +1,7 @@
 import unittest
 from types import SimpleNamespace
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import cv2
 import numpy as np
@@ -21,13 +23,86 @@ from ultrasonic_target_reach import (
     home_pose_holding,
     loaded_home_reassert_pose,
     open_ready_pose,
+    select_after_external_decisions,
     tracking_wrist_target,
     transition_fingertip_floor_clearance_mm,
     vivid_table_candidates,
 )
+from look_reach import LookReachTargetSelector
+from decision_signal import DecisionMailbox
 
 
 class ApproachStopTests(unittest.TestCase):
+    def test_decision_mailbox_ignores_stale_signal(self):
+        with TemporaryDirectory() as directory:
+            mailbox = DecisionMailbox(Path(directory) / "decision.json")
+            old = mailbox.emit("reject", source="test")
+            cursor = mailbox.cursor()
+
+            self.assertEqual(cursor, old.sequence)
+            self.assertIsNone(mailbox.wait_after(cursor, timeout_s=0))
+
+            fresh = mailbox.emit("accept", source="test")
+            self.assertEqual(
+                mailbox.wait_after(cursor, timeout_s=0), fresh)
+
+    def test_external_reject_cycles_multiple_objects_and_resets(self):
+        candidates = [
+            SimpleNamespace(
+                center=(640.0, 350.0), bbox=(610, 310, 60, 80),
+                area=4800.0, confidence=0.95),
+            SimpleNamespace(
+                center=(650.0, 570.0), bbox=(620, 530, 60, 80),
+                area=4800.0, confidence=0.95),
+        ]
+        scene = SimpleNamespace(
+            ranked=candidates,
+            frame_shape=(720, 1280, 3),
+            gripper=SimpleNamespace(center=(640.0, 680.0), opening_px=320.0),
+        )
+        selector = LookReachTargetSelector(
+            reachability=lambda *_args, **_kwargs: (True, "ok"),
+            logger=None,
+        )
+        first = selector.choose(scene, pose=[90, 70, 90, 140, 90, 170])
+
+        switched = select_after_external_decisions(
+            scene, selector, [90, 70, 90, 140, 90, 170],
+            1280, ["reject"])
+        reset = select_after_external_decisions(
+            scene, selector, [90, 70, 90, 140, 90, 170],
+            1280, ["reject"])
+
+        self.assertIs(first, candidates[0])
+        self.assertIs(switched["candidate"], candidates[1])
+        self.assertFalse(switched["cycleReset"])
+        self.assertIs(reset["candidate"], candidates[0])
+        self.assertTrue(reset["cycleReset"])
+
+    def test_fixed_base_selection_ignores_lateral_candidate(self):
+        lateral = SimpleNamespace(
+            center=(400.0, 500.0), bbox=(370, 460, 60, 80),
+            area=4800.0, confidence=0.95)
+        axial = SimpleNamespace(
+            center=(640.0, 570.0), bbox=(610, 530, 60, 80),
+            area=4800.0, confidence=0.95)
+        scene = SimpleNamespace(
+            ranked=[lateral, axial],
+            frame_shape=(720, 1280, 3),
+            gripper=SimpleNamespace(center=(640.0, 680.0), opening_px=320.0),
+        )
+        selector = LookReachTargetSelector(
+            reachability=lambda *_args, **_kwargs: (True, "ok"),
+            logger=None,
+        )
+
+        result = select_after_external_decisions(
+            scene, selector, [90, 70, 90, 140, 90, 170],
+            1280, [])
+
+        self.assertEqual(result["candidateCount"], 1)
+        self.assertIs(result["candidate"], axial)
+
     def test_only_two_normal_stop_conditions(self):
         self.assertEqual(
             approach_stop_decision(46.1, 10.1).action, "continue")

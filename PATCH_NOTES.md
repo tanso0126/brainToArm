@@ -3628,3 +3628,35 @@ and the trained model backend.
   voltage, regulator/BEC output, current capacity, polarity, and common-ground
   wiring are verified. The partial motion above must not be reported as HOME
   completion.
+
+## Patch 99 — connect real multi-object selection to an external veto
+
+### Goal
+
+- Preserve the physically successful single-object camera/sonar approach while
+  adding the simulation's target-selection semantics in front of it.
+- Keep the signal producer replaceable: manual testing, a dashboard button, and
+  the future ErrP detector must all drive the same robot-side transition.
+
+### Changes
+
+- Added an atomic sequence-numbered JSON decision mailbox. A separate process
+  can emit `ACCEPT` or `REJECT`; stale decisions are ignored for later targets.
+- Connected the mailbox to the real ultrasonic target proposal. A fresh reject
+  vetoes the current visual instance and proposes the next detected object.
+- When every currently selectable object has been rejected, the veto stack is
+  cleared and selection restarts from the first object, matching the MuJoCo
+  simulation behavior.
+- With motor 1 still locked, only candidates near the fixed camera/sonar bearing
+  participate. Objects requiring base yaw are excluded rather than causing an
+  unsafe lateral guess.
+- Added regression tests for two-object switching, all-rejected reset, and
+  exclusion of lateral candidates.
+
+### Safety boundary
+
+- No real-arm motion is enabled by default. `--run` and `--grasp` remain
+  explicit gates.
+- This patch changes the target before approach. Returning a physically held
+  rejected object to its exact origin remains disabled until loaded transport
+  has reliable external servo power and passes a separate physical test.
