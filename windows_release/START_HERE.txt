@@ -1,0 +1,28 @@
+brainToArm WINDOWS QUICK START
+================================
+
+1) Arduino firmware
+   - Double-click OPEN_FIRMWARE.bat.
+   - Arduino IDE: Board = Arduino Uno, select its COM port, then Upload.
+
+2) First PC setup (once)
+   - Double-click SETUP_WINDOWS.bat.
+   - Internet is needed only for this package-install step.
+
+3) Camera check (recommended after mounting/repair)
+   - Connect the wrist webcam.
+   - Double-click CHECK_CAMERA.bat.
+   - Confirm BOTH blue and red finger tapes are visible at the bottom.
+   - Press Q to exit.
+
+4) Autonomous run
+   - Connect the Uno USB and CHARGED external servo battery.
+   - Remove hands, cables, and people from the arm workspace.
+   - Place one object on the flat table in front of the arm.
+   - Double-click RUN_AUTONOMOUS.bat.
+
+If automatic camera or COM selection is wrong:
+  RUN_AUTONOMOUS.bat --camera 1 --port COM5
+
+Full Korean instructions:
+  README_WINDOWS.md

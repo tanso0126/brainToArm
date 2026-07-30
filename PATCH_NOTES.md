@@ -4096,3 +4096,27 @@ and the trained model backend.
   later target reacquisition.
 - This commit is the immutable macOS/physical-arm handoff baseline. The Windows
   distribution is developed separately without rewriting these files.
+
+## Patch 124 — self-contained Windows handoff distribution
+
+- Added `windows_release/` without modifying the tagged macOS physical runtime.
+- Added double-click first-run setup, camera check, diagnostics, firmware-open,
+  and autonomous-run launchers for a clean Windows PC.
+- Replaced the macOS-only AVFoundation publisher with a Windows DirectShow
+  publisher that selects the wrist webcam by detecting the rigid blue-left /
+  red-right finger pair and keeps a live preview visible.
+- Replaced the Unix-domain arm session with an in-process Windows COM adapter.
+  It auto-selects Uno/CH340 ports while excluding the ESP32 CP210x, validates
+  the firmware HOME pose, and preserves live-camera, swept-collision, stream
+  step, and floor safeguards.
+- Reused the proven autonomous controller unchanged through dependency
+  injection. One Windows run performs search, continuous 2/3/4 approach,
+  immediate 180° grasp, loaded lift, and HOME.
+- Bundled the 23 MB `FastSAM-s.pt` model with a pinned SHA-256 checksum so the
+  experiment does not download model weights at run time.
+- Added a Korean handoff manual, wiring table, repair caveats, and
+  troubleshooting for COM ports, camera permissions, firmware mismatch, and
+  discharged external servo power.
+- Added hardware-free Windows adapter tests and an installation verifier that
+  loads OpenCV, PySerial, Ultralytics, the bundled model, and all launcher
+  modules.

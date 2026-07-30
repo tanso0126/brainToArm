@@ -1,0 +1,1 @@
+c9f78716a81c7aff0d608ccc73e1b82ab3aaad86005049f6a92106a0be6d0844  FastSAM-s.pt
