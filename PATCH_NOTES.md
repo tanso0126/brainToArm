@@ -3660,3 +3660,11 @@ and the trained model backend.
 - This patch changes the target before approach. Returning a physically held
   rejected object to its exact origin remains disabled until loaded transport
   has reliable external servo power and passes a separate physical test.
+
+## Patch 100 — keep the optional decision mailbox truly optional
+
+- Fixed the real-approach CLI default: an omitted `--decision-mailbox` flag
+  produces Boolean `False`, which must disable the mailbox rather than being
+  treated as a mailbox object.
+- Added regression coverage for disabled, enabled, and injected mailbox modes.
+- The bug failed before any arm motion; no physical command was sent.

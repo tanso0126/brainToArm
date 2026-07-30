@@ -23,6 +23,7 @@ from ultrasonic_target_reach import (
     home_pose_holding,
     loaded_home_reassert_pose,
     open_ready_pose,
+    resolve_decision_mailbox,
     select_after_external_decisions,
     tracking_wrist_target,
     transition_fingertip_floor_clearance_mm,
@@ -33,6 +34,13 @@ from decision_signal import DecisionMailbox
 
 
 class ApproachStopTests(unittest.TestCase):
+    def test_disabled_decision_mailbox_is_none(self):
+        existing = object()
+
+        self.assertIsNone(resolve_decision_mailbox(False))
+        self.assertIsInstance(resolve_decision_mailbox(True), DecisionMailbox)
+        self.assertIs(resolve_decision_mailbox(existing), existing)
+
     def test_decision_mailbox_ignores_stale_signal(self):
         with TemporaryDirectory() as directory:
             mailbox = DecisionMailbox(Path(directory) / "decision.json")

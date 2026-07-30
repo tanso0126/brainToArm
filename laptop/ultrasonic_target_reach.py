@@ -549,6 +549,15 @@ def _await_target_decision(
     return result["candidate"], decision.sequence, decision.decision == "reject"
 
 
+def resolve_decision_mailbox(value):
+    """Normalize the CLI flag without treating ``False`` as a mailbox."""
+    if value is True:
+        return DecisionMailbox()
+    if value is False:
+        return None
+    return value
+
+
 def _clear_target_lock(selector):
     """Discard a background lock while retaining explicit ErrP vetoes."""
     selector.current = None
@@ -926,8 +935,7 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
     if not isinstance(detector, VividFallbackDetector):
         detector = VividFallbackDetector(detector)
     selector = selector or LookReachTargetSelector()
-    decision_mailbox = (
-        DecisionMailbox() if decision_mailbox is True else decision_mailbox)
+    decision_mailbox = resolve_decision_mailbox(decision_mailbox)
     decision_cursor = (
         decision_mailbox.cursor() if decision_mailbox is not None else 0)
     safety = PhysicalArmSafety()
