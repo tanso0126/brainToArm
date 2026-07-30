@@ -75,6 +75,11 @@
 
 `firmware/arm_controller/arm_controller.ino`
 
+`OPEN_FIRMWARE.bat`은 전체 저장소와 함께 있어야 합니다. GitHub 웹 화면에서
+`windows_release` 폴더만 따로 저장하거나 ZIP 내부에서 직접 실행하지 마세요.
+배포 ZIP의 압축을 완전히 풀면 `brainToArm\firmware`와
+`brainToArm\windows_release`가 같은 폴더 아래에 보여야 합니다.
+
 ## 3. 카메라 확인
 
 로봇팔과 웹캠을 설치한 뒤 `CHECK_CAMERA.bat`을 실행합니다.
@@ -136,6 +141,20 @@ windows_release\RUN_AUTONOMOUS.bat --camera 1 --port COM5
 cd C:\brainToArm\windows_release
 .\SETUP_WINDOWS.bat
 ```
+
+### 한글이 깨지거나 `'…'은(는) 내부 또는 외부 명령` 오류가 표시됨
+
+구형 Windows CMD가 UTF-8 한글 배치 파일을 잘못 해석할 때 발생하던
+문제입니다. 최신 배포판에서는 BAT 파일을 영문 실행기로 바꾸고 한글 안내를
+PowerShell에서 출력하도록 수정했습니다.
+
+1. GitHub Releases에서 `windows-handoff-ko-v2` 이상 ZIP을 다시 받습니다.
+2. 이전 폴더 위에 덮어쓰지 말고 새 폴더에 압축을 완전히 풉니다.
+3. `brainToArm\windows_release\OPEN_FIRMWARE.bat`을 실행합니다.
+
+`지정된 경로를 찾을 수 없습니다`가 함께 나오면 `windows_release`만 따로
+복사한 상태일 수 있습니다. 같은 상위 폴더에 `firmware`와
+`windows_release`가 모두 있는지 확인하세요.
 
 ### Python 또는 winget을 찾지 못함
 

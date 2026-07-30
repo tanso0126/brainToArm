@@ -14,6 +14,10 @@ from windows_camera import gripper_score
 from windows_support import DirectArmClient, find_arm_port
 
 
+RELEASE_DIR = Path(__file__).resolve().parent
+ROOT_DIR = RELEASE_DIR.parent
+
+
 class FakeArm:
     def __init__(self):
         self.pose = list(config.HOME_POSE)
@@ -41,6 +45,23 @@ class FakeArm:
 
 
 class WindowsReleaseTests(unittest.TestCase):
+    def test_batch_launchers_are_ascii_crlf(self):
+        for path in RELEASE_DIR.glob("*.bat"):
+            payload = path.read_bytes()
+            self.assertTrue(payload.isascii(), path.name)
+            self.assertNotIn(b"\n", payload.replace(b"\r\n", b""))
+
+    def test_powershell_launchers_have_utf8_bom(self):
+        for name in (
+                "setup_windows.ps1", "open_firmware.ps1",
+                "launch_tool.ps1"):
+            payload = (RELEASE_DIR / name).read_bytes()
+            self.assertTrue(payload.startswith(b"\xef\xbb\xbf"), name)
+
+    def test_firmware_launcher_target_is_shipped(self):
+        sketch = ROOT_DIR / "firmware" / "arm_controller" / "arm_controller.ino"
+        self.assertTrue(sketch.is_file())
+
     def test_port_selection_prefers_uno_and_rejects_esp32(self):
         ports = [
             SimpleNamespace(

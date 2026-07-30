@@ -296,7 +296,8 @@ Windows PC와 수리 후 실물 로봇팔 조합은 현장에서 최종 확인�
 ## 백업과 배포 기준
 
 - macOS 실물 실험 기준 태그: `physical-macos-baseline-2026-07-30`
-- 최초 Windows 인수인계 태그: `windows-handoff-v1`
+- 최초 Windows 인수인계 태그: `windows-handoff-ko-v1`
+- CMD 한글·경로 수정판 태그: `windows-handoff-ko-v2`
 - Windows용 코드는 기존 실물 코드를 덮어쓰지 않고
   `windows_release/`에 별도로 추가했습니다.
 
