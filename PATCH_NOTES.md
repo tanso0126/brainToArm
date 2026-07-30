@@ -4086,3 +4086,13 @@ and the trained model backend.
   backoff is not used.
 - Collision-swept motion validation and the 10 mm floor protection remain as
   the minimal hardware-damage safeguards.
+
+## Patch 123 — preserve the final physical calibration before Windows port
+
+- Preserved the latest physical HOME calibration with servo 6 at `180°`.
+- Preserved the real-camera rigid-point probe in `look_reach.py`: a small wrist
+  nudge identifies detections that move rigidly with the camera (finger tape,
+  servo loom, and cable ties) and excludes them from both initial selection and
+  later target reacquisition.
+- This commit is the immutable macOS/physical-arm handoff baseline. The Windows
+  distribution is developed separately without rewriting these files.

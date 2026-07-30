@@ -205,7 +205,8 @@ def _depth_error_px(scene, target):
 
 
 def solve_object_reach(mover, detector, target_selector, start_pose,
-                       frame_source=_fresh_frame, logger=print):
+                       frame_source=_fresh_frame, logger=print,
+                       rigid_points=()):
     """Extend/retract forward reach until the fingertips reach the object.
 
     Measures d(depth error)/d(reach) on the real hardware with one bounded
@@ -221,7 +222,13 @@ def solve_object_reach(mover, detector, target_selector, start_pose,
         failure does.
         """
         for _ in range(attempts):
-            scene, _ = detector.scene(frame_source(discard=1))
+            frame = frame_source(discard=1)
+            scene, _ = detector.scene(frame)
+            # Same discrimination as at selection time: own hardware and flat
+            # sheet folds must not be able to steal the lock mid-approach.
+            scene.ranked = [item for item in scene.ranked
+                            if is_graspable_figure(frame, item)
+                            and not _is_rigid(item, rigid_points)]
             matched = target_selector.match(scene)
             if matched is not None:
                 return scene, matched
@@ -441,10 +448,14 @@ def run_constant_x_grasp(client, execute=False, advance_mm=-5.0,
         mover.slow_move(start, final_settle=1.0)
         current = list(client.request({"command": "status"})["pose"])
 
+    rigid_points = []
+    if execute:
+        rigid_points = rigid_with_camera_points(
+            mover, detector, client, frame_source)
     initial_frame, initial_scene, target = acquire_initial_target(
         detector, target_selector=target_selector,
         reject_count=reject_count, pose=current,
-        frame_source=frame_source)
+        frame_source=frame_source, rigid_points=rigid_points)
     # Search. One fixed viewing pose only sees one slice of the table, so an
     # object nearer or farther than that slice is simply invisible - which is
     # what "no target" meant every time so far. Sweep the reach band (which
@@ -466,7 +477,7 @@ def run_constant_x_grasp(client, execute=False, advance_mm=-5.0,
             initial_frame, initial_scene, target = acquire_initial_target(
                 detector, target_selector=target_selector,
                 reject_count=reject_count, pose=current,
-                frame_source=frame_source)
+                frame_source=frame_source, rigid_points=rigid_points)
             if target is not None:
                 start = scan_pose
                 print(f"[look-reach] SEARCH found target at reach "
@@ -544,7 +555,7 @@ def run_constant_x_grasp(client, execute=False, advance_mm=-5.0,
     if execute:
         solved, solved_x = solve_object_reach(
             mover, detector, target_selector, start,
-            frame_source=frame_source)
+            frame_source=frame_source, rigid_points=rigid_points)
         if solved is None:
             raise RuntimeError(
                 "could not reach the selected object's depth; no descent")
@@ -1077,9 +1088,59 @@ def _save_selection_evidence(frame, scene):
     cv2.imwrite(str(SELECTION_EVIDENCE), image)
 
 
+RIGID_PROBE_DEG = 3
+RIGID_MAX_SHIFT_PX = 8.0
+
+
+def rigid_with_camera_points(mover, detector, client, frame_source,
+                             probe_deg=RIGID_PROBE_DEG, logger=print):
+    """Image points that belong to the ROBOT, not the world.
+
+    The servo loom, cable ties and finger tapes are bolted to the arm, so they
+    keep the same image position when the arm moves; every real scene object
+    shifts. One tiny wrist nudge therefore separates own-hardware detections
+    from graspable objects without any colour, region or position heuristic.
+    """
+    before_frame = frame_source(discard=1)
+    before, _ = detector.scene(before_frame)
+    pose = list(client.request({"command": "status"})["pose"])
+    probe = list(pose)
+    probe[config.J_WRIST] = int(np.clip(
+        pose[config.J_WRIST] - probe_deg,
+        config.SERVO_MIN[config.J_WRIST], config.SERVO_MAX[config.J_WRIST]))
+    if probe[config.J_WRIST] == pose[config.J_WRIST]:
+        probe[config.J_WRIST] = int(np.clip(
+            pose[config.J_WRIST] + probe_deg,
+            config.SERVO_MIN[config.J_WRIST], config.SERVO_MAX[config.J_WRIST]))
+    if probe[config.J_WRIST] == pose[config.J_WRIST]:
+        return []
+    mover.slow_move(probe, final_settle=0.5)
+    after, _ = detector.scene(frame_source(discard=1))
+    mover.slow_move(pose, final_settle=0.5)
+    rigid = []
+    for candidate in before.ranked:
+        nearest = None
+        best = None
+        for other in after.ranked:
+            distance = math.dist(candidate.center, other.center)
+            if best is None or distance < best:
+                best, nearest = distance, other
+        if nearest is not None and best is not None and best <= RIGID_MAX_SHIFT_PX:
+            rigid.append(tuple(float(v) for v in candidate.center))
+    if rigid:
+        logger(f"[look-reach] {len(rigid)} detection(s) are rigid with the "
+               "camera (own hardware); excluded")
+    return rigid
+
+
+def _is_rigid(candidate, rigid_points, radius=18.0):
+    return any(math.dist(candidate.center, point) <= radius
+               for point in rigid_points)
+
+
 def acquire_initial_target(detector, samples=3, target_selector=None,
                            reject_count=0, pose=None,
-                           frame_source=_fresh_frame):
+                           frame_source=_fresh_frame, rigid_points=()):
     """Choose once, then follow that lock across several fresh segmentations."""
     target_selector = target_selector or LookReachTargetSelector()
     latest_frame = None
@@ -1095,7 +1156,8 @@ def acquire_initial_target(detector, samples=3, target_selector=None,
         # compact blobs nearest the jaws and would otherwise always out-rank the
         # real object. Only figures distinct from their own background survive.
         latest_scene.ranked = [item for item in latest_scene.ranked
-                               if is_graspable_figure(latest_frame, item)]
+                               if is_graspable_figure(latest_frame, item)
+                               and not _is_rigid(item, rigid_points)]
         # Rank by figure/ground distinctness, not jaw proximity. The workspace
         # sheet lies directly in front of the fingers, so proximity ranking put
         # paper first every time; the real object is the one that stands out
