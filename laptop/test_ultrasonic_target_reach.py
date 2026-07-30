@@ -236,6 +236,27 @@ class ApproachStopTests(unittest.TestCase):
 
         self.assertIs(selected, complete)
 
+    def test_complete_mask_cannot_expand_into_white_robot_body(self):
+        fragment = SimpleNamespace(
+            center=(593.0, 535.0), bbox=(580, 480, 26, 110),
+            area=2860.0, confidence=0.60,
+            median_saturation=72.0, median_value=248.0)
+        complete = SimpleNamespace(
+            center=(593.5, 534.7), bbox=(573, 464, 41, 142),
+            area=5822.0, confidence=0.85,
+            median_saturation=68.0, median_value=253.0)
+        white_overlap = SimpleNamespace(
+            center=(610.0, 520.0), bbox=(565, 430, 90, 180),
+            area=16200.0, confidence=0.80,
+            median_saturation=11.0, median_value=253.0)
+        scene = SimpleNamespace(
+            ranked=[fragment, complete, white_overlap])
+
+        selected = _complete_tracking_candidate(
+            scene, fragment, appearance_reference=fragment)
+
+        self.assertIs(selected, complete)
+
     def test_vivid_target_cannot_switch_to_white_robot_body(self):
         purple_object = SimpleNamespace(
             median_saturation=148.0, median_value=172.0)

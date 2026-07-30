@@ -115,6 +115,7 @@ OBSERVATION_STAGE_COUNT = 4
 VIVID_IDENTITY_SATURATION = 60.0
 VIVID_IDENTITY_MIN_SATURATION = 35.0
 IDENTITY_MAX_VALUE_DELTA = 110.0
+MAX_TARGET_RECOVERY_ATTEMPTS = 3
 
 
 @dataclass(frozen=True)
@@ -228,7 +229,8 @@ def _reacquire(detector, selector, attempts=3):
             rejected_points = list(selector.selector.rejected_points)
         candidate = selector.match(scene)
         if candidate is not None:
-            candidate = _complete_tracking_candidate(scene, candidate)
+            candidate = _complete_tracking_candidate(
+                scene, candidate, appearance_reference=previous)
             if not target_appearance_is_continuous(previous, candidate):
                 print(
                     "[sonar-reach] rejected tracking identity switch "
@@ -422,14 +424,21 @@ def _best_final_grasp_candidate(scene, locked):
     ))
 
 
-def _complete_tracking_candidate(scene, locked):
-    """Prefer the complete body over nested part masks during approach."""
+def _complete_tracking_candidate(
+        scene, locked, appearance_reference=None):
+    """Prefer a complete same-appearance body over nested part masks."""
     if locked is None:
         return None
     lx, ly, lwidth, lheight = locked.bbox
     locked_area = float(max(1, lwidth * lheight))
     compatible = [locked]
     for item in getattr(scene, "ranked", ()):
+        if (
+            appearance_reference is not None
+            and not target_appearance_is_continuous(
+                appearance_reference, item)
+        ):
+            continue
         ix, iy, iwidth, iheight = item.bbox
         left = max(lx, ix)
         top = max(ly, iy)
@@ -1225,18 +1234,28 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
         raise RuntimeError(jaw_reason)
     last_visible_pose = list(pose)
     approach_start_x_mm = fingertip_forward_x_mm(pose)
+    recovery_attempts = 0
 
     for step in range(int(max_steps)):
         frame, observed_scene, observed_candidate = _reacquire(
             detector, selector)
         target_visible = observed_candidate is not None
         if target_visible:
+            recovery_attempts = 0
             scene, candidate = observed_scene, observed_candidate
         else:
+            recovery_attempts += 1
             pose = list(client.request({"command": "status"})["pose"])
             if not execute:
                 return {
                     "state": "target-recovery-needed", "pose": pose,
+                    "preview": str(PREVIEW),
+                }
+            if recovery_attempts >= MAX_TARGET_RECOVERY_ATTEMPTS:
+                return {
+                    "state": "target-recovery-failed",
+                    "pose": pose,
+                    "recovery_attempts": recovery_attempts,
                     "preview": str(PREVIEW),
                 }
             report = safety.transition_report(pose, last_visible_pose)

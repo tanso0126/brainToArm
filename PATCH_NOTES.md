@@ -3801,3 +3801,26 @@ and the trained model backend.
   object during this transition.
 - Added regressions for purple-object versus white-base identity and exact
   staged waypoint generation.
+
+## Patch 107 — keep mask completion inside the physical object
+
+### Physical finding
+
+- FastSAM still detected the repositioned purple/white object correctly at
+  `(593.5, 534.7)` with confidence `0.849` and median saturation `68`.
+- The failure happened afterward: the helper that expands a fragment to the
+  complete object selected a larger overlapping white region with saturation
+  around `11`, then the identity safety gate correctly rejected it.
+- Repeating the same unchanged recovery pose could therefore consume the full
+  step budget without producing useful motion.
+
+### Changes
+
+- Nested-mask completion may now expand only to candidates whose saturation and
+  value remain compatible with the already locked physical object.
+- A larger overlapping white table/robot mask can no longer replace a vivid
+  target merely because its bounding box is larger.
+- Bound unchanged target recovery to three attempts, then stop explicitly
+  instead of issuing repeated no-op returns to the same pose.
+- Added a regression containing the measured purple target and a larger white
+  overlapping false body.
