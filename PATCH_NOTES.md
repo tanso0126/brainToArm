@@ -3715,3 +3715,22 @@ and the trained model backend.
 - Loaded-HOME regression expectations now derive from `home_pose.h`, so changing
   one configured HOME angle also updates the grasp transport target without
   rewriting hard-coded test poses.
+
+## Patch 103 — approach from the last target-visible safe pose
+
+### Physical finding
+
+- The floor cable was already absent from the current perception candidates.
+- The object was visible and selected in the high wrist-search pose, but the
+  fixed forward observation transition moved that object above the camera
+  frame. The controller then stopped before approach.
+
+### Changes
+
+- Preserve the last safe pose where the selected object was visibly detected.
+- If the fixed forward observation loses that object, collision-check and
+  reverse the same transition, reacquire at the preserved pose, and begin the
+  normal camera/sonar closed loop there.
+- The fallback never promotes the cable or guesses a new off-axis target. If
+  the object is not independently detected again at the preserved pose, motion
+  remains stopped.

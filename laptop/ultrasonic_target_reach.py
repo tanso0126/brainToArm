@@ -808,7 +808,8 @@ def _open_and_find_target(
 
 def _enter_forward_observation(
         client, safety, detector, selector, pose, execute):
-    """Stage the arm in the reproduced forward approach branch and relock."""
+    """Stage the arm forward, or return to the last target-visible safe pose."""
+    visible_search_pose = list(pose)
     target = approach_observation_pose(pose)
     report = safety.transition_report(pose, target)
     if not report.safe:
@@ -833,8 +834,42 @@ def _enter_forward_observation(
         candidate = _choose_vivid_on_axis(
             frame, scene, selector, pose)
     if not _candidate_on_sonar_axis(candidate, frame.shape[1], scene):
+        # Object depth varies. A fixed close observation can move a legitimate
+        # target above the image even though it was clearly visible at the safe
+        # high search pose. Reverse the already-validated transition and start
+        # closed-loop approach from that last visible pose instead of guessing
+        # a new object or treating a floor cable as the target.
+        fallback_report = safety.transition_report(
+            pose, visible_search_pose)
+        if not fallback_report.safe:
+            raise RuntimeError(
+                "target-visible fallback rejected: "
+                + fallback_report.explain())
+        if execute and pose != visible_search_pose:
+            print(
+                f"[sonar-reach] fixed forward view lost target; "
+                f"returning to visible search pose "
+                f"{pose[1:4]}->{visible_search_pose[1:4]}",
+                flush=True,
+            )
+            _fast_approach_move(
+                client, visible_search_pose, settle_s=0.45)
+        pose = visible_search_pose
         _clear_target_lock(selector)
-        return pose, frame, scene, None
+        frame, scene, candidate = acquire_initial_target(
+            detector, target_selector=selector, pose=pose)
+        if not _candidate_on_sonar_axis(
+                candidate, frame.shape[1], scene):
+            candidate = _choose_on_axis(
+                scene, selector, pose, frame.shape[1])
+        if not _candidate_on_sonar_axis(
+                candidate, frame.shape[1], scene):
+            candidate = _choose_vivid_on_axis(
+                frame, scene, selector, pose)
+        if not _candidate_on_sonar_axis(
+                candidate, frame.shape[1], scene):
+            _clear_target_lock(selector)
+            return pose, frame, scene, None
     return pose, frame, scene, candidate
 
 
