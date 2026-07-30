@@ -320,6 +320,27 @@ def grasp_readiness(
                           center_error)
 
 
+def floor_limited_grasp_readiness(
+        target, gripper_center, opening_px, floor_clearance_mm):
+    """Allow the user's floor-stop branch when sonar misses the small object."""
+    if target is None:
+        return GraspReadiness(False, "target not tracked", float("inf"))
+    center_error = float(np.linalg.norm(
+        np.asarray(target.center, dtype=float)
+        - np.asarray(gripper_center, dtype=float)))
+    lateral = abs(float(target.center[0]) - float(gripper_center[0]))
+    if float(floor_clearance_mm) > FLOOR_HOLD_START_MM:
+        return GraspReadiness(False, "floor stop not reached", center_error)
+    if lateral > GRASP_LATERAL_OPENING_FRACTION * float(opening_px):
+        return GraspReadiness(False, "object centre outside finger width",
+                              center_error)
+    if center_error > GRASP_CENTER_TOLERANCE_PX:
+        return GraspReadiness(False, "object centre not deep inside jaws",
+                              center_error)
+    return GraspReadiness(
+        True, "floor-limited with physical jaw centre aligned", center_error)
+
+
 def _vivid_frame_seeds(frame, gripper):
     """Recover coloured objects when segmentation misses an overexposed view."""
     height, width = frame.shape[:2]
@@ -665,6 +686,31 @@ def run(execute=False, allow_grasp=False, max_seconds=45.0):
             clearance,
         )
         if plan is None:
+            floor_ready = floor_limited_grasp_readiness(
+                target, gripper_center, opening_px, clearance)
+            if floor_ready.ready:
+                if not allow_grasp:
+                    return {
+                        "state": "grasp-ready-floor",
+                        "pose": pose,
+                        "distance_mm": distance,
+                        "center_error_px": floor_ready.center_error_px,
+                        "preview": str(PREVIEW_PATH),
+                    }
+                closed = list(pose)
+                closed[config.J_GRIP] = config.GRIP_CLOSED
+                client.request({
+                    "command": "move", "pose": closed,
+                    "require_camera": True,
+                })
+                return {
+                    "state": "closed-pending-verification",
+                    "pose": closed,
+                    "distance_mm": distance,
+                    "center_error_px": floor_ready.center_error_px,
+                    "preview": str(PREVIEW_PATH),
+                    "gate": floor_ready.reason,
+                }
             return {
                 "state": "safe-reach-exhausted",
                 "pose": pose,

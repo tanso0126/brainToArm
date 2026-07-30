@@ -4047,3 +4047,17 @@ and the trained model backend.
   frame, and immediately continues from the current pose whenever a valid
   target is visible. Search poses are used only when the current view truly has
   no target.
+
+## Patch 120 — implement the operator-specified floor-stop grasp branch
+
+- The measured close pose reached `11.6 mm` modelled floor clearance with the
+  object only `35 px` from the physical red/blue jaw centre. The next integer
+  servo step would cross the hard `10 mm` floor guard, while sonar read
+  `101 mm` because its narrow beam missed the small object.
+- The controller now treats this as the operator-specified alternative stop
+  branch: near the floor limit, closing is permitted only when the object
+  centre is both inside the finger opening and within the same strict 55 px
+  physical-centre gate.
+- Sonar-close operation still requires the original ultrasonic gate; this
+  fallback activates only when safe approach motion is exhausted near the
+  floor. Added aligned/off-axis regressions.

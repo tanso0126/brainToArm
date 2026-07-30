@@ -8,6 +8,7 @@ import arm_fk
 from realtime_visual_servo import (
     HistogramTargetTracker,
     dynamic_aim_y,
+    floor_limited_grasp_readiness,
     grasp_readiness,
     numeric_task_jacobian,
     resolved_velocity_target,
@@ -74,6 +75,18 @@ class RealtimeVisualServoTests(unittest.TestCase):
         self.assertFalse(far.ready)
         self.assertIn("sonar", far.reason)
         self.assertTrue(ready.ready)
+
+    def test_floor_stop_accepts_only_deep_jaw_alignment(self):
+        target = SimpleNamespace(center=(585.0, 678.0))
+
+        aligned = floor_limited_grasp_readiness(
+            target, (613.0, 699.0), 290.0, 11.6)
+        off_axis = floor_limited_grasp_readiness(
+            SimpleNamespace(center=(400.0, 678.0)),
+            (613.0, 699.0), 290.0, 11.6)
+
+        self.assertTrue(aligned.ready)
+        self.assertFalse(off_axis.ready)
 
     def test_realtime_seed_does_not_use_a_fixed_image_horizon(self):
         near_real_object = SimpleNamespace(
