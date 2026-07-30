@@ -3985,3 +3985,23 @@ and the trained model backend.
   centre and bbox, including scale, for visual servo and grasp-depth control.
 - Added a regression with a mostly white object body and a small coloured
   internal feature; the output must remain the full physical centre and size.
+
+## Patch 115 — exclude the robot's own bottom finger lobes
+
+### Physical finding
+
+- At wrist 180°, the only FastSAM candidate was the left blue finger around
+  `(503, 640)`, not the object near the top of the frame.
+- Removing the old fixed table horizon also removed an incidental filter that
+  had sometimes kept this hardware mask out.
+
+### Changes
+
+- Derive the expected left/right finger x positions from the live gripper or
+  the calibrated open-hand profile.
+- In only the rigid lower hardware band, reject candidates centred on either
+  expected finger lobe.
+- A real object on the central grasp axis remains eligible even when it is low
+  in the frame; no table/background row is reintroduced.
+- Added a regression using the measured false finger `(503,640)` and a central
+  low object.

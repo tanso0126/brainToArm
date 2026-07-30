@@ -89,6 +89,21 @@ class RealtimeVisualServoTests(unittest.TestCase):
 
         self.assertIs(select_realtime_seed(scene), near_real_object)
 
+    def test_realtime_seed_excludes_expected_bottom_finger_lobes(self):
+        real_object = SimpleNamespace(
+            center=(600.0, 676.0), area=6200.0,
+            confidence=0.80, median_saturation=70.0)
+        blue_finger = SimpleNamespace(
+            center=(503.0, 640.0), area=6200.0,
+            confidence=0.90, median_saturation=6.0)
+        scene = SimpleNamespace(
+            ranked=[blue_finger, real_object],
+            frame_shape=(720, 1280, 3),
+            gripper=None,
+        )
+
+        self.assertIs(select_realtime_seed(scene), real_object)
+
     def test_numeric_jacobian_and_resolved_target_are_bounded(self):
         pose = [90, 107, 84, 178, 90, 170]
 

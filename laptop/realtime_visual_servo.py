@@ -74,6 +74,8 @@ SEARCH_WRISTS = (170, 180)
 SEED_MIN_AREA_RATIO = 0.0004
 SEED_MAX_AREA_RATIO = 0.08
 SEED_MAX_AXIS_ERROR_RATIO = 0.16
+SEED_FINGER_EXCLUSION_Y_RATIO = 0.72
+SEED_FINGER_EXCLUSION_RADIUS_FRACTION = 0.28
 
 
 @dataclass(frozen=True)
@@ -312,10 +314,17 @@ def select_realtime_seed(scene):
     """Select a compact object without a pose-dependent fixed horizon row."""
     height, width = scene.frame_shape[:2]
     gripper = getattr(scene, "gripper", None)
-    aim_x = (
-        float(gripper.center[0])
-        if gripper is not None
-        else float(config.WRIST_GRIPPER_OPEN_PROFILE["center"][0]) * width
+    if gripper is not None:
+        aim_x = float(gripper.center[0])
+        opening_px = float(gripper.opening_px)
+    else:
+        profile = config.WRIST_GRIPPER_OPEN_PROFILE
+        aim_x = float(profile["center"][0]) * width
+        opening_px = float(profile["opening_ratio"]) * math.hypot(
+            width, height)
+    finger_centres = (
+        aim_x - 0.5 * opening_px,
+        aim_x + 0.5 * opening_px,
     )
     valid = []
     for candidate in scene.ranked:
@@ -324,6 +333,16 @@ def select_realtime_seed(scene):
         if not SEED_MIN_AREA_RATIO <= ratio <= SEED_MAX_AREA_RATIO:
             continue
         if axis_error > SEED_MAX_AXIS_ERROR_RATIO * width:
+            continue
+        if (
+            float(candidate.center[1])
+            >= SEED_FINGER_EXCLUSION_Y_RATIO * height
+            and min(
+                abs(float(candidate.center[0]) - finger_x)
+                for finger_x in finger_centres
+            )
+            <= SEED_FINGER_EXCLUSION_RADIUS_FRACTION * opening_px
+        ):
             continue
         if float(getattr(candidate, "confidence", 1.0)) < 0.20:
             continue
