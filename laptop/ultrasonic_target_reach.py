@@ -111,6 +111,10 @@ HOME_MAX_TRANSLATION_PX = 15.0
 HOME_MAX_ROTATION_DEG = 3.0
 HOME_MAX_SCALE_ERROR = 0.04
 HOME_MIN_INLIERS = 12
+OBSERVATION_STAGE_COUNT = 4
+VIVID_IDENTITY_SATURATION = 60.0
+VIVID_IDENTITY_MIN_SATURATION = 35.0
+IDENTITY_MAX_VALUE_DELTA = 110.0
 
 
 @dataclass(frozen=True)
@@ -182,14 +186,62 @@ def transition_fingertip_floor_clearance_mm(
     )
 
 
+def target_appearance_is_continuous(previous, candidate):
+    """Reject abrupt vivid-object to neutral-hardware identity switches."""
+    if previous is None or candidate is None:
+        return candidate is not None
+    previous_saturation = getattr(previous, "median_saturation", None)
+    candidate_saturation = getattr(candidate, "median_saturation", None)
+    previous_value = getattr(previous, "median_value", None)
+    candidate_value = getattr(candidate, "median_value", None)
+    if previous_saturation is not None and candidate_saturation is not None:
+        previous_saturation = float(previous_saturation)
+        candidate_saturation = float(candidate_saturation)
+        if (
+            previous_saturation >= VIVID_IDENTITY_SATURATION
+            and candidate_saturation < VIVID_IDENTITY_MIN_SATURATION
+        ):
+            return False
+    if previous_value is not None and candidate_value is not None:
+        if abs(float(previous_value) - float(candidate_value)) > (
+                IDENTITY_MAX_VALUE_DELTA):
+            return False
+    return True
+
+
+def _restore_tracking_snapshot(selector, current, lock, rejected_points):
+    selector.current = current
+    selector.lock = lock
+    if getattr(selector, "selector", None) is not None:
+        selector.selector.rejected_points = rejected_points
+
+
 def _reacquire(detector, selector, attempts=3):
     frame = scene = candidate = None
     for _ in range(attempts):
         frame = _fresh_frame(discard=1)
         scene, _observation = detector.scene(frame)
+        previous = selector.current
+        previous_lock = copy.deepcopy(selector.lock)
+        rejected_points = []
+        if getattr(selector, "selector", None) is not None:
+            rejected_points = list(selector.selector.rejected_points)
         candidate = selector.match(scene)
         if candidate is not None:
             candidate = _complete_tracking_candidate(scene, candidate)
+            if not target_appearance_is_continuous(previous, candidate):
+                print(
+                    "[sonar-reach] rejected tracking identity switch "
+                    f"sat={getattr(previous, 'median_saturation', None)}"
+                    f"->{getattr(candidate, 'median_saturation', None)} "
+                    f"value={getattr(previous, 'median_value', None)}"
+                    f"->{getattr(candidate, 'median_value', None)}",
+                    flush=True,
+                )
+                _restore_tracking_snapshot(
+                    selector, previous, previous_lock, rejected_points)
+                candidate = None
+                continue
             if getattr(selector, "lock", None) is not None:
                 selector.lock.update(candidate)
                 selector.current = candidate
@@ -564,6 +616,26 @@ def approach_observation_pose(pose):
     return target
 
 
+def interpolated_observation_poses(start, target,
+                                   stages=OBSERVATION_STAGE_COUNT):
+    """Return distinct rounded waypoints, including the exact target."""
+    if int(stages) < 1:
+        raise ValueError("observation stages must be positive")
+    start_values = np.asarray(start, dtype=float)
+    target_values = np.asarray(target, dtype=float)
+    result = []
+    for index in range(1, int(stages) + 1):
+        ratio = index / float(stages)
+        pose = [
+            int(round(value))
+            for value in start_values + ratio * (target_values - start_values)
+        ]
+        if not result or pose != result[-1]:
+            result.append(pose)
+    result[-1] = [int(round(value)) for value in target]
+    return result
+
+
 def fingertip_forward_x_mm(pose):
     """Planar distance of the physical finger endpoint from the base axis."""
     return float(arm_fk.geometry(pose).finger_tip[0]) * 1000.0
@@ -880,69 +952,62 @@ def _open_and_find_target(
 
 def _enter_forward_observation(
         client, safety, detector, selector, pose, execute):
-    """Stage the arm forward, or return to the last target-visible safe pose."""
-    visible_search_pose = list(pose)
+    """Move through observed stages without ever selecting a replacement."""
+    visible_pose = list(pose)
+    visible_frame = _fresh_frame(discard=1)
+    visible_scene, _observation = detector.scene(visible_frame)
+    visible_candidate = selector.current
     target = approach_observation_pose(pose)
-    report = safety.transition_report(pose, target)
-    if not report.safe:
-        raise RuntimeError(
-            "forward observation transition rejected: " + report.explain())
-    if execute and target != pose:
+    if not execute:
+        return pose, visible_frame, visible_scene, visible_candidate
+
+    for waypoint in interpolated_observation_poses(pose, target):
+        report = safety.transition_report(pose, waypoint)
+        if not report.safe:
+            raise RuntimeError(
+                "forward observation transition rejected: "
+                + report.explain())
+        if waypoint == pose:
+            continue
         print(
-            f"[sonar-reach] FORWARD observation {pose[1:4]} "
-            f"->{target[1:4]}; clearance="
+            f"[sonar-reach] FORWARD stage {pose[1:4]} "
+            f"->{waypoint[1:4]}; clearance="
             f"{report.minimum_clearance_mm:.1f}mm",
             flush=True,
         )
-        _fast_approach_move(client, target, settle_s=0.50)
-    pose = target
-    _clear_target_lock(selector)
-    frame, scene, candidate = acquire_initial_target(
-        detector, target_selector=selector, pose=pose)
-    if not _candidate_on_sonar_axis(candidate, frame.shape[1], scene):
-        candidate = _choose_on_axis(
-            scene, selector, pose, frame.shape[1])
-    if not _candidate_on_sonar_axis(candidate, frame.shape[1], scene):
-        candidate = _choose_vivid_on_axis(
-            frame, scene, selector, pose)
-    if not _candidate_on_sonar_axis(candidate, frame.shape[1], scene):
-        # Object depth varies. A fixed close observation can move a legitimate
-        # target above the image even though it was clearly visible at the safe
-        # high search pose. Reverse the already-validated transition and start
-        # closed-loop approach from that last visible pose instead of guessing
-        # a new object or treating a floor cable as the target.
-        fallback_report = safety.transition_report(
-            pose, visible_search_pose)
+        _fast_approach_move(client, waypoint, settle_s=0.35)
+        pose = waypoint
+        frame, scene, candidate = _reacquire(
+            detector, selector, attempts=3)
+        if candidate is not None:
+            visible_pose = list(pose)
+            visible_frame = frame
+            visible_scene = scene
+            visible_candidate = candidate
+            continue
+
+        fallback_report = safety.transition_report(pose, visible_pose)
         if not fallback_report.safe:
             raise RuntimeError(
                 "target-visible fallback rejected: "
                 + fallback_report.explain())
-        if execute and pose != visible_search_pose:
+        if pose != visible_pose:
             print(
-                f"[sonar-reach] fixed forward view lost target; "
-                f"returning to visible search pose "
-                f"{pose[1:4]}->{visible_search_pose[1:4]}",
+                "[sonar-reach] staged view lost the locked object; "
+                f"returning to last same-object pose "
+                f"{pose[1:4]}->{visible_pose[1:4]}",
                 flush=True,
             )
-            _fast_approach_move(
-                client, visible_search_pose, settle_s=0.45)
-        pose = visible_search_pose
-        _clear_target_lock(selector)
-        frame, scene, candidate = acquire_initial_target(
-            detector, target_selector=selector, pose=pose)
-        if not _candidate_on_sonar_axis(
-                candidate, frame.shape[1], scene):
-            candidate = _choose_on_axis(
-                scene, selector, pose, frame.shape[1])
-        if not _candidate_on_sonar_axis(
-                candidate, frame.shape[1], scene):
-            candidate = _choose_vivid_on_axis(
-                frame, scene, selector, pose)
-        if not _candidate_on_sonar_axis(
-                candidate, frame.shape[1], scene):
-            _clear_target_lock(selector)
-            return pose, frame, scene, None
-    return pose, frame, scene, candidate
+            _fast_approach_move(client, visible_pose, settle_s=0.40)
+        pose = visible_pose
+        frame, scene, candidate = _reacquire(
+            detector, selector, attempts=4)
+        if candidate is None:
+            return pose, visible_frame, visible_scene, None
+        return pose, frame, scene, candidate
+
+    return (
+        visible_pose, visible_frame, visible_scene, visible_candidate)
 
 
 def _return_home_holding(client, mover, safety, pose):

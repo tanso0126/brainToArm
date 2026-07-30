@@ -26,10 +26,12 @@ from ultrasonic_target_reach import (
     grip_hold_pose,
     home_pose_holding,
     home_transform_is_arrived,
+    interpolated_observation_poses,
     loaded_home_reassert_pose,
     open_ready_pose,
     resolve_decision_mailbox,
     select_after_external_decisions,
+    target_appearance_is_continuous,
     tracking_wrist_target,
     transition_fingertip_floor_clearance_mm,
     vivid_table_candidates,
@@ -233,6 +235,31 @@ class ApproachStopTests(unittest.TestCase):
         selected = _complete_tracking_candidate(scene, fragment)
 
         self.assertIs(selected, complete)
+
+    def test_vivid_target_cannot_switch_to_white_robot_body(self):
+        purple_object = SimpleNamespace(
+            median_saturation=148.0, median_value=172.0)
+        white_base_slit = SimpleNamespace(
+            median_saturation=7.0, median_value=214.0)
+        purple_under_exposure = SimpleNamespace(
+            median_saturation=82.0, median_value=220.0)
+
+        self.assertFalse(target_appearance_is_continuous(
+            purple_object, white_base_slit))
+        self.assertTrue(target_appearance_is_continuous(
+            purple_object, purple_under_exposure))
+
+    def test_forward_observation_is_split_into_exact_safe_stages(self):
+        start = [90, 70, 90, 170, 90, 180]
+        target = [90, 107, 84, 178, 90, 180]
+
+        stages = interpolated_observation_poses(start, target, stages=4)
+
+        self.assertEqual(len(stages), 4)
+        self.assertEqual(stages[-1], target)
+        self.assertEqual(stages[0][0], start[0])
+        self.assertEqual(stages[0][4:], start[4:])
+        self.assertLess(stages[0][1], stages[-1][1])
 
     def test_motor_four_uses_measured_pixel_error_with_large_headroom(self):
         self.assertEqual(tracking_wrist_target(178, -60), 168)

@@ -3774,3 +3774,30 @@ and the trained model backend.
   automatically return to live marker geometry.
 - Final alignment, close, retention, and HOME proof still require real visual
   evidence; the estimated profile cannot authorize a blind grasp.
+
+## Patch 106 — preserve object identity through staged observation
+
+### Physical finding
+
+- The blue floor cable was not a perception candidate and did not steal the
+  target lock.
+- After the real purple/white object left the wrist-camera frame, the tracker
+  instead attached to a low-saturation white vent in the robot's own base.
+  Continuing from that false identity would have aimed motion at the robot.
+- A single high-search to fixed-forward transition could also carry a valid
+  object across the image boundary without showing where visibility was lost.
+
+### Changes
+
+- Reject an abrupt vivid-object to neutral-hardware change using the
+  per-instance HSV saturation/value measurements already produced by the
+  detector.
+- Restore the previous target lock and veto coordinates when such an identity
+  switch is rejected, so a bad frame cannot corrupt future tracking.
+- Split the forward observation move into four collision-checked stages and
+  reacquire only the already locked object after every stage.
+- If that same object leaves the frame, reverse only to the last pose where its
+  identity was confirmed; never select the cable, robot body, or another new
+  object during this transition.
+- Added regressions for purple-object versus white-base identity and exact
+  staged waypoint generation.
