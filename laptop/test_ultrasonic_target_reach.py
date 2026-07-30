@@ -19,9 +19,11 @@ from ultrasonic_target_reach import (
     approach_observation_pose,
     approach_stays_forward,
     approach_stop_decision,
+    camera_pose_is_home_command,
     fingertip_floor_clearance_mm,
     grip_hold_pose,
     home_pose_holding,
+    home_transform_is_arrived,
     loaded_home_reassert_pose,
     open_ready_pose,
     resolve_decision_mailbox,
@@ -240,11 +242,35 @@ class ApproachStopTests(unittest.TestCase):
 
     def test_loaded_home_preserves_only_closed_gripper_value(self):
         held = [90, 111, 70, 177, 180, 170]
+        expected_home = list(config.HOME_POSE)
+        expected_home[config.J_GRIP] = held[config.J_GRIP]
         self.assertEqual(
-            home_pose_holding(held), [90, 70, 90, 140, 180, 170])
+            home_pose_holding(held), expected_home)
         self.assertEqual(
             loaded_home_reassert_pose(held),
             [90, 90, 90, 150, 180, 170])
+
+    def test_loaded_finger_angle_does_not_change_home_camera_pose(self):
+        loaded_home = list(config.HOME_POSE)
+        loaded_home[config.J_GRIP] = config.GRIP_HOLD
+        not_home = list(loaded_home)
+        not_home[config.J_SHOULDER] += 10
+
+        self.assertTrue(camera_pose_is_home_command(loaded_home))
+        self.assertFalse(camera_pose_is_home_command(not_home))
+
+    def test_physical_home_requires_tight_camera_transform(self):
+        arrived = {
+            "inliers": 48, "translation_px": 4.0,
+            "rotation_deg": 0.8, "scale": 1.01,
+        }
+        partial_motion = {
+            "inliers": 109, "translation_px": 75.0,
+            "rotation_deg": 1.0, "scale": 0.92,
+        }
+
+        self.assertTrue(home_transform_is_arrived(arrived))
+        self.assertFalse(home_transform_is_arrived(partial_motion))
 
     def test_loaded_hold_reduces_stall_without_opening(self):
         closed = [90, 108, 78, 172, 180, 170]
@@ -253,8 +279,9 @@ class ApproachStopTests(unittest.TestCase):
         self.assertEqual(holding, [90, 108, 78, 172, 158, 170])
         self.assertGreater(holding[4], config.GRIP_OPEN)
         self.assertLess(holding[4], config.GRIP_CLOSED)
-        self.assertEqual(
-            home_pose_holding(holding), [90, 70, 90, 140, 158, 170])
+        expected_home = list(config.HOME_POSE)
+        expected_home[config.J_GRIP] = config.GRIP_HOLD
+        self.assertEqual(home_pose_holding(holding), expected_home)
         self.assertEqual(
             loaded_home_reassert_pose(holding),
             [90, 90, 90, 150, 158, 170])

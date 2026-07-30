@@ -43,7 +43,7 @@ from look_reach import (
     plan_resolved_step,
 )
 from ultrasonic_depth import acquire_profile
-from vision_segment import ObjectDetection
+from vision_segment import ObjectDetection, estimate_camera_transform
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -107,6 +107,10 @@ APPROACH_MAX_JOINT_STEP_DEG = 12
 MIN_TOOL_CENTER_Z_M = 0.010
 MAX_STEPS = 24
 DEFAULT_DECISION_WAIT_S = 8.0
+HOME_MAX_TRANSLATION_PX = 15.0
+HOME_MAX_ROTATION_DEG = 3.0
+HOME_MAX_SCALE_ERROR = 0.04
+HOME_MIN_INLIERS = 12
 
 
 @dataclass(frozen=True)
@@ -437,6 +441,44 @@ def loaded_home_reassert_pose(pose):
     waypoint = list(LOADED_HOME_REASSERT_TEMPLATE)
     waypoint[config.J_GRIP] = int(pose[config.J_GRIP])
     return waypoint
+
+
+def camera_pose_is_home_command(pose):
+    """Camera pose depends on joints 1–4, not the loaded finger opening."""
+    return all(
+        int(round(pose[joint])) == int(config.HOME_POSE[joint])
+        for joint in (
+            config.J_BASE,
+            config.J_SHOULDER,
+            config.J_ELBOW,
+            config.J_WRIST,
+        )
+    )
+
+
+def home_transform_is_arrived(transform):
+    """Turn a measured image transform into an honest physical HOME verdict."""
+    return (
+        int(transform.get("inliers", 0)) >= HOME_MIN_INLIERS
+        and float(transform.get("translation_px", float("inf")))
+        <= HOME_MAX_TRANSLATION_PX
+        and abs(float(transform.get("rotation_deg", float("inf"))))
+        <= HOME_MAX_ROTATION_DEG
+        and abs(float(transform.get("scale", 0.0)) - 1.0)
+        <= HOME_MAX_SCALE_ERROR
+    )
+
+
+def verify_home_camera_pose(reference, frame):
+    """Compare the wrist view against the unloaded starting-HOME view."""
+    if reference is None:
+        return False, {"reason": "starting HOME camera reference unavailable"}
+    try:
+        transform = estimate_camera_transform(reference, frame)
+    except RuntimeError as exc:
+        return False, {"reason": str(exc)}
+    transform["arrived"] = home_transform_is_arrived(transform)
+    return bool(transform["arrived"]), transform
 
 
 def open_ready_pose(pose):
@@ -820,7 +862,8 @@ def _return_home_holding(client, mover, safety, pose):
 
 
 def _clearance_grasp_and_verify(
-        client, mover, safety, detector, selector, pose, distance_mm):
+        client, mover, safety, detector, selector, pose, distance_mm,
+        home_reference_frame=None):
     """Lift open fingers off the table, close, then verify a retained lift."""
     preclose = _vertical_lift_pose(pose, PRE_CLOSE_LIFT_MM)
     report = safety.transition_report(pose, preclose)
@@ -931,13 +974,29 @@ def _clearance_grasp_and_verify(
                 "retained_reason": hold_reason,
             }
         transport_pose = holding
-    final_pose = (
-        _return_home_holding(client, mover, safety, transport_pose)
-        if retained_ok else verified)
+    final_pose = verified
+    home_verified = False
+    home_verification = None
+    if retained_ok:
+        final_pose = _return_home_holding(
+            client, mover, safety, transport_pose)
+        final_frame = _fresh_frame(discard=3)
+        home_verified, home_verification = verify_home_camera_pose(
+            home_reference_frame, final_frame)
+        print(
+            f"[sonar-reach] physical HOME verified={home_verified} "
+            f"evidence={home_verification}",
+            flush=True,
+        )
     return {
-        "state": "home-with-object" if retained_ok else "closed-unverified",
+        "state": (
+            "home-with-object" if retained_ok and home_verified
+            else "home-commanded-unverified" if retained_ok
+            else "closed-unverified"),
         "pose": final_pose, "distance_mm": distance_mm,
         "retained_shift_px": shift, "retained_reason": retained_reason,
+        "home_verified": home_verified,
+        "home_verification": home_verification,
     }
 
 
@@ -955,6 +1014,8 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
     safety = PhysicalArmSafety()
     mover = FloorServo(client, calib=None)
     pose = list(client.request({"command": "status"})["pose"])
+    home_reference_frame = (
+        _fresh_frame(discard=2) if camera_pose_is_home_command(pose) else None)
 
     pose, frame, scene, candidate = _open_and_find_target(
         client, mover, safety, detector, selector, pose, execute)
@@ -1049,7 +1110,8 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
         if decision.action == "floor":
             if execute and allow_grasp:
                 return _clearance_grasp_and_verify(
-                    client, mover, safety, detector, selector, pose, distance)
+                    client, mover, safety, detector, selector, pose, distance,
+                    home_reference_frame=home_reference_frame)
             return {
                 "state": "floor-clearance-stop", "pose": pose,
                 "distance_mm": distance,
@@ -1061,7 +1123,8 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
             print(f"[sonar-reach] {final_reason}", flush=True)
             if execute and allow_grasp:
                 return _clearance_grasp_and_verify(
-                    client, mover, safety, detector, selector, pose, distance)
+                    client, mover, safety, detector, selector, pose, distance,
+                    home_reference_frame=home_reference_frame)
             if not execute or not allow_grasp or not final_aligned:
                 return {
                     "state": (
@@ -1095,7 +1158,8 @@ def run(client=None, execute=False, allow_grasp=False, max_steps=MAX_STEPS,
                     flush=True,
                 )
                 return _clearance_grasp_and_verify(
-                    client, mover, safety, detector, selector, pose, distance)
+                    client, mover, safety, detector, selector, pose, distance,
+                    home_reference_frame=home_reference_frame)
             return {
                 "state": "floor-clearance-stop", "pose": pose,
                 "distance_mm": distance,

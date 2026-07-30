@@ -3687,3 +3687,31 @@ and the trained model backend.
 - FastSAM candidates, hue-independent fallback candidates, selection, preview,
   and the approach interlock all use the same dynamic axis.
 - Added regression coverage using the measured 530/542 px venue geometry.
+
+## Patch 102 — verify physical loaded HOME with the wrist camera
+
+### Problem
+
+- The grasp and loaded-HOME command sequence already existed, but the Uno has
+  no servo encoders. Its reported angles are commanded PWM targets and can say
+  HOME even when low supply voltage leaves the real shoulder/elbow short.
+- That made the software unable to distinguish a successful battery upgrade
+  from the previously observed partial loaded return.
+
+### Changes
+
+- When a full grasp run starts at HOME, save a fresh wrist-camera reference
+  before opening or moving the arm.
+- After close, lift verification, 158° loaded hold, reassert waypoint, and HOME
+  command, compare the final wrist view with that starting reference using a
+  robust feature/affine transform.
+- Physical HOME requires at least 12 inliers, at most 15 px translation, at
+  most 3° rotation, and scale within 4% of the reference.
+- A failed or unavailable image proof now returns
+  `home-commanded-unverified`; only a passed image proof may return
+  `home-with-object`.
+- Added regression coverage that rejects the previously measured partial-return
+  transform of roughly 75 px translation and 0.92 scale.
+- Loaded-HOME regression expectations now derive from `home_pose.h`, so changing
+  one configured HOME angle also updates the grasp transport target without
+  rewriting hard-coded test poses.
