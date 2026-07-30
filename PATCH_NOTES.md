@@ -4037,3 +4037,13 @@ and the trained model backend.
 - Allow at most `6 mm` inward correction per streamed step while retaining the
   full swept collision check and 10 mm floor guard. Added the measured-pose
   regression.
+
+## Patch 119 — resume continuous approach from the live arm pose
+
+- A controller restart previously forced motors 2/3/4 back to the canned
+  search pose before checking the camera, discarding successful approach
+  progress and creating an unnecessary target-losing camera jump.
+- The search routine now opens the gripper if needed, reads the current live
+  frame, and immediately continues from the current pose whenever a valid
+  target is visible. Search poses are used only when the current view truly has
+  no target.

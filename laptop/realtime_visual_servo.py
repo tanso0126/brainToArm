@@ -550,6 +550,14 @@ def _search_and_seed(
             "require_camera": True,
         })
         pose = opened
+    # A restarted controller must continue from the live pose. Returning to a
+    # canned search pose discards successful approach progress and introduces
+    # a large camera jump that can lose an otherwise visible target.
+    frame, _stamp = frame_stream.read(timeout_s=1.0)
+    scene, _observation = detector.scene(frame)
+    candidate = select_realtime_seed(scene, frame)
+    if candidate is not None:
+        return pose, frame, candidate
     for wrist in SEARCH_WRISTS:
         target_pose = list(pose)
         target_pose[config.J_SHOULDER] = 70
