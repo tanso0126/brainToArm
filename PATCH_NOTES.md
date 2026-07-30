@@ -3905,3 +3905,23 @@ and the trained model backend.
 - Publish a continuously updated annotated controller preview.
 - Added synthetic temporal-tracking, dynamic-aim, dual grasp-gate, Jacobian,
   and floor-guard regression tests.
+
+## Patch 111 — reacquire after one-time model seeding latency
+
+### Physical finding
+
+- FastSAM correctly selected the real object around `(647, 550)`, but its
+  one-time 3–4 second inference left the next live frame outside CamShift's
+  original narrow seed window.
+- The arm remained at the safe search pose and emitted no approach target.
+
+### Changes
+
+- Learn the target histogram only from the tight FastSAM object box.
+- Use an 80 px enlarged search window for the first temporal update so the
+  tracker can re-anchor on the newest frame after model latency and servo
+  settling.
+- Skip only the meaningless first scale-ratio comparison, then restore the
+  normal bounded centre, scale, and confidence gates for every later frame.
+- Added a regression in which the first live target moves completely outside
+  its original seed box but remains inside the bounded reacquisition window.

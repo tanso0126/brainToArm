@@ -60,6 +60,7 @@ PREVIEW_HZ = 10.0
 TRACKER_MIN_CONFIDENCE = 0.08
 TRACKER_MAX_CENTER_JUMP_RATIO = 0.20
 TRACKER_SCALE_RANGE = (0.45, 2.20)
+TRACKER_INITIAL_SEARCH_MARGIN_PX = 80
 FAR_AIM_Y_RATIO = 0.56
 NEAR_RANGE_MM = 180.0
 GRASP_CENTER_TOLERANCE_PX = 55.0
@@ -134,8 +135,8 @@ class HistogramTargetTracker:
         return x0, y0, max(2, x1 - x0), max(2, y1 - y0)
 
     def initialize(self, frame, bbox):
-        window = self._clamp_box(bbox, frame.shape, margin=8)
-        x, y, width, height = window
+        histogram_box = self._clamp_box(bbox, frame.shape, margin=4)
+        x, y, width, height = histogram_box
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         crop = hsv[y:y + height, x:x + width]
         mask = cv2.inRange(
@@ -149,12 +150,16 @@ class HistogramTargetTracker:
             [crop], [0, 1], mask, [36, 32], [0, 180, 0, 256])
         cv2.normalize(histogram, histogram, 0, 255, cv2.NORM_MINMAX)
         self.histogram = histogram
-        self.window = window
+        self.window = self._clamp_box(
+            bbox, frame.shape, margin=TRACKER_INITIAL_SEARCH_MARGIN_PX)
         self.last_center = np.asarray(
             (x + 0.5 * width, y + 0.5 * height), dtype=float)
-        self.last_area = float(width * height)
+        # The first CamShift update intentionally collapses a wide reacquisition
+        # window back onto the physical object, so it has no meaningful scale
+        # ratio to the seed box.
+        self.last_area = None
         return TrackObservation(
-            tuple(self.last_center), window, 1.0)
+            tuple(self.last_center), histogram_box, 1.0)
 
     def update(self, frame):
         if self.histogram is None or self.window is None:
@@ -180,7 +185,10 @@ class HistogramTargetTracker:
         area = float(width * height)
         diagonal = math.hypot(frame.shape[1], frame.shape[0])
         center_jump = float(np.linalg.norm(center - self.last_center))
-        scale = area / max(1.0, self.last_area)
+        scale = (
+            1.0 if self.last_area is None
+            else area / max(1.0, self.last_area)
+        )
         roi = probability[y:y + height, x:x + width]
         confidence = (
             float(np.mean(roi)) / 255.0 if roi.size else 0.0)

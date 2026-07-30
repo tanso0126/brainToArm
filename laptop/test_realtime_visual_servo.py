@@ -28,6 +28,20 @@ class RealtimeVisualServoTests(unittest.TestCase):
         self.assertAlmostEqual(tracked.center[0], 152.0, delta=8.0)
         self.assertAlmostEqual(tracked.center[1], 126.0, delta=8.0)
 
+    def test_first_temporal_frame_reacquires_beyond_seed_box(self):
+        first = np.full((240, 320, 3), 235, dtype=np.uint8)
+        shifted = first.copy()
+        cv2.rectangle(first, (80, 80), (110, 150), (180, 60, 120), -1)
+        cv2.rectangle(
+            shifted, (140, 85), (170, 155), (180, 60, 120), -1)
+        tracker = HistogramTargetTracker()
+        tracker.initialize(first, (80, 80, 30, 70))
+
+        tracked = tracker.update(shifted)
+
+        self.assertIsNotNone(tracked)
+        self.assertAlmostEqual(tracked.center[0], 155.0, delta=10.0)
+
     def test_dynamic_aim_moves_from_image_to_live_gripper_row(self):
         self.assertAlmostEqual(dynamic_aim_y(720, 300, 690), 403.2)
         self.assertAlmostEqual(dynamic_aim_y(720, 46, 690), 690.0)
