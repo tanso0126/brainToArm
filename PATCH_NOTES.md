@@ -4005,3 +4005,14 @@ and the trained model backend.
   in the frame; no table/background row is reintroduced.
 - Added a regression using the measured false finger `(503,640)` and a central
   low object.
+
+## Patch 116 — recover coloured targets under wrist-camera overexposure
+
+- Added a lightweight HSV connected-component seed fallback to the continuous
+  visual servo. FastSAM remains the primary arbitrary-object proposal source,
+  but a vivid object on the white work surface can now seed tracking even when
+  overexposure causes FastSAM to return no candidates.
+- The fallback removes the already-observed red/blue fingertip regions before
+  ranking components, so the gripper tape cannot become the target.
+- Added a synthetic regression proving that a saturated object is recovered
+  from an otherwise overexposed white frame.

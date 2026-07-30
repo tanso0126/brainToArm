@@ -104,6 +104,21 @@ class RealtimeVisualServoTests(unittest.TestCase):
 
         self.assertIs(select_realtime_seed(scene), real_object)
 
+    def test_realtime_seed_recovers_vivid_object_on_white_frame(self):
+        frame = np.full((720, 1280, 3), 255, dtype=np.uint8)
+        cv2.rectangle(frame, (530, 20), (650, 180), (220, 50, 150), -1)
+        scene = SimpleNamespace(
+            ranked=[],
+            frame_shape=frame.shape,
+            gripper=None,
+        )
+
+        selected = select_realtime_seed(scene, frame)
+
+        self.assertIsNotNone(selected)
+        self.assertGreater(selected.area, 10000)
+        self.assertLess(abs(selected.center[0] - 590), 5)
+
     def test_numeric_jacobian_and_resolved_target_are_bounded(self):
         pose = [90, 107, 84, 178, 90, 170]
 

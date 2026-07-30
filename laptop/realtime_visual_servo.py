@@ -92,6 +92,15 @@ class GraspReadiness:
     center_error_px: float
 
 
+@dataclass(frozen=True)
+class RealtimeSeed:
+    center: tuple[float, float]
+    bbox: tuple[int, int, int, int]
+    area: float
+    confidence: float
+    median_saturation: float
+
+
 class LatestFrameStream:
     """Consume every newly published frame without reopening the camera."""
 
@@ -310,7 +319,52 @@ def grasp_readiness(
                           center_error)
 
 
-def select_realtime_seed(scene):
+def _vivid_frame_seeds(frame, gripper):
+    """Recover coloured objects when segmentation misses an overexposed view."""
+    height, width = frame.shape[:2]
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(
+        hsv,
+        np.asarray((0, 45, 35), dtype=np.uint8),
+        np.asarray((179, 255, 255), dtype=np.uint8),
+    )
+    mask = cv2.morphologyEx(
+        mask, cv2.MORPH_OPEN, np.ones((3, 3), dtype=np.uint8))
+    mask = cv2.morphologyEx(
+        mask, cv2.MORPH_CLOSE, np.ones((7, 7), dtype=np.uint8))
+    if gripper is not None:
+        for blob in (gripper.blue, gripper.red):
+            cv2.circle(
+                mask,
+                tuple(int(round(value)) for value in blob.center),
+                int(round(max(blob.bbox[2], blob.bbox[3]) * 0.85)),
+                0,
+                -1,
+            )
+    count, labels, stats, centroids = cv2.connectedComponentsWithStats(
+        mask, 8)
+    seeds = []
+    frame_area = float(width * height)
+    for label in range(1, count):
+        x, y, box_width, box_height, pixels = (
+            int(value) for value in stats[label])
+        ratio = float(pixels) / frame_area
+        if not SEED_MIN_AREA_RATIO <= ratio <= SEED_MAX_AREA_RATIO:
+            continue
+        component = labels == label
+        saturation = float(np.median(hsv[:, :, 1][component]))
+        confidence = float(np.clip(saturation / 180.0, 0.0, 1.0))
+        seeds.append(RealtimeSeed(
+            center=tuple(float(value) for value in centroids[label]),
+            bbox=(x, y, box_width, box_height),
+            area=float(pixels),
+            confidence=confidence,
+            median_saturation=saturation,
+        ))
+    return seeds
+
+
+def select_realtime_seed(scene, frame=None):
     """Select a compact object without a pose-dependent fixed horizon row."""
     height, width = scene.frame_shape[:2]
     gripper = getattr(scene, "gripper", None)
@@ -327,7 +381,10 @@ def select_realtime_seed(scene):
         aim_x + 0.5 * opening_px,
     )
     valid = []
-    for candidate in scene.ranked:
+    candidates = list(scene.ranked)
+    if frame is not None:
+        candidates.extend(_vivid_frame_seeds(frame, gripper))
+    for candidate in candidates:
         ratio = float(candidate.area) / float(width * height)
         axis_error = abs(float(candidate.center[0]) - aim_x)
         if not SEED_MIN_AREA_RATIO <= ratio <= SEED_MAX_AREA_RATIO:
@@ -479,7 +536,7 @@ def _search_and_seed(
     if not execute:
         frame, _stamp = frame_stream.read(timeout_s=1.0)
         scene, _observation = detector.scene(frame)
-        return pose, frame, select_realtime_seed(scene)
+        return pose, frame, select_realtime_seed(scene, frame)
     opened = list(pose)
     opened[config.J_GRIP] = config.GRIP_OPEN
     if opened != pose:
@@ -503,7 +560,7 @@ def _search_and_seed(
         pose = target_pose
         frame, _stamp = frame_stream.read(timeout_s=1.0)
         scene, _observation = detector.scene(frame)
-        candidate = select_realtime_seed(scene)
+        candidate = select_realtime_seed(scene, frame)
         if candidate is not None:
             return pose, frame, candidate
     return pose, frame, None
