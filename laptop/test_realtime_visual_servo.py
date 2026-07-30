@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import cv2
 import numpy as np
 
+import arm_fk
 from realtime_visual_servo import (
     HistogramTargetTracker,
     dynamic_aim_y,
@@ -150,6 +151,19 @@ class RealtimeVisualServoTests(unittest.TestCase):
                     pose, plan["pose"]),
                 10.0,
             )
+
+    def test_measured_high_target_pose_can_continue_forward(self):
+        pose = [90, 77, 90, 163, 90, 180]
+
+        plan = resolved_velocity_target(
+            pose, vertical_error_px=-300,
+            distance_mm=72.0, floor_clearance_mm=231.0)
+
+        self.assertIsNotNone(plan)
+        self.assertGreater(
+            arm_fk.geometry(plan["pose"]).finger_tip[0],
+            arm_fk.geometry(pose).finger_tip[0],
+        )
 
 
 if __name__ == "__main__":

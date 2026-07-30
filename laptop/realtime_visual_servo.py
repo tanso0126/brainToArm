@@ -438,8 +438,11 @@ def resolved_velocity_target(
         TASK_ADVANCE_MIN_MM, float(desired_translation[0]))
     if float(floor_clearance_mm) <= FLOOR_HOLD_START_MM:
         desired_translation = np.asarray((advance, 0.0), dtype=float)
+    # Mounted-camera evidence: decreasing the hand pitch moved a target that
+    # was already above the aim row even farther upward.  Image y therefore
+    # has the same control sign as this task-space pitch convention.
     desired_pitch = float(np.clip(
-        -float(vertical_error_px) / 35.0, -2.0, 2.0))
+        float(vertical_error_px) / 35.0, -2.0, 2.0))
     desired = np.asarray(
         (desired_translation[0], desired_translation[1], desired_pitch),
         dtype=float,

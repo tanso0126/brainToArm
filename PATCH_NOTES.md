@@ -4016,3 +4016,13 @@ and the trained model backend.
   ranking components, so the gripper tape cannot become the target.
 - Added a synthetic regression proving that a saturated object is recovered
   from an otherwise overexposed white frame.
+
+## Patch 117 — correct mounted-camera vertical control polarity
+
+- The first continuous physical approach reduced sonar range to `72 mm` while
+  retaining the same target, but stopped at pose `[90,77,90,163,90,180]`.
+- Its preview showed that decreasing task pitch had driven an already-high
+  target farther upward. Corrected the image-y-to-pitch polarity from that
+  measured mounted-camera response.
+- Added a regression for the measured pose: a target 300 px above the aim row
+  must produce a safe forward next pose instead of exhausting the reach.
