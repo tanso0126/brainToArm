@@ -2,7 +2,7 @@
 
 이 폴더는 기존 macOS 실험 코드를 건드리지 않고 만든 **Windows 전용
 배포판**입니다. 일반 사용자는 GitHub Releases에서
-`brainToArm-Windows-Setup-v2.0.0.exe` 하나만 받아 더블클릭하면 됩니다.
+`brainToArm-Windows-Setup-v2.0.1.exe` 하나만 받아 더블클릭하면 됩니다.
 Python, Node.js, 터미널 명령 또는 저장소 ZIP은 필요하지 않습니다.
 
 설치가 끝나면 전용 GUI가 자동으로 열리고 바탕화면에

@@ -13,6 +13,9 @@ datas = [
     # Top-level bundled modules live in PyInstaller's _internal directory, so
     # their __file__.parent resolves this source release directory here.
     (str(RELEASE / "assets"), "assets"),
+    # config.py is bundled under _internal/laptop and loads the exact HOME
+    # constants during import, including when only the simulator is opened.
+    (str(ROOT / "firmware"), "firmware"),
     (str(ROOT / "simul" / "model_manifest.json"), "simul"),
     (str(ROOT / "simul" / "Robotic+Arm+with+Servo+&+Arduino.zip"), "simul"),
     (str(ROOT / "simul" / "Robotic+Arm+with+Servo+&+Arduino.3mf"), "simul"),

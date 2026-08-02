@@ -66,7 +66,7 @@ jobs:
           & "dist\brainToArm\brainToArm.exe" --self-test
           if ($LASTEXITCODE -ne 0) { throw "독립 실행 앱 자체 검사 실패" }
 
-      - name: 내장 GUI HTTP 검사
+      - name: 내장 GUI와 3D 시뮬레이션 실제 기동 검사
         shell: pwsh
         run: |
           $process = Start-Process "dist\brainToArm\brainToArm.exe" -ArgumentList "--no-window", "--api-port", "18765" -PassThru
@@ -84,6 +84,12 @@ jobs:
               } catch {}
             }
             if (-not $ready) { throw "패키지에서 GUI 또는 API가 열리지 않음" }
+            $simulation = Invoke-RestMethod "http://127.0.0.1:18765/api/simulation/start" -Method Post -ContentType "application/json" -Body "{}"
+            $frame = Invoke-WebRequest "http://127.0.0.1:18765/api/simulation/frame?camera=overview&width=640&height=360" -UseBasicParsing
+            if ($frame.StatusCode -ne 200 -or $frame.RawContentLength -lt 10000) {
+              throw "패키지에서 MuJoCo 시뮬레이션 프레임을 만들지 못함"
+            }
+            Invoke-RestMethod "http://127.0.0.1:18765/api/simulation/stop" -Method Post -ContentType "application/json" -Body "{}" | Out-Null
           } finally {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
           }

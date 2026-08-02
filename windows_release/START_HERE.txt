@@ -2,7 +2,7 @@ brainToArm WINDOWS 앱 빠른 시작
 ===============================
 
 일반 사용자는 GitHub Releases에서
-brainToArm-Windows-Setup-v2.0.0.exe 하나만 받습니다.
+brainToArm-Windows-Setup-v2.0.1.exe 하나만 받습니다.
 설치가 끝나면 전용 GUI가 자동으로 열립니다.
 이후에는 바탕화면의 brainToArm 통합 운영실 아이콘만 실행합니다.
 

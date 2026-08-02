@@ -236,6 +236,11 @@ def frozen_self_test():
         raise RuntimeError("내장 GUI index.html이 없습니다.")
     if not (RELEASE / "assets" / "FastSAM-s.pt").is_file():
         raise RuntimeError("내장 FastSAM 모델이 없습니다.")
+    firmware = (
+        Path(getattr(sys, "_MEIPASS", ROOT))
+        / "firmware" / "arm_controller" / "home_pose.h")
+    if not firmware.is_file():
+        raise RuntimeError(f"내장 Arduino HOME 설정이 없습니다: {firmware}")
     service = ControlCenterService()
     status = service.status()
     service.close()
@@ -246,6 +251,7 @@ def frozen_self_test():
         "armMode": status["arm"]["mode"],
         "activeServos": status["arm"]["activeServos"],
         "ui": str(UI_ROOT / "index.html"),
+        "firmware": str(firmware),
     }, ensure_ascii=False, indent=2))
     return 0
 

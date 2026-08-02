@@ -85,6 +85,10 @@ class WindowsReleaseTests(unittest.TestCase):
         workflow = ROOT_DIR / ".github" / "workflows" / "build-windows-app.yml"
         self.assertIn(
             "brainToArm-Windows-Setup", workflow.read_text(encoding="utf-8"))
+        spec = (RELEASE_DIR / "brainToArm.spec").read_text(encoding="utf-8")
+        self.assertIn('(str(ROOT / "firmware"), "firmware")', spec)
+        self.assertIn("/api/simulation/frame?camera=overview", workflow.read_text(
+            encoding="utf-8"))
 
     def test_control_center_uses_embedded_ui_and_frozen_camera_worker(self):
         center = (RELEASE_DIR / "control_center.py").read_text(encoding="utf-8")

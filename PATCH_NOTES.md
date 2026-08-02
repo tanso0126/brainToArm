@@ -442,3 +442,32 @@ Node.js와 여러 `.bat` 파일을 직접 다뤄야 했으므로 “앱 하나�
 - EEG, 실시간 시각 서보, MuJoCo Studio 핵심 모듈 가져오기
 - 내장 HTML과 통합 상태 API의 동일 포트 기동 검사
 - GitHub Windows x64 패키지 자체 검사와 설치 파일 생성 자동화
+
+## 패치 132 — Windows `_internal` 펌웨어 누락 수정과 시뮬레이터 실기동 검사
+
+### 원인
+
+v2.0.0은 펌웨어를 설치 폴더 바깥 계층에 복사했지만, PyInstaller가 묶은
+`config.py`는 `_internal\firmware\arm_controller\home_pose.h`에서 여섯 개
+HOME 상수를 읽었습니다. GUI와 상태 API는 이 경로를 사용하지 않아 빌드
+검사를 통과했지만, MuJoCo Studio를 처음 열 때 설정 모듈이 해당 파일을
+읽으며 실패했습니다.
+
+### 변경 내용
+
+- PyInstaller 데이터에 `firmware/` 전체를 추가해 `_internal` 안에 반드시
+  포함되게 했습니다.
+- 독립 실행 앱 자체 검사가 `_internal`의 `home_pose.h` 존재를 직접 검사하게
+  했습니다.
+- Windows 패키지 검사에서 `/api/simulation/start`를 실제 호출하고 640×360
+  MuJoCo JPEG 프레임이 10KB 이상 생성되는지 확인한 뒤 시뮬레이션을
+  종료하게 했습니다.
+- v2.0.1 설치 파일과 릴리스 문서를 수정 버전으로 갱신했습니다.
+
+### 재검증 기준
+
+- Windows x64 독립 실행 앱 자체 검사
+- 내장 GUI와 실제 상태 API 기동
+- MuJoCo Studio 시작
+- overview 카메라 JPEG 렌더
+- 시뮬레이션 정상 종료
