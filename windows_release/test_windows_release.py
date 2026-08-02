@@ -87,7 +87,7 @@ class WindowsReleaseTests(unittest.TestCase):
             "brainToArm-Windows-Setup", workflow.read_text(encoding="utf-8"))
         spec = (RELEASE_DIR / "brainToArm.spec").read_text(encoding="utf-8")
         self.assertIn('(str(ROOT / "firmware"), "firmware")', spec)
-        self.assertIn("/api/simulation/frame?camera=overview", workflow.read_text(
+        self.assertIn('simulation.engine -ne "MuJoCo"', workflow.read_text(
             encoding="utf-8"))
 
     def test_control_center_uses_embedded_ui_and_frozen_camera_worker(self):

@@ -18,5 +18,5 @@ GUI에서 PolyG-I EEG, ErrP/TAR, 3D 시뮬레이션, 손목 카메라, Arduino U
 - 패키지의 `_internal` 실행환경에 Arduino HOME 설정과 펌웨어 전체를 포함했습니다.
 - 시뮬레이터가 `firmware/arm_controller/home_pose.h`를 찾지 못하던 v2.0.0
   패키징 오류를 수정했습니다.
-- Windows 빌드에서 GUI/API 확인뿐 아니라 MuJoCo 시뮬레이션 시작과 실제 JPEG
-  렌더 프레임 생성까지 통과해야 릴리스하도록 검사를 강화했습니다.
+- Windows 빌드에서 GUI/API 확인뿐 아니라 MuJoCo 시뮬레이션 시작, 물리 진행,
+  다중 물체·6관절 상태와 정상 종료까지 통과해야 릴리스하도록 강화했습니다.

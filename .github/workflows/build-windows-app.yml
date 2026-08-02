@@ -85,11 +85,13 @@ jobs:
             }
             if (-not $ready) { throw "패키지에서 GUI 또는 API가 열리지 않음" }
             $simulation = Invoke-RestMethod "http://127.0.0.1:18765/api/simulation/start" -Method Post -ContentType "application/json" -Body "{}"
-            $frame = Invoke-WebRequest "http://127.0.0.1:18765/api/simulation/frame?camera=overview&width=640&height=360" -UseBasicParsing
-            if ($frame.StatusCode -ne 200 -or $frame.RawContentLength -lt 10000) {
-              throw "패키지에서 MuJoCo 시뮬레이션 프레임을 만들지 못함"
+            Start-Sleep -Seconds 1
+            $simulation = Invoke-RestMethod "http://127.0.0.1:18765/api/simulation/status"
+            if ($simulation.engine -ne "MuJoCo" -or -not $simulation.physics -or -not $simulation.running -or $simulation.objects.Count -lt 2 -or $simulation.servoDeg.Count -ne 6) {
+              throw "패키지에서 MuJoCo 물리 작업실이 정상적으로 진행되지 않음"
             }
-            Invoke-RestMethod "http://127.0.0.1:18765/api/simulation/stop" -Method Post -ContentType "application/json" -Body "{}" | Out-Null
+            $stopped = Invoke-RestMethod "http://127.0.0.1:18765/api/simulation/stop" -Method Post -ContentType "application/json" -Body "{}"
+            if ($stopped.running) { throw "패키지의 MuJoCo 작업을 정상 종료하지 못함" }
           } finally {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
           }
