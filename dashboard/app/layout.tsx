@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "brainToArm · Shared Autonomy Studio",
-  description: "카메라 기반 다중 물체 로봇 시뮬레이션과 PolyG-I ErrP를 연결하는 로컬 공유자율 작업실",
+  title: "brainToArm · Windows 통합 운영실",
+  description: "PolyG-I 뇌파, 3D 시뮬레이션, 손목 카메라, 실물 로봇팔을 한 화면에서 연결하는 로컬 공유자율 운영실",
 };
 
 export default function RootLayout({

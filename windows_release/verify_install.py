@@ -14,7 +14,9 @@ EXPECTED_MODEL_SHA256 = (
 
 
 def main():
-    required = ("numpy", "cv2", "serial", "ultralytics")
+    required = (
+        "numpy", "cv2", "serial", "ultralytics", "scipy", "hid",
+        "mujoco", "webview")
     for name in required:
         importlib.import_module(name)
         print(f"[설치 확인] {name} 불러오기: 정상")
@@ -34,10 +36,23 @@ def main():
     config.PLANAR_VISION_MODEL = str(ASSET)
     from vision_segment import FastSAMDetector
     FastSAMDetector()
-    for name in ("windows_app", "windows_camera", "windows_support"):
+    for name in (
+            "windows_app", "windows_camera", "windows_support",
+            "control_service", "control_center"):
         importlib.import_module(name)
+    dashboard = ROOT / "dashboard"
+    if not (dashboard / "dist" / "client").is_dir():
+        raise RuntimeError(
+            "통합 GUI 빌드 파일이 없습니다. SETUP_WINDOWS.bat을 다시 "
+            "실행하세요.")
+    for model in (
+            ROOT / "simul" / "models" / "full_task_policy_v1.ts",
+            ROOT / "simul" / "models" / "reduced_dof_policy_v1.ts"):
+        if not model.is_file():
+            raise RuntimeError(f"시뮬레이션 학습 모델이 없습니다: {model}")
     print(f"[설치 확인] FastSAM AI 모델: 정상 ({digest[:12]}...)")
     print("[설치 확인] Windows 실행 모듈: 정상")
+    print("[설치 확인] 통합 GUI와 3D 학습 모델: 정상")
     return 0
 
 

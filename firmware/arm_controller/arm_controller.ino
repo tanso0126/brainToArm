@@ -23,6 +23,7 @@
 //     "F\n"                        grip sensor -> "F 0..1023", or "F -1" absent
 //     "D\n"                        ultrasonic range -> "D millimetres", or
 //                                   "D -1" on timeout/out-of-range
+//     "X\n"                        stop the current slew at its present command
 //   Reply to laptop:
 //     "OK\n"      command accepted
 //     "ERR ...\n" parse error
@@ -170,6 +171,16 @@ void sendUltrasonicDistance() {
   Serial.println(distanceMm);
 }
 
+void stopMotion() {
+  // This is a host emergency hold, not a power cut.  It cancels the remaining
+  // interpolation immediately while leaving every servo attached at the last
+  // pulse already written.  A physical emergency still requires disconnecting
+  // the external servo supply.
+  for (uint8_t i = 0; i < N; i++) target[i] = (int)(current[i] + 0.5);
+  announced = true;
+  Serial.println("STOPPED");
+}
+
 void handleLine(char* line) {
   switch (line[0]) {
     case 'A':
@@ -194,6 +205,10 @@ void handleLine(char* line) {
       break;
     case 'D':
       if (line[1] == '\0') sendUltrasonicDistance();
+      else                  Serial.println("ERR parse");
+      break;
+    case 'X':
+      if (line[1] == '\0') stopMotion();
       else                  Serial.println("ERR parse");
       break;
     default:  Serial.println("ERR cmd");

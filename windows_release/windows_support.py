@@ -14,6 +14,11 @@ from serial.tools import list_ports
 import config
 from arm_safety import PhysicalArmSafety
 import arm_serial
+from reduced_dof import (
+    ReducedDofSafety,
+    canonicalize_status,
+    validate_command_pose,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -154,6 +159,9 @@ class DirectArmClient:
                 "valid": distance is not None,
                 "samples": samples,
             }
+        if command == "stop":
+            return {"ok": bool(self.arm.stop_motion()),
+                    "pose": self.arm.status()}
         if command == "move":
             target = self._pose(payload)
             pose = self._checked_move(
@@ -190,3 +198,53 @@ class DirectArmClient:
 
     def close(self):
         self.arm.close()
+
+
+class ReducedDirectArmClient(DirectArmClient):
+    """Direct Windows adapter for the current 2/3/5-only physical build."""
+
+    def __init__(self, arm, camera_path=WRIST_RAW_FRAME):
+        super().__init__(
+            arm, safety=ReducedDofSafety(), camera_path=camera_path)
+
+    @staticmethod
+    def _pose(payload):
+        pose = DirectArmClient._pose(payload)
+        return validate_command_pose(pose)
+
+    def request(self, payload, timeout=30.0):
+        response = super().request(payload, timeout=timeout)
+        if isinstance(response, dict) and isinstance(response.get("pose"), list):
+            response["pose"] = canonicalize_status(response["pose"])
+        response["mode"] = "reduced-2dof"
+        response["activeServos"] = [2, 3, 5]
+        return response
+
+
+class Wrist3DofDirectArmClient(DirectArmClient):
+    """Windows adapter that exposes only servos 2/3/4 and the gripper.
+
+    Base yaw and wrist roll are captured once at connection and then copied into
+    every outgoing pose.  Legacy HOME helpers can therefore be reused without
+    accidentally moving either disabled axis.
+    """
+
+    def __init__(self, arm, camera_path=WRIST_RAW_FRAME):
+        super().__init__(arm, camera_path=camera_path)
+        initial = list(arm.status())
+        self._locked_base = int(initial[config.J_BASE])
+        self._locked_roll = int(initial[config.J_ROLL])
+
+    def _pose(self, payload):
+        pose = DirectArmClient._pose(payload)
+        pose[config.J_BASE] = self._locked_base
+        pose[config.J_ROLL] = self._locked_roll
+        return pose
+
+    def request(self, payload, timeout=30.0):
+        response = super().request(payload, timeout=timeout)
+        if isinstance(response, dict):
+            response["mode"] = "wrist-3dof"
+            response["activeServos"] = [2, 3, 4, 5]
+            response["fixedServos"] = [1, 6]
+        return response

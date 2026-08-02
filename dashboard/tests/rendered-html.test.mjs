@@ -13,22 +13,24 @@ async function render() {
   );
 }
 
-test("server-renders the shared-autonomy simulation studio", async () => {
+test("server-renders the Windows all-in-one control center", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
-  assert.match(html, /<title>brainToArm · Shared Autonomy Studio<\/title>/i);
-  assert.match(html, /Simulation Studio/);
+  assert.match(html, /<title>brainToArm · Windows 통합 운영실<\/title>/i);
+  assert.match(html, /Windows Control Center/);
+  assert.match(html, /연결부터 뇌파 제어, 자동 파지까지/);
   assert.match(html, /시뮬레이션 작업실/);
-  assert.match(html, /MuJoCo 3D 엔진에 연결하는 중입니다/);
+  assert.match(html, /EEG 실시간 모니터/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
 
 test("starter preview is removed and localhost API is explicit", async () => {
-  const [page, simulationLab, packageJson] = await Promise.all([
+  const [page, simulationLab, controlCenter, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/SimulationLab.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/ControlCenter.tsx", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
   assert.match(page, /http:\/\/127\.0\.0\.1:8765/);
@@ -59,6 +61,9 @@ test("starter preview is removed and localhost API is explicit", async () => {
   assert.match(page, /requestAnimationFrame/);
   assert.match(page, /부드럽게 · 0\.45초/);
   assert.match(page, /SimulationLab/);
+  assert.match(controlCenter, /\/api\/control\/task\/start/);
+  assert.match(controlCenter, /2·3·4축\+집게/);
+  assert.match(controlCenter, /ErrP 자동 반영/);
   assert.match(packageJson, /braintoarm-eeg-dashboard/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));

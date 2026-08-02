@@ -20,6 +20,7 @@ import {
 import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import SimulationLab from "./SimulationLab";
+import ControlCenter from "./ControlCenter";
 
 const API_BASE = "http://127.0.0.1:8765";
 const CHANNEL_COLORS = [
@@ -653,7 +654,7 @@ function SpectrumCanvas({ bins }: { bins: { hz: number; db: number }[] }) {
 }
 
 export default function Home() {
-  const [activeWorkspace, setActiveWorkspace] = useState<"simulation" | "eeg">("simulation");
+  const [activeWorkspace, setActiveWorkspace] = useState<"control" | "simulation" | "eeg">("control");
   const [status, setStatus] = useState<DashboardStatus | null>(null);
   const [rows, setRows] = useState<SampleRow[]>([]);
   const [recordings, setRecordings] = useState<Recording[]>([]);
@@ -894,7 +895,7 @@ export default function Home() {
           <div className="brand-mark"><Activity size={18} strokeWidth={2.2} /></div>
           <div>
             <p className="eyebrow">brainToArm / shared autonomy</p>
-            <h1>{activeWorkspace === "simulation" ? "Simulation Studio" : "PolyG-I Live Monitor"}</h1>
+            <h1>{activeWorkspace === "control" ? "Windows Control Center" : activeWorkspace === "simulation" ? "Simulation Studio" : "PolyG-I Live Monitor"}</h1>
           </div>
         </div>
         <div className="header-actions">
@@ -915,6 +916,9 @@ export default function Home() {
       </header>
 
       <nav className="workspace-tabs" aria-label="작업 화면">
+        <button className={activeWorkspace === "control" ? "active" : ""} onClick={() => setActiveWorkspace("control")}>
+          <Usb size={16} />통합 운영실
+        </button>
         <button className={activeWorkspace === "simulation" ? "active" : ""} onClick={() => setActiveWorkspace("simulation")}>
           <Sparkles size={16} />시뮬레이션 작업실
         </button>
@@ -933,7 +937,26 @@ export default function Home() {
         </div>
       )}
 
-      {activeWorkspace === "simulation" ? (
+      {activeWorkspace === "control" ? (
+        <ControlCenter
+          eeg={{
+            apiOnline,
+            deviceReady,
+            running: isRunning,
+            baselineReady: Boolean(status?.errp.baselineReady && loadStatus?.baselineReady),
+            probability: status?.errp.asynchronous.probability ?? null,
+            threshold: status?.errp.asynchronous.threshold ?? 0.5,
+            tar: loadStatus?.tar ?? null,
+            relativeTar: loadStatus?.smoothedRelativeTar ?? null,
+            robotWeight: loadStatus?.robotWeight ?? 0.5,
+            humanWeight: loadStatus?.humanWeight ?? 0.5,
+          }}
+          startEeg={() => perform("/api/acquisition/start", { gainIndex })}
+          stopEeg={() => perform("/api/acquisition/stop")}
+          openEeg={() => setActiveWorkspace("eeg")}
+          openSimulation={() => setActiveWorkspace("simulation")}
+        />
+      ) : activeWorkspace === "simulation" ? (
         <SimulationLab
           eegRunning={isRunning}
           apiOnline={apiOnline}

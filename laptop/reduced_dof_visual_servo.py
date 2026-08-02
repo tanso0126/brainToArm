@@ -86,7 +86,8 @@ def _preview(frame, target, gripper_center, aim_y, distance_mm,
     _atomic_write_jpeg(PREVIEW_PATH, image)
 
 
-def _search_and_seed(connection, frames, detector, safety, execute):
+def _search_and_seed(connection, frames, detector, safety, execute,
+                     stop_event=None, candidate_rank=0):
     pose = canonicalize_status(
         connection.request({"command": "status"})["pose"])
     opened = command_pose(
@@ -98,11 +99,13 @@ def _search_and_seed(connection, frames, detector, safety, execute):
 
     frame, _stamp = frames.read(timeout_s=1.0)
     scene, _observation = detector.scene(frame)
-    candidate = select_realtime_seed(scene, frame)
+    candidate = _ranked_seed(scene, frame, candidate_rank)
     if candidate is not None or not execute:
         return pose, frame, candidate
 
     for target in search_poses(config.GRIP_OPEN):
+        if stop_event is not None and stop_event.is_set():
+            return pose, frame, None
         report = safety.transition_report(pose, target)
         if not report.safe:
             continue
@@ -111,10 +114,21 @@ def _search_and_seed(connection, frames, detector, safety, execute):
         pose = target
         frame, _stamp = frames.read(timeout_s=1.0)
         scene, _observation = detector.scene(frame)
-        candidate = select_realtime_seed(scene, frame)
+        candidate = _ranked_seed(scene, frame, candidate_rank)
         if candidate is not None:
             return pose, frame, candidate
     return pose, frame, None
+
+
+def _ranked_seed(scene, frame, candidate_rank=0):
+    """Select one stable ranked candidate while preserving the legacy default."""
+    rank = max(0, int(candidate_rank))
+    if rank == 0:
+        return select_realtime_seed(scene, frame)
+    # The multi-object GUI deliberately uses FastSAM's consolidated ranking.
+    # The vivid fallback has no stable identity, so it remains rank-0 only.
+    candidates = list(getattr(scene, "ranked", ()))
+    return candidates[rank] if rank < len(candidates) else None
 
 
 def close_lift_home(connection, safety, pose):
@@ -140,14 +154,17 @@ def close_lift_home(connection, safety, pose):
 
 
 def run(execute=False, allow_grasp=False, max_seconds=60.0,
-        learned_policy=False):
+        learned_policy=False, stop_event=None, candidate_rank=0):
     connection = reduced_client()
     safety = ReducedDofSafety()
     frames = LatestFrameStream()
     scene_detector = VividFallbackDetector(WristSceneDetector())
     wrist_detector = WristDetector()
     pose, frame, candidate = _search_and_seed(
-        connection, frames, scene_detector, safety, execute)
+        connection, frames, scene_detector, safety, execute,
+        stop_event=stop_event, candidate_rank=candidate_rank)
+    if stop_event is not None and stop_event.is_set():
+        return {"state": "stopped", "pose": pose, "mode": "reduced-2dof"}
     if candidate is None:
         return {"state": "no-target", "pose": pose, "mode": "reduced-2dof"}
 
@@ -165,6 +182,18 @@ def run(execute=False, allow_grasp=False, max_seconds=60.0,
     deadline = last_seen + float(max_seconds)
 
     while time.monotonic() < deadline:
+        if stop_event is not None and stop_event.is_set():
+            try:
+                connection.request({"command": "stop"})
+            except Exception:
+                pass
+            return {
+                "state": "stopped",
+                "pose": canonicalize_status(
+                    connection.request({"command": "status"})["pose"]),
+                "preview": str(PREVIEW_PATH),
+                "mode": "reduced-2dof",
+            }
         frame, _stamp = frames.read(timeout_s=1.0)
         now = time.monotonic()
         tracked = tracker.update(frame)

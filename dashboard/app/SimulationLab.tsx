@@ -244,7 +244,7 @@ const PHASE_COPY: Record<string, { title: string; detail: string }> = {
   error: { title: "엔진 오류", detail: "실행 기록의 원인을 확인하세요." },
 };
 
-const JOINT_LABELS = ["1 Base · FIXED", "2 Shoulder", "3 Elbow", "4 Wrist pitch", "5 Gripper", "6 Wrist roll"];
+const JOINT_LABELS = ["1 Base · FIXED", "2 Shoulder", "3 Elbow", "4 Wrist pitch", "5 Gripper", "6 Wrist roll · FIXED"];
 
 function polar(x: number, y: number) {
   return {

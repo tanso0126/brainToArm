@@ -4,7 +4,14 @@ PolyG-I 뇌파 측정 서비스와 연결되는 로컬 웹 화면입니다. 브�
 그래프와 상태를 표시하고, `../laptop/eeg_dashboard.py`가 USB HID 장치를
 단독으로 연결해 `http://127.0.0.1:8765`의 로컬 API로 전달합니다.
 
-## 가장 쉬운 실행 방법
+## Windows에서 가장 쉬운 실행 방법
+
+최초 한 번 `../windows_release/SETUP_WINDOWS.bat`을 실행한 뒤에는
+`../windows_release/START_CONTROL_CENTER.bat`만 더블클릭합니다. 통합 화면에서
+EEG, 3D 시뮬레이션, 손목 카메라, Arduino, 다중 후보 파지를 모두
+버튼으로 관리합니다.
+
+## macOS 개발 실행
 
 저장소 루트에서 다음 명령 하나를 실행합니다.
 

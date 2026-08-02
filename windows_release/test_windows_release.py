@@ -11,7 +11,12 @@ import numpy as np
 
 import config
 from windows_camera import gripper_score
-from windows_support import DirectArmClient, find_arm_port
+from windows_support import (
+    DirectArmClient,
+    Wrist3DofDirectArmClient,
+    find_arm_port,
+)
+from control_service import ControlCenterService
 
 
 RELEASE_DIR = Path(__file__).resolve().parent
@@ -43,6 +48,10 @@ class FakeArm:
     def close(self):
         self.closed = True
 
+    def stop_motion(self):
+        self.stopped = True
+        return True
+
 
 class WindowsReleaseTests(unittest.TestCase):
     def test_batch_launchers_are_ascii_crlf(self):
@@ -54,7 +63,7 @@ class WindowsReleaseTests(unittest.TestCase):
     def test_powershell_launchers_have_utf8_bom(self):
         for name in (
                 "setup_windows.ps1", "open_firmware.ps1",
-                "launch_tool.ps1"):
+                "launch_tool.ps1", "start_control_center.ps1"):
             payload = (RELEASE_DIR / name).read_bytes()
             self.assertTrue(payload.startswith(b"\xef\xbb\xbf"), name)
 
@@ -122,6 +131,67 @@ class WindowsReleaseTests(unittest.TestCase):
                     "require_camera": True,
                 })
         self.assertEqual(arm.sent, [])
+
+    def test_direct_client_exposes_firmware_emergency_hold(self):
+        arm = FakeArm()
+        client = DirectArmClient(arm)
+
+        response = client.request({"command": "stop"})
+
+        self.assertTrue(response["ok"])
+        self.assertTrue(arm.stopped)
+
+    def test_control_center_defaults_to_repaired_wrist_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            service = ControlCenterService(
+                settings_path=Path(directory) / "settings.json")
+            status = service.status()
+
+        self.assertEqual(status["arm"]["mode"], "wrist-3dof")
+        self.assertEqual(status["arm"]["activeServos"], [2, 3, 4, 5])
+        self.assertEqual(status["arm"]["fixedServos"], [1, 6])
+        self.assertFalse(status["camera"]["running"])
+        self.assertFalse(status["arm"]["connected"])
+
+    def test_wrist_mode_never_changes_base_or_roll(self):
+        arm = FakeArm()
+        arm.pose = [87, 70, 90, 140, 90, 23]
+        with tempfile.TemporaryDirectory() as directory:
+            frame = Path(directory) / "frame.jpg"
+            frame.write_bytes(b"live")
+            client = Wrist3DofDirectArmClient(arm, camera_path=frame)
+            client.safety = SimpleNamespace(
+                transition_report=lambda _start, _target:
+                SimpleNamespace(safe=True, explain=lambda: "safe"))
+
+            response = client.request({
+                "command": "move",
+                "pose": [0, 80, 100, 170, 180, 180],
+            })
+
+        self.assertEqual(response["pose"], [87, 80, 100, 170, 180, 23])
+        self.assertEqual(arm.sent[-1][0], 87)
+        self.assertEqual(arm.sent[-1][5], 23)
+
+    def test_control_center_persists_validated_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "settings.json"
+            service = ControlCenterService(settings_path=path)
+            saved = service.update_settings({
+                "camera": "2", "armPort": "com7",
+                "candidateReviewSeconds": 99,
+            })
+            restored = ControlCenterService(settings_path=path)
+
+        self.assertEqual(saved["armPort"], "COM7")
+        self.assertEqual(saved["candidateReviewSeconds"], 15.0)
+        self.assertEqual(restored.status()["settings"]["camera"], "2")
+
+    def test_firmware_has_immediate_stop_command(self):
+        source = (ROOT_DIR / "firmware" / "arm_controller"
+                  / "arm_controller.ino").read_text(encoding="utf-8")
+        self.assertIn("case 'X':", source)
+        self.assertIn('Serial.println("STOPPED")', source)
 
     def test_camera_score_requires_real_marker_pair(self):
         blank = np.full((720, 1280, 3), 240, dtype=np.uint8)

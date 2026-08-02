@@ -320,6 +320,13 @@ class ArmSerial:
         a[config.J_GRIP] = config.GRIP_OPEN if open_ else config.GRIP_CLOSED
         return self.send_angles(a)
 
+    def stop_motion(self):
+        """Cancel the remaining firmware slew and hold the last written pose."""
+        if self.mock:
+            return True
+        self.ser.write(b"X\n")
+        return self._wait_for({"STOPPED"}, timeout=2.0) == "STOPPED"
+
     def home(self):
         return self.send_angles(config.HOME_POSE)
 

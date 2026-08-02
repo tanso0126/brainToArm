@@ -308,7 +308,7 @@ def grasp_readiness(
     if float(distance_mm) > STOP_RANGE_MM:
         return GraspReadiness(
             False,
-            f"초음파 거리 {float(distance_mm):.1f}mm가 정지 기준 "
+            f"sonar/초음파 거리 {float(distance_mm):.1f}mm가 정지 기준 "
             f"{STOP_RANGE_MM:.1f}mm보다 큼",
             center_error,
         )
@@ -596,13 +596,23 @@ def _draw_preview(frame, target, gripper_center, aim_y, distance_mm,
     _atomic_write_jpeg(PREVIEW_PATH, image)
 
 
+def _ranked_realtime_seed(scene, frame, candidate_rank=0):
+    rank = max(0, int(candidate_rank))
+    if rank == 0:
+        return select_realtime_seed(scene, frame)
+    candidates = list(getattr(scene, "ranked", ()))
+    return candidates[rank] if rank < len(candidates) else None
+
+
 def _search_and_seed(
-        client, frame_stream, detector, safety, execute):
+        client, frame_stream, detector, safety, execute,
+        stop_event=None, candidate_rank=0):
     pose = list(client.request({"command": "status"})["pose"])
     if not execute:
         frame, _stamp = frame_stream.read(timeout_s=1.0)
         scene, _observation = detector.scene(frame)
-        return pose, frame, select_realtime_seed(scene, frame)
+        return pose, frame, _ranked_realtime_seed(
+            scene, frame, candidate_rank)
     opened = list(pose)
     opened[config.J_GRIP] = config.GRIP_OPEN
     if opened != pose:
@@ -617,10 +627,12 @@ def _search_and_seed(
     frame, _stamp = frame_stream.read(timeout_s=1.0)
     if pose[config.J_WRIST] >= CURRENT_VIEW_RESUME_WRIST_MIN_DEG:
         scene, _observation = detector.scene(frame)
-        candidate = select_realtime_seed(scene, frame)
+        candidate = _ranked_realtime_seed(scene, frame, candidate_rank)
         if candidate is not None:
             return pose, frame, candidate
     for wrist in SEARCH_WRISTS:
+        if stop_event is not None and stop_event.is_set():
+            return pose, frame, None
         target_pose = list(pose)
         target_pose[config.J_SHOULDER] = 70
         target_pose[config.J_ELBOW] = 90
@@ -635,20 +647,24 @@ def _search_and_seed(
         pose = target_pose
         frame, _stamp = frame_stream.read(timeout_s=1.0)
         scene, _observation = detector.scene(frame)
-        candidate = select_realtime_seed(scene, frame)
+        candidate = _ranked_realtime_seed(scene, frame, candidate_rank)
         if candidate is not None:
             return pose, frame, candidate
     return pose, frame, None
 
 
-def run(execute=False, allow_grasp=False, max_seconds=45.0):
+def run(execute=False, allow_grasp=False, max_seconds=45.0,
+        stop_event=None, candidate_rank=0):
     client = ArmSessionClient()
     safety = PhysicalArmSafety()
     frames = LatestFrameStream()
     detector = VividFallbackDetector(WristSceneDetector())
     wrist_detector = WristDetector()
     pose, frame, candidate = _search_and_seed(
-        client, frames, detector, safety, execute)
+        client, frames, detector, safety, execute,
+        stop_event=stop_event, candidate_rank=candidate_rank)
+    if stop_event is not None and stop_event.is_set():
+        return {"state": "stopped", "pose": pose}
     if candidate is None:
         return {"state": "no-target", "pose": pose}
     tracker = HistogramTargetTracker()
@@ -661,6 +677,16 @@ def run(execute=False, allow_grasp=False, max_seconds=45.0):
     deadline = last_seen + float(max_seconds)
 
     while time.monotonic() < deadline:
+        if stop_event is not None and stop_event.is_set():
+            try:
+                client.request({"command": "stop"})
+            except Exception:
+                pass
+            return {
+                "state": "stopped",
+                "pose": client.request({"command": "status"})["pose"],
+                "preview": str(PREVIEW_PATH),
+            }
         frame, _stamp = frames.read(timeout_s=1.0)
         now = time.monotonic()
         tracked = tracker.update(frame)
