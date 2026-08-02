@@ -104,6 +104,7 @@ def build_reduced_mjcf(parameters: Mapping[str, float] | None = None) -> str:
     <texture name="floor_tex" type="2d" builtin="checker" rgb1="0.9 0.9 0.88" rgb2="0.62 0.64 0.66" width="512" height="512"/>
     <material name="floor_mat" texture="floor_tex" texrepeat="4 4"/>
     <mesh name="base_case" file="{mesh_path('Alt_Kasa.stl')}" scale="0.001 0.001 0.001"/>
+    <mesh name="base_cover" file="{mesh_path('Alt_Kapak.stl')}" scale="0.001 0.001 0.001"/>
     <mesh name="base_rotor" file="{mesh_path('Alt_Govde.stl')}" scale="0.001 0.001 0.001"/>
     <mesh name="upper_visual" file="{mesh_path('Alt_Kol.stl')}" scale="0.001 0.001 0.001"/>
     <mesh name="fore_visual" file="{mesh_path('On_Kol.stl')}" scale="0.001 0.001 0.001"/>
@@ -116,19 +117,22 @@ def build_reduced_mjcf(parameters: Mapping[str, float] | None = None) -> str:
     <geom name="floor" type="plane" size="1.2 1.2 0.02" material="floor_mat"/>
     <camera name="overview" pos="0.72 -0.78 0.56" xyaxes="0.74 0.68 0 -0.27 0.29 0.92" fovy="48"/>
     <body name="base">
-      <geom name="base_collision" class="collision" type="box" pos="-0.045 0 0.035" size="0.105 0.06 0.035"/>
-      <geom class="visual" mesh="base_case"/><geom class="visual" mesh="base_rotor" pos="0 0 0.08"/>
+      <!-- Same +X housing envelope and 12 mm margin as the real interlock. -->
+      <geom name="base_collision" class="collision" type="box" pos="0.1025 0 0.0835" size="0.1945 0.087 0.0835" contype="4" conaffinity="2"/>
+      <geom class="visual" mesh="base_case" pos="0.1 0 0" euler="0 0 180"/>
+      <geom class="visual" mesh="base_cover" pos="0.1 0 0.07"/>
+      <geom class="visual" mesh="base_rotor" pos="0 0 0.08"/>
       <body name="shoulder_link" pos="0 0 {_f(arm_fk.SHOULDER_HEIGHT_M)}">
         <joint name="shoulder" type="hinge" axis="0 1 0" range="{_range(shoulder_deg)}"/>
-        <geom name="upper_collision" class="collision" type="capsule" fromto="0 0 0 {_f(upper_dx)} 0 {_f(upper_dz)}" size="0.025"/>
+        <geom name="upper_collision" class="collision" type="capsule" fromto="0 0 0 {_f(upper_dx)} 0 {_f(upper_dz)}" size="0.035"/>
         <geom class="visual" mesh="upper_visual" pos="0.1275 0 0.02" euler="0 90 0"/>
         <body name="elbow_link" pos="{_f(upper_dx)} 0 {_f(upper_dz)}">
           <joint name="elbow" type="hinge" axis="0 1 0" range="{_range(elbow_deg)}"/>
-          <geom name="fore_collision" class="collision" type="capsule" fromto="0 0 0 {_f(fore)} 0 0" size="0.024"/>
+          <geom name="fore_collision" class="collision" type="capsule" fromto="0 0 0 {_f(fore)} 0 0" size="0.035"/>
           <geom class="visual" mesh="fore_visual" pos="0.1525 0 0"/>
           <!-- Motor 4 has no joint or actuator: this complete subtree is rigid. -->
           <body name="fixed_wrist" pos="{_f(fore)} 0 0">
-            <geom name="wrist_collision" class="collision" type="capsule" fromto="0 0 0 {_f(arm_fk.WRISTROLL_M)} 0 0" size="0.022"/>
+            <geom name="wrist_collision" class="collision" type="capsule" fromto="0 0 0 {_f(arm_fk.WRISTROLL_M)} 0 0" size="0.040"/>
             <geom class="visual" mesh="wrist_visual" pos="0.022 0 0" euler="0 90 0"/>
             <camera name="wrist" pos="{_f(arm_fk.WRISTROLL_M + camera_x)} 0 {_f(camera_z)}" euler="0 {_f(camera_pitch)} {_f(camera_roll)}" fovy="73"/>
             <site name="camera_mount" pos="{_f(arm_fk.WRISTROLL_M + camera_x)} 0 {_f(camera_z)}" size="0.0001" rgba="0 0 0 0"/>

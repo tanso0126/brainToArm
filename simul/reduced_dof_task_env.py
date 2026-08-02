@@ -51,8 +51,10 @@ PHASE_SEARCH, PHASE_APPROACH, PHASE_GRASPED, PHASE_LIFTED, PHASE_RETURNED = rang
 # Safe, near-floor configurations found by the same rigid-wrist collision model
 # used on the laptop.  Domain randomization interpolates among these anchors.
 GRASP_POSES = (
-    (105, 145), (110, 115), (115, 95), (120, 85),
-    (125, 75), (130, 70), (135, 60), (140, 50), (145, 45),
+    # Each anchor and its complete HOME->grasp->lift path keeps at least
+    # ~10 mm clearance *after* the 12 mm housing/model safety margin.
+    (128, 65), (132, 63), (134, 57), (136, 51),
+    (140, 49), (142, 43), (144, 39),
 )
 
 

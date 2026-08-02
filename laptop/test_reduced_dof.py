@@ -105,6 +105,20 @@ class ReducedDofTests(unittest.TestCase):
         for pose in [lift, *route]:
             self.assertEqual(pose[config.J_WRIST], FIXED_WRIST_COMMAND_DEG)
 
+    def test_vent_housing_incident_pose_is_permanently_rejected(self):
+        """Regression for the photographed 2026-08-02 motor-damage incident."""
+        safety = ReducedDofSafety()
+        home = reduced_home(170)
+        incident = command_pose(95, 165, 170)
+
+        pose_report = safety.pose_report(incident)
+        transition_report = safety.transition_report(home, incident)
+
+        self.assertFalse(pose_report.safe)
+        self.assertIn("base-housing", pose_report.explain())
+        self.assertFalse(transition_report.safe)
+        self.assertIn("base-housing", transition_report.explain())
+
     def test_close_lift_home_keeps_full_gripper_clamp(self):
         class RecordingConnection:
             def __init__(self):

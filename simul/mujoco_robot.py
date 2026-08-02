@@ -226,10 +226,10 @@ def build_mjcf(
         raise ValueError("camera_fovy must be in [55, 90] degrees")
 
     meshes = _prepared_meshes()
-    mesh_path = lambda name: escape(str(meshes / name), quote=True)
+    def mesh_path(name):
+        return escape(str(meshes / name), quote=True)
     upper = spec.upper_arm_m * link_scale
     fore = spec.forearm_m * link_scale
-    hand = spec.hand_m * link_scale
     shoulder_values = _joint_range("shoulder", spec)
     elbow_values = _joint_range("elbow", spec)
     wrist_values = _joint_range("wrist_pitch", spec)
@@ -269,6 +269,7 @@ def build_mjcf(
     <texture name="floor_tex" type="2d" builtin="checker" rgb1="{floor_rgb1}" rgb2="{floor_rgb2}" width="512" height="512"/>
     <material name="floor_mat" texture="floor_tex" texrepeat="4 4" reflectance="0.08"/>
     <mesh name="base_case" file="{mesh_path('Alt_Kasa.stl')}" scale="0.001 0.001 0.001"/>
+    <mesh name="base_cover" file="{mesh_path('Alt_Kapak.stl')}" scale="0.001 0.001 0.001"/>
     <mesh name="base_rotor" file="{mesh_path('Alt_Govde.stl')}" scale="0.001 0.001 0.001"/>
     <mesh name="upper_visual" file="{mesh_path('Alt_Kol.stl')}" scale="0.001 0.001 0.001"/>
     <mesh name="fore_visual" file="{mesh_path('On_Kol.stl')}" scale="0.001 0.001 0.001"/>
@@ -285,20 +286,23 @@ def build_mjcf(
     <!-- Motor 1 is intentionally absent: the complete kinematic tree is fixed
          at the physical 90-degree base heading. -->
     <body name="base" pos="0 0 0">
-      <geom name="base_collision" class="collision" type="box" pos="-0.045 0 0.035" size="0.105 0.06 0.035"/>
-      <geom name="base_mesh" class="visual" mesh="base_case"/>
+      <!-- Expanded by the same 12 mm safety margin as arm_safety.py.  Its
+           dedicated contact bits allow robot-vs-housing self contact. -->
+      <geom name="base_collision" class="collision" type="box" pos="0.1025 0 0.0835" size="0.1945 0.087 0.0835" contype="4" conaffinity="2"/>
+      <geom name="base_mesh" class="visual" mesh="base_case" pos="0.1 0 0" euler="0 0 180"/>
+      <geom name="base_cover_mesh" class="visual" mesh="base_cover" pos="0.1 0 0.07"/>
       <geom name="rotor_mesh" class="visual" mesh="base_rotor" pos="0 0 0.08"/>
       <body name="shoulder_link" pos="0 0 {_f(spec.shoulder_height_m)}">
         <joint name="shoulder" type="hinge" axis="0 1 0" range="{shoulder_joint_range}"/>
-        <geom name="upper_collision" class="collision" type="capsule" fromto="0 0 0 {_f(upper)} 0 0" size="0.025"/>
+        <geom name="upper_collision" class="collision" type="capsule" fromto="0 0 0 {_f(upper)} 0 0" size="0.035"/>
         <geom name="upper_mesh" class="visual" mesh="upper_visual" pos="0.1275 0 0.02" euler="0 90 0"/>
         <body name="elbow_link" pos="{_f(upper)} 0 0">
           <joint name="elbow" type="hinge" axis="0 1 0" range="{elbow_joint_range}"/>
-          <geom name="fore_collision" class="collision" type="capsule" fromto="0 0 0 {_f(fore)} 0 0" size="0.024"/>
+          <geom name="fore_collision" class="collision" type="capsule" fromto="0 0 0 {_f(fore)} 0 0" size="0.035"/>
           <geom name="fore_mesh" class="visual" mesh="fore_visual" pos="0.1525 0 0"/>
           <body name="wrist_pitch_link" pos="{_f(fore)} 0 0">
             <joint name="wrist_pitch" type="hinge" axis="0 1 0" range="{wrist_joint_range}"/>
-            <geom name="wrist_collision" class="collision" type="capsule" fromto="0 0 0 0.045 0 0" size="0.022"/>
+            <geom name="wrist_collision" class="collision" type="capsule" fromto="0 0 0 0.045 0 0" size="0.040"/>
             <geom name="wrist_mesh" class="visual" mesh="wrist_visual" pos="0.022 0 0" euler="0 90 0"/>
             <body name="wrist_roll_link" pos="0.045 0 0">
               <joint name="wrist_roll" type="hinge" axis="1 0 0" range="{roll_joint_range}"/>

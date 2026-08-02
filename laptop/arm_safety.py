@@ -20,13 +20,15 @@ import arm_fk
 import config
 
 
-# Conservative envelopes derived from the original 3D asset extents and the
-# photographed assembled arm.  The lower enclosure is 210 x 120 x 70 mm, but
-# its transform relative to the shoulder axis is absent from the source 3MF.
-# A 235 mm radial keep-out therefore bounds every possible planar placement of
-# that enclosure plus its forward cover; this is intentionally conservative.
-BASE_RADIUS_M = 0.235
-BASE_TOP_M = 0.120
+# The 2026-08-02 incident photograph established the missing assembly
+# transform: the vented lower enclosure points in the same +X direction as the
+# arm.  The old model put its MuJoCo box in -X and approximated the real safety
+# volume as a short cylinder.  That allowed the rigid wrist to hook the forward
+# top edge.  This directional box includes the 210 mm source enclosure, its
+# cover, the shoulder-axis offset visible in the assembled photograph, and a
+# conservative forward/top uncertainty band.
+BASE_HOUSING_MIN_M = np.array((-0.080, -0.075, 0.000), dtype=float)
+BASE_HOUSING_MAX_M = np.array((0.285, 0.075, 0.155), dtype=float)
 MAST_RADIUS_M = 0.075
 MAST_BOTTOM_M = 0.085
 MAST_TOP_M = 0.225
@@ -133,6 +135,25 @@ def _segment_cylinder_distance(start, end, radius, bottom, top):
                for point in np.linspace(start, end, count))
 
 
+def _point_aabb_distance(point, minimum, maximum):
+    point = np.asarray(point, dtype=float)
+    minimum = np.asarray(minimum, dtype=float)
+    maximum = np.asarray(maximum, dtype=float)
+    outside = np.maximum(np.maximum(minimum - point, point - maximum), 0.0)
+    return float(np.linalg.norm(outside))
+
+
+def _segment_aabb_distance(start, end, minimum, maximum):
+    """Conservative sampled distance from a segment to an axis-aligned box."""
+    start, end = np.asarray(start, dtype=float), np.asarray(end, dtype=float)
+    count = max(2, int(math.ceil(np.linalg.norm(end - start) / 0.002)) + 1)
+    # Sampling at <=2 mm can overestimate the exact minimum by at most 1 mm;
+    # subtract that bound so the approximation can only reject extra poses.
+    sampled = min(_point_aabb_distance(point, minimum, maximum)
+                  for point in np.linspace(start, end, count))
+    return max(0.0, sampled - 0.001)
+
+
 class PhysicalArmSafety:
     """Collision report for a pose and every firmware slew state."""
 
@@ -176,17 +197,17 @@ class PhysicalArmSafety:
             ("hand", g.wrist_roll, g.finger_tip, HAND_RADIUS_M),
         )
         for name, start, end, radius in distal:
-            distance = _segment_cylinder_distance(
-                start, end, BASE_RADIUS_M, 0.0, BASE_TOP_M)
+            distance = _segment_aabb_distance(
+                start, end, BASE_HOUSING_MIN_M, BASE_HOUSING_MAX_M)
             check("base-housing", distance - radius - self.margin_m,
-                  f"{name} 부분이 로봇 하부 몸체의 안전 영역에 들어갑니다.")
+                  f"{name} 부분이 팔과 같은 +X 방향의 통풍구 몸체에 들어갑니다.")
 
         # The webcam is larger than the wrist itself and must be checked as a
         # separate sphere against both housing and shoulder mast.
-        camera_base = _point_capped_cylinder_distance(
-            g.camera, BASE_RADIUS_M, 0.0, BASE_TOP_M)
+        camera_base = _point_aabb_distance(
+            g.camera, BASE_HOUSING_MIN_M, BASE_HOUSING_MAX_M)
         check("camera-base", camera_base - CAMERA_RADIUS_M - self.margin_m,
-              "장착한 웹캠이 로봇 하부 몸체의 안전 영역에 들어갑니다.")
+              "장착한 웹캠이 전방 통풍구 몸체의 안전 영역에 들어갑니다.")
 
         for name, start, end, radius in distal:
             distance = _segment_cylinder_distance(

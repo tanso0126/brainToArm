@@ -1,9 +1,9 @@
 {
   "episodes": 300,
-  "contact_physics_success_rate": 0.81,
+  "contact_physics_success_rate": 0.5966666666666667,
   "symbolic_success_rate": 1.0,
-  "mean_lift_m": 0.2790248129333148,
-  "failure_count": 57,
+  "mean_lift_m": 0.1899079804878678,
+  "failure_count": 121,
   "by_shape": {
     "box": {
       "episodes": 104,
@@ -11,11 +11,11 @@
     },
     "cylinder": {
       "episodes": 97,
-      "success_rate": 1.0
+      "success_rate": 0.7731958762886598
     },
     "sphere": {
       "episodes": 99,
-      "success_rate": 0.42424242424242425
+      "success_rate": 0.0
     }
   },
   "failures": [
@@ -24,18 +24,8 @@
       "symbolic_success": true,
       "shape": "sphere",
       "half_size_m": 0.014852955827185245,
-      "lift_m": -0.0003676491834689998,
-      "follows_hand": false,
-      "floor_contact": true,
-      "steps": 18
-    },
-    {
-      "success": false,
-      "symbolic_success": true,
-      "shape": "sphere",
-      "half_size_m": 0.012642812320456906,
-      "lift_m": -0.00037024117404852765,
-      "follows_hand": false,
+      "lift_m": -0.000367181842460167,
+      "follows_hand": true,
       "floor_contact": true,
       "steps": 20
     },
@@ -43,7 +33,37 @@
       "success": false,
       "symbolic_success": true,
       "shape": "sphere",
+      "half_size_m": 0.012642812320456906,
+      "lift_m": -0.000367181842460167,
+      "follows_hand": false,
+      "floor_contact": true,
+      "steps": 20
+    },
+    {
+      "success": false,
+      "symbolic_success": true,
+      "shape": "cylinder",
+      "half_size_m": 0.01520831526654899,
+      "lift_m": 0.004309738123326407,
+      "follows_hand": false,
+      "floor_contact": true,
+      "steps": 23
+    },
+    {
+      "success": false,
+      "symbolic_success": true,
+      "shape": "sphere",
       "half_size_m": 0.013591171133519975,
+      "lift_m": -0.000367181842460167,
+      "follows_hand": true,
+      "floor_contact": true,
+      "steps": 18
+    },
+    {
+      "success": false,
+      "symbolic_success": true,
+      "shape": "sphere",
+      "half_size_m": 0.01712488624991331,
       "lift_m": -0.00036718184246016874,
       "follows_hand": false,
       "floor_contact": true,
@@ -53,9 +73,29 @@
       "success": false,
       "symbolic_success": true,
       "shape": "sphere",
-      "half_size_m": 0.016589141955099508,
-      "lift_m": -0.0009394046180086074,
+      "half_size_m": 0.016898026724847838,
+      "lift_m": -0.0003671818424601653,
       "follows_hand": false,
+      "floor_contact": true,
+      "steps": 19
+    },
+    {
+      "success": false,
+      "symbolic_success": true,
+      "shape": "cylinder",
+      "half_size_m": 0.014047226440007703,
+      "lift_m": -0.00027708346041844037,
+      "follows_hand": true,
+      "floor_contact": true,
+      "steps": 19
+    },
+    {
+      "success": false,
+      "symbolic_success": true,
+      "shape": "sphere",
+      "half_size_m": 0.016589141955099508,
+      "lift_m": -0.0003671818424601653,
+      "follows_hand": true,
       "floor_contact": true,
       "steps": 19
     },
@@ -64,8 +104,8 @@
       "symbolic_success": true,
       "shape": "sphere",
       "half_size_m": 0.01267555676802172,
-      "lift_m": -0.00036718184248130115,
-      "follows_hand": true,
+      "lift_m": -0.00036718184246016874,
+      "follows_hand": false,
       "floor_contact": true,
       "steps": 23
     },
@@ -74,18 +114,18 @@
       "symbolic_success": true,
       "shape": "sphere",
       "half_size_m": 0.013226126599853266,
-      "lift_m": -0.00036718184246016874,
+      "lift_m": -0.0003671818424601653,
       "follows_hand": true,
       "floor_contact": true,
-      "steps": 19
+      "steps": 22
     },
     {
       "success": false,
       "symbolic_success": true,
       "shape": "sphere",
       "half_size_m": 0.01413149856610161,
-      "lift_m": -0.0003671972531353162,
-      "follows_hand": false,
+      "lift_m": -0.00036718184246016874,
+      "follows_hand": true,
       "floor_contact": true,
       "steps": 22
     },
@@ -94,18 +134,18 @@
       "symbolic_success": true,
       "shape": "sphere",
       "half_size_m": 0.015497403200749734,
-      "lift_m": -0.0003906916658757559,
+      "lift_m": -0.00036718184246016874,
       "follows_hand": false,
       "floor_contact": true,
-      "steps": 18
+      "steps": 19
     },
     {
       "success": false,
       "symbolic_success": true,
       "shape": "sphere",
       "half_size_m": 0.014731993192627565,
-      "lift_m": -0.00036719696908915633,
-      "follows_hand": false,
+      "lift_m": -0.000367181842460167,
+      "follows_hand": true,
       "floor_contact": true,
       "steps": 17
     },
@@ -114,9 +154,9 @@
       "symbolic_success": true,
       "shape": "sphere",
       "half_size_m": 0.014724591749260938,
-      "lift_m": 0.3150086713443373,
+      "lift_m": -0.0003671818424601653,
       "follows_hand": false,
-      "floor_contact": false,
+      "floor_contact": true,
       "steps": 20
     },
     {
@@ -124,7 +164,7 @@
       "symbolic_success": true,
       "shape": "sphere",
       "half_size_m": 0.01530932594119536,
-      "lift_m": -0.00043745527693189214,
+      "lift_m": -0.0003671818424601653,
       "follows_hand": false,
       "floor_contact": true,
       "steps": 21
@@ -133,18 +173,8 @@
       "success": false,
       "symbolic_success": true,
       "shape": "sphere",
-      "half_size_m": 0.01570532219423035,
-      "lift_m": -0.005697721992350477,
-      "follows_hand": false,
-      "floor_contact": true,
-      "steps": 22
-    },
-    {
-      "success": false,
-      "symbolic_success": true,
-      "shape": "sphere",
-      "half_size_m": 0.015388824503213898,
-      "lift_m": -0.00037115356866550264,
+      "half_size_m": 0.015770751472338786,
+      "lift_m": -0.000367181842460167,
       "follows_hand": false,
       "floor_contact": true,
       "steps": 18
@@ -153,8 +183,68 @@
       "success": false,
       "symbolic_success": true,
       "shape": "sphere",
-      "half_size_m": 0.012182262135816673,
+      "half_size_m": 0.017962342033324103,
+      "lift_m": -0.00036718184246016874,
+      "follows_hand": false,
+      "floor_contact": true,
+      "steps": 19
+    },
+    {
+      "success": false,
+      "symbolic_success": true,
+      "shape": "cylinder",
+      "half_size_m": 0.013658750532676286,
+      "lift_m": 0.0025273630199406615,
+      "follows_hand": true,
+      "floor_contact": true,
+      "steps": 23
+    },
+    {
+      "success": false,
+      "symbolic_success": true,
+      "shape": "sphere",
+      "half_size_m": 0.018169000900095527,
+      "lift_m": -0.00036718184246016874,
+      "follows_hand": true,
+      "floor_contact": true,
+      "steps": 18
+    },
+    {
+      "success": false,
+      "symbolic_success": true,
+      "shape": "sphere",
+      "half_size_m": 0.01570532219423035,
+      "lift_m": -0.0003671818424601653,
+      "follows_hand": true,
+      "floor_contact": true,
+      "steps": 21
+    },
+    {
+      "success": false,
+      "symbolic_success": true,
+      "shape": "sphere",
+      "half_size_m": 0.015388824503213898,
       "lift_m": -0.000367181842460167,
+      "follows_hand": false,
+      "floor_contact": true,
+      "steps": 18
+    },
+    {
+      "success": false,
+      "symbolic_success": true,
+      "shape": "cylinder",
+      "half_size_m": 0.01420438023435255,
+      "lift_m": -0.00032818419600287585,
+      "follows_hand": true,
+      "floor_contact": true,
+      "steps": 21
+    },
+    {
+      "success": false,
+      "symbolic_success": true,
+      "shape": "sphere",
+      "half_size_m": 0.012182262135816673,
+      "lift_m": -0.0003671818424601653,
       "follows_hand": false,
       "floor_contact": true,
       "steps": 19
@@ -164,7 +254,7 @@
       "symbolic_success": true,
       "shape": "sphere",
       "half_size_m": 0.015255075924086784,
-      "lift_m": -0.00036842502178190996,
+      "lift_m": -0.000367181842460167,
       "follows_hand": false,
       "floor_contact": true,
       "steps": 18
@@ -174,10 +264,20 @@
       "symbolic_success": true,
       "shape": "sphere",
       "half_size_m": 0.01543539924490309,
-      "lift_m": -0.0006301183631187614,
+      "lift_m": -0.00036718184246016874,
+      "follows_hand": true,
+      "floor_contact": true,
+      "steps": 20
+    },
+    {
+      "success": false,
+      "symbolic_success": true,
+      "shape": "sphere",
+      "half_size_m": 0.01722002252477342,
+      "lift_m": -0.00036718184246016874,
       "follows_hand": false,
       "floor_contact": true,
-      "steps": 25
+      "steps": 20
     },
     {
       "success": false,
@@ -185,7 +285,17 @@
       "shape": "sphere",
       "half_size_m": 0.012024911655483079,
       "lift_m": -0.000367181842460167,
-      "follows_hand": true,
+      "follows_hand": false,
+      "floor_contact": true,
+      "steps": 18
+    },
+    {
+      "success": false,
+      "symbolic_success": true,
+      "shape": "sphere",
+      "half_size_m": 0.01773580887744392,
+      "lift_m": -0.00036718184246016874,
+      "follows_hand": false,
       "floor_contact": true,
       "steps": 18
     },
@@ -194,130 +304,20 @@
       "symbolic_success": true,
       "shape": "sphere",
       "half_size_m": 0.0150456114304382,
-      "lift_m": -0.0003851366515061523,
+      "lift_m": -0.00036718184246016874,
       "follows_hand": false,
       "floor_contact": true,
-      "steps": 19
+      "steps": 24
     },
     {
       "success": false,
       "symbolic_success": true,
       "shape": "sphere",
       "half_size_m": 0.01742480955364767,
-      "lift_m": 0.31124936857011903,
-      "follows_hand": false,
-      "floor_contact": false,
-      "steps": 19
-    },
-    {
-      "success": false,
-      "symbolic_success": true,
-      "shape": "sphere",
-      "half_size_m": 0.012986876258361377,
-      "lift_m": -0.000367181842460167,
-      "follows_hand": true,
-      "floor_contact": true,
-      "steps": 22
-    },
-    {
-      "success": false,
-      "symbolic_success": true,
-      "shape": "sphere",
-      "half_size_m": 0.015746407453410983,
-      "lift_m": -0.00043490768460733957,
-      "follows_hand": false,
-      "floor_contact": true,
-      "steps": 18
-    },
-    {
-      "success": false,
-      "symbolic_success": true,
-      "shape": "sphere",
-      "half_size_m": 0.01590309151171067,
-      "lift_m": -0.00037105008150392985,
-      "follows_hand": false,
-      "floor_contact": true,
-      "steps": 20
-    },
-    {
-      "success": false,
-      "symbolic_success": true,
-      "shape": "sphere",
-      "half_size_m": 0.016079618109984962,
-      "lift_m": -0.0005039671387464337,
-      "follows_hand": false,
-      "floor_contact": true,
-      "steps": 18
-    },
-    {
-      "success": false,
-      "symbolic_success": true,
-      "shape": "sphere",
-      "half_size_m": 0.01607684793388627,
-      "lift_m": -0.0004266133076718387,
+      "lift_m": -0.00036718184246016874,
       "follows_hand": false,
       "floor_contact": true,
       "steps": 19
-    },
-    {
-      "success": false,
-      "symbolic_success": true,
-      "shape": "sphere",
-      "half_size_m": 0.01260549713600617,
-      "lift_m": -0.0003738706704485544,
-      "follows_hand": false,
-      "floor_contact": true,
-      "steps": 18
-    },
-    {
-      "success": false,
-      "symbolic_success": true,
-      "shape": "sphere",
-      "half_size_m": 0.013367619134559139,
-      "lift_m": -0.0004146454575067616,
-      "follows_hand": false,
-      "floor_contact": true,
-      "steps": 20
-    },
-    {
-      "success": false,
-      "symbolic_success": true,
-      "shape": "sphere",
-      "half_size_m": 0.017780009770704753,
-      "lift_m": 0.3205176726818277,
-      "follows_hand": false,
-      "floor_contact": false,
-      "steps": 19
-    },
-    {
-      "success": false,
-      "symbolic_success": true,
-      "shape": "sphere",
-      "half_size_m": 0.01608221629142582,
-      "lift_m": -0.00037238261022667224,
-      "follows_hand": false,
-      "floor_contact": true,
-      "steps": 18
-    },
-    {
-      "success": false,
-      "symbolic_success": true,
-      "shape": "sphere",
-      "half_size_m": 0.01494021325430297,
-      "lift_m": -0.00037365013970144974,
-      "follows_hand": false,
-      "floor_contact": true,
-      "steps": 17
-    },
-    {
-      "success": false,
-      "symbolic_success": true,
-      "shape": "sphere",
-      "half_size_m": 0.01446141846768759,
-      "lift_m": -0.00036722509080441314,
-      "follows_hand": false,
-      "floor_contact": true,
-      "steps": 18
     }
   ]
 }
