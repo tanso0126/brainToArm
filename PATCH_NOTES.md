@@ -404,3 +404,41 @@ MuJoCo는 출력판의 `Alt_Kasa.stl` 좌표를 조립 좌표로 잘못 사용�
 - 3D 시뮬레이션은 바구니 배송 뒤 늦은 ErrP까지 자동 회수하지만, 실물은
   이동 중 ErrP에서 안전 정지합니다. 실물 원위치 자동 반환은 수리된 기구의
   역경로를 별도로 검증한 뒤 활성화해야 합니다.
+
+## 패치 131 — Windows 단일 설치 앱과 실제 GitHub 릴리스 자동화
+
+### 문제
+
+`windows-control-center-v1`은 Git 태그와 소스 코드만 원격에 있었고 GitHub
+Releases에는 실행 가능한 새 자산이 없었습니다. 사용자는 여전히 Python,
+Node.js와 여러 `.bat` 파일을 직접 다뤄야 했으므로 “앱 하나를 열어 GUI에서
+모든 설정과 실험을 진행한다”는 요구를 충족하지 못했습니다.
+
+### 변경 내용
+
+- 별도 Node.js 서버 없이 Python 앱이 React 정적 화면을 직접 제공하도록
+  Windows 전용 Vite 빌드를 추가했습니다.
+- GUI, Python 3.11, FastSAM/PyTorch, EEG, MuJoCo, OpenCV, HID, 시리얼
+  런타임을 PyInstaller `onedir` 앱으로 묶는 규격을 추가했습니다.
+- 묶인 카메라 프로세스가 잘못 자기 자신을 다시 여는 문제를 막기 위해
+  전용 `--camera-worker` 내부 실행 모드를 추가했습니다.
+- Inno Setup으로 일반 사용자가 받는 파일을
+  `brainToArm-Windows-Setup-v2.0.0.exe` 하나로 만들었습니다. 사용자 전용
+  설치, 시작 메뉴/바탕화면 아이콘, 설치 후 자동 실행을 포함합니다.
+- 첫 실행부터 통합 운영실이 열리고 PolyG-I, 카메라, Uno, 시뮬레이션,
+  다중 후보, ErrP/TAR와 설정을 GUI에서 다루도록 했습니다.
+- GUI에서 현재 Arduino 펌웨어를 바로 열 수 있는 버튼을 추가했습니다.
+- 앱 시작 실패를 한국어 메시지 창과
+  `%LOCALAPPDATA%\brainToArm\logs\startup-error.txt`에 남깁니다.
+- Windows x64 GitHub Actions가 실제 `.exe`를 빌드하고 자체 검사, 내장 GUI
+  HTTP 검사, SHA256 생성 후 GitHub Release를 생성하도록 했습니다.
+- 설치·실행 문서를 단일 설치 앱 기준으로 다시 작성하고 구형 배치 파일은
+  개발자용으로만 구분했습니다.
+
+### 확인 항목
+
+- Windows 내장 React GUI production 빌드
+- 기존 Windows 단위 검사 17개
+- EEG, 실시간 시각 서보, MuJoCo Studio 핵심 모듈 가져오기
+- 내장 HTML과 통합 상태 API의 동일 포트 기동 검사
+- GitHub Windows x64 패키지 자체 검사와 설치 파일 생성 자동화

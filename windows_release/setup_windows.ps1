@@ -89,8 +89,8 @@ Push-Location $DashboardDir
 try {
     & npm.cmd ci
     if ($LASTEXITCODE -ne 0) { throw "GUI 패키지 설치에 실패했습니다. 인터넷 연결과 방화벽을 확인하세요." }
-    & npm.cmd run build
-    if ($LASTEXITCODE -ne 0) { throw "GUI 빌드에 실패했습니다. 저장소를 다시 내려받으세요." }
+    & npm.cmd run build:windows
+    if ($LASTEXITCODE -ne 0) { throw "Windows 내장 GUI 빌드에 실패했습니다. 저장소를 다시 내려받으세요." }
 } finally {
     Pop-Location
 }

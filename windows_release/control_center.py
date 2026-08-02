@@ -13,6 +13,9 @@ from pathlib import Path
 from threading import Event, Thread
 from urllib.parse import urlparse
 import argparse
+import ctypes
+import json
+import mimetypes
 import os
 import socket
 import subprocess
@@ -25,6 +28,8 @@ RELEASE = Path(__file__).resolve().parent
 ROOT = RELEASE.parent
 LAPTOP = ROOT / "laptop"
 DASHBOARD = ROOT / "dashboard"
+UI_ROOT = RELEASE / "assets" / "ui"
+APP_VERSION = "2.0.0"
 for entry in (str(LAPTOP), str(RELEASE), str(ROOT)):
     if entry not in sys.path:
         sys.path.insert(0, entry)
@@ -85,6 +90,40 @@ class UnifiedService:
 
 
 class ControlCenterHandler(DashboardHandler):
+    def _static(self, request_path):
+        root = UI_ROOT.resolve()
+        relative = request_path.lstrip("/") or "index.html"
+        candidate = (root / relative).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            self._json({"error": "잘못된 GUI 파일 경로입니다."},
+                       HTTPStatus.BAD_REQUEST)
+            return
+        if not candidate.is_file():
+            candidate = root / "index.html"
+        if not candidate.is_file():
+            self._json(
+                {"error": "내장 GUI 파일을 찾지 못했습니다. 앱을 다시 설치하세요."},
+                HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
+        payload = candidate.read_bytes()
+        content_type = mimetypes.guess_type(candidate.name)[0]
+        if content_type is None:
+            content_type = "application/octet-stream"
+        if content_type.startswith("text/") or content_type in {
+                "application/javascript", "application/json"}:
+            content_type += "; charset=utf-8"
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header(
+            "Cache-Control",
+            "public, max-age=31536000, immutable"
+            if "/assets/" in request_path else "no-store")
+        self.end_headers()
+        self.wfile.write(payload)
+
     def do_GET(self):
         parsed = urlparse(self.path)
         try:
@@ -97,6 +136,9 @@ class ControlCenterHandler(DashboardHandler):
                 return
             if parsed.path == "/api/control/diagnose":
                 self._json(self.service.control.diagnostic())
+                return
+            if not parsed.path.startswith("/api/"):
+                self._static(parsed.path)
                 return
         except (FileNotFoundError, ValueError, RuntimeError, OSError) as exc:
             self._json({"error": str(exc)}, HTTPStatus.CONFLICT)
@@ -138,6 +180,7 @@ class ControlCenterHandler(DashboardHandler):
                 "/api/control/task/stop": control.stop_task,
                 "/api/control/task/reject": lambda: control.reject_task(
                     source="GUI 수동"),
+                "/api/control/firmware/open": control.open_firmware,
             }
             action = actions.get(parsed.path)
             if action is None:
@@ -161,33 +204,6 @@ class UnifiedHTTPServer(DashboardHTTPServer):
         self.service = service
 
 
-def start_ui(port):
-    if port_is_open(port):
-        raise RuntimeError(
-            f"GUI 포트 {port}이 이미 사용 중입니다. 기존 brainToArm 창을 "
-            "닫고 다시 실행하세요.")
-    if not (DASHBOARD / "node_modules").is_dir():
-        raise RuntimeError(
-            "GUI 구성 요소가 설치되지 않았습니다. SETUP_WINDOWS.bat을 "
-            "먼저 한 번 실행하세요.")
-    command = ["npm.cmd" if os.name == "nt" else "npm", "run", "start",
-               "--", "--port", str(port)]
-    process = subprocess.Popen(
-        command, cwd=str(DASHBOARD),
-        creationflags=(subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0))
-    deadline = time.monotonic() + 30
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise RuntimeError(
-                f"GUI 서비스가 오류 코드 {process.returncode}로 종료되었습니다. "
-                "SETUP_WINDOWS.bat을 다시 실행하세요.")
-        if port_is_open(port):
-            return process
-        time.sleep(0.1)
-    process.terminate()
-    raise TimeoutError("30초 안에 GUI가 준비되지 않았습니다.")
-
-
 def show_window(url):
     if os.name == "nt":
         try:
@@ -209,25 +225,66 @@ def show_window(url):
         return
 
 
+def frozen_self_test():
+    modules = {}
+    for name in (
+            "cv2", "numpy", "scipy", "serial", "hid", "mujoco",
+            "ultralytics", "webview"):
+        module = __import__(name)
+        modules[name] = getattr(module, "__version__", "포함됨")
+    if not (UI_ROOT / "index.html").is_file():
+        raise RuntimeError("내장 GUI index.html이 없습니다.")
+    if not (RELEASE / "assets" / "FastSAM-s.pt").is_file():
+        raise RuntimeError("내장 FastSAM 모델이 없습니다.")
+    service = ControlCenterService()
+    status = service.status()
+    service.close()
+    print(json.dumps({
+        "ok": True,
+        "version": APP_VERSION,
+        "modules": modules,
+        "armMode": status["arm"]["mode"],
+        "activeServos": status["arm"]["activeServos"],
+        "ui": str(UI_ROOT / "index.html"),
+    }, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api-port", type=int, default=8765)
-    parser.add_argument("--ui-port", type=int, default=3000)
     parser.add_argument(
         "--no-window", action="store_true",
         help="GUI 창을 열지 않고 서비스만 실행")
+    parser.add_argument("--self-test", action="store_true",
+                        help="내장 구성 요소를 검사하고 종료")
+    parser.add_argument("--camera-worker", action="store_true",
+                        help=argparse.SUPPRESS)
+    parser.add_argument("--camera", default="auto", help=argparse.SUPPRESS)
+    parser.add_argument("--version", action="version",
+                        version=f"brainToArm {APP_VERSION}")
     args = parser.parse_args()
+    if args.self_test:
+        return frozen_self_test()
+    if args.camera_worker:
+        from windows_camera import publish
+        return publish(args.camera, headless=True)
+    if not (UI_ROOT / "index.html").is_file():
+        raise RuntimeError(
+            "내장 GUI가 없습니다. 정식 Windows 설치 파일로 다시 설치하세요.")
+    if port_is_open(args.api_port):
+        raise RuntimeError(
+            f"GUI 포트 {args.api_port}이 이미 사용 중입니다. 기존 "
+            "brainToArm 창을 닫고 다시 실행하세요.")
     service = UnifiedService()
     server = UnifiedHTTPServer(("127.0.0.1", args.api_port), service)
     server_thread = Thread(
         target=server.serve_forever,
         kwargs={"poll_interval": 0.2},
         name="control-center-api", daemon=True)
-    ui_process = None
     try:
         server_thread.start()
-        ui_process = start_ui(args.ui_port)
-        url = f"http://127.0.0.1:{args.ui_port}/"
+        url = f"http://127.0.0.1:{args.api_port}/"
         print(f"[통합 운영실] {url}", flush=True)
         if args.no_window:
             while True:
@@ -240,14 +297,34 @@ def main():
         server.shutdown()
         server.server_close()
         service.close()
-        if ui_process is not None and ui_process.poll() is None:
-            ui_process.terminate()
-            try:
-                ui_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                ui_process.kill()
     return 0
 
 
+def _fatal_startup_error(exc):
+    message = (
+        f"brainToArm 통합 운영실을 시작하지 못했습니다.\n\n"
+        f"{type(exc).__name__}: {exc}\n\n"
+        "앱을 다시 설치한 뒤에도 반복되면 아래 로그를 전달하세요.")
+    local = Path(os.environ.get("LOCALAPPDATA", Path.home()))
+    log_path = local / "brainToArm" / "logs" / "startup-error.txt"
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(message + "\n", encoding="utf-8")
+        message += f"\n{log_path}"
+    except OSError:
+        pass
+    if os.name == "nt" and "--camera-worker" not in sys.argv:
+        ctypes.windll.user32.MessageBoxW(
+            0, message, "brainToArm 시작 오류", 0x10)
+    else:
+        print(message, file=sys.stderr, flush=True)
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except SystemExit:
+        raise
+    except Exception as exc:
+        _fatal_startup_error(exc)
+        raise SystemExit(1)

@@ -1,13 +1,16 @@
 # brainToArm Windows 통합 운영실 사용 설명서
 
 이 폴더는 기존 macOS 실험 코드를 건드리지 않고 만든 **Windows 전용
-배포판**입니다. 코딩을 몰라도 파일을 더블클릭해 진행할 수 있습니다.
+배포판**입니다. 일반 사용자는 GitHub Releases에서
+`brainToArm-Windows-Setup-v2.0.0.exe` 하나만 받아 더블클릭하면 됩니다.
+Python, Node.js, 터미널 명령 또는 저장소 ZIP은 필요하지 않습니다.
 
-처음에는 `START_HERE.txt`를 열어 옆에 띄워 놓고 아래 순서대로 진행하세요.
+설치가 끝나면 전용 GUI가 자동으로 열리고 바탕화면에
+`brainToArm 통합 운영실` 바로가기가 생깁니다. 이후에는 이 아이콘 하나만
+실행합니다. 장치 연결, 상태 확인, 설정 저장과 실험 실행은 모두 GUI에서
+진행합니다.
 
-1. 최초 한 번: `SETUP_WINDOWS.bat`
-2. 펌웨어 업로드: `OPEN_FIRMWARE.bat`
-3. 매 실험: `START_CONTROL_CENTER.bat`
+저장소를 직접 수정하거나 개발할 때만 기존 `.bat` 파일을 사용합니다.
 
 이제 카메라와 자동 파지 도구를 따로 실행할 필요가 없습니다. 통합 운영실
 안에서 다음 기능을 버튼으로 사용할 수 있습니다.
@@ -57,25 +60,30 @@
 > GND와 Uno GND는 반드시 공통으로 연결합니다. 방전된 배터리를 쓰면
 > Uno는 명령 완료를 보내도 실제 서보가 움직이지 않을 수 있습니다.
 
-## 1. Windows 최초 설치
+## 1. Windows 앱 설치
 
-저장소 ZIP 파일 안에서 직접 실행하지 말고 먼저 압축을 완전히 풉니다.
-가능하면 `C:\brainToArm`처럼 짧고 단순한 위치에 둡니다.
+1. GitHub Releases의 최신 `brainToArm-Windows-Setup-v*.exe`를 받습니다.
+2. 설치 파일을 더블클릭합니다.
+3. Windows SmartScreen이 표시되면 배포처가 이 저장소인지 확인한 뒤
+   `추가 정보 → 실행`을 선택합니다.
+4. 설치 완료 화면의 `brainToArm 통합 운영실 실행`을 선택합니다.
 
-인터넷에 연결한 상태에서 `SETUP_WINDOWS.bat`을 더블클릭합니다.
+앱에는 다음 구성 요소가 포함되어 있으므로 별도 설치하지 않습니다.
 
-설치기가 자동으로 수행하는 작업:
+- Python 3.11 실행환경
+- OpenCV, PySerial, NumPy, SciPy, MuJoCo, HID, PyWebView
+- FastSAM과 PyTorch 추론 실행환경
+- EEG·ErrP·TAR 분석 코드와 3D 시뮬레이션
+- React 기반 전용 GUI
 
-- Python 3.11 확인(없으면 `winget`으로 설치)
-- 저장소 전용 `.venv-windows` 가상환경 생성
-- OpenCV, PySerial, NumPy, Ultralytics, HID, SciPy, MuJoCo 설치
-- Node.js와 전용 React GUI 자동 설치·빌드
-- 함께 제공된 FastSAM 모델 파일 검사
-- 로봇 없이 Python 실행환경 검사
+설치 위치는 사용자 전용 `%LOCALAPPDATA%\Programs\brainToArm`이며 관리자
+권한이 필요하지 않습니다. 친구 PC가 64비트 Windows 11이면 됩니다.
 
-다른 프로젝트의 Python 환경은 변경하지 않습니다. 첫 설치는 PyTorch
-때문에 수 분 이상 걸릴 수 있습니다. 멈춘 것처럼 보여도 설치 창을 닫지
-마세요.
+### 개발자용 소스 실행
+
+Git 저장소 자체를 실행해야 할 때만 `SETUP_WINDOWS.bat`과
+`START_CONTROL_CENTER.bat`을 사용합니다. 일반 사용자와 하드웨어 실험자는
+이 절차를 사용하지 않습니다.
 
 ## 2. Arduino 펌웨어 업로드
 
@@ -97,7 +105,7 @@
 
 ## 3. 통합 운영실 실행
 
-`START_CONTROL_CENTER.bat`을 더블클릭합니다. 전용 창이 뜨면 위에서부터
+바탕화면의 `brainToArm 통합 운영실`을 더블클릭합니다. 전용 창이 뜨면 위에서부터
 다음 세 버튼을 차례로 누릅니다.
 
 1. `PolyG-I 측정 시작`
@@ -176,19 +184,13 @@ windows_release\RUN_AUTONOMOUS.bat --camera 1 --port COM5
 
 ## 6. 문제 해결
 
-### 설치 파일이 바로 닫히거나 Windows가 실행을 막음
+### 설치 파일을 Windows가 막음
 
-- ZIP 파일 안에서 직접 실행하지 말고 압축을 모두 풉니다.
-- 파일을 오른쪽 클릭하고 `속성 → 차단 해제`가 있으면 선택합니다.
+- 설치 파일을 오른쪽 클릭하고 `속성 → 차단 해제`가 있으면 선택합니다.
 - SmartScreen이 나오면 `추가 정보 → 실행`을 선택합니다.
-- 폴더를 OneDrive 밖의 `C:\brainToArm` 같은 위치로 옮깁니다.
-- `Windows PowerShell`에서 다음처럼 실행하면 창이 닫히지 않아 오류를
-  읽기 쉽습니다.
-
-```powershell
-cd C:\brainToArm\windows_release
-.\SETUP_WINDOWS.bat
-```
+- 릴리스의 `.sha256` 파일과 설치 파일의 SHA256을 비교합니다.
+- 학교·회사 PC의 실행 정책이 막는다면 담당 관리자에게 설치 파일 허용을
+  요청해야 합니다.
 
 ### 한글이 깨지거나 `'…'은(는) 내부 또는 외부 명령` 오류가 표시됨
 
@@ -204,22 +206,20 @@ PowerShell에서 출력하도록 수정했습니다.
 복사한 상태일 수 있습니다. 같은 상위 폴더에 `firmware`와
 `windows_release`가 모두 있는지 확인하세요.
 
-### Python 또는 winget을 찾지 못함
+### Python, Node.js 또는 winget 관련 오류
 
-`winget`이 없는 PC라면 python.org에서 Python 3.11 64비트를 설치합니다.
-설치 화면에서 반드시 `Add Python to PATH`를 선택합니다. 설치 후 열려
-있던 명령 창을 모두 닫고 `SETUP_WINDOWS.bat`을 다시 실행하세요.
+정식 v2 설치 앱은 이 프로그램들을 외부에서 찾거나 설치하지 않습니다.
+이 오류가 보인다면 구형 ZIP 또는 개발자용 `.bat` 파일을 실행한 것입니다.
+구형 폴더를 지우고 최신 `brainToArm-Windows-Setup-v*.exe`를 설치합니다.
 
 ### 통합 운영실 창이 열리지 않음
 
-- 이미 열린 brainToArm 창과 `localhost:3000` 탭을 모두 닫습니다.
-- `SETUP_WINDOWS.bat`을 다시 실행해 GUI 빌드까지 완료합니다.
+- 작업 관리자에서 이미 실행 중인 `brainToArm.exe`를 종료합니다.
 - Windows Edge WebView2가 없으면 Windows Update 또는 Microsoft Edge를
   업데이트합니다. 전용 창을 못 열면 프로그램은 기본 브라우저로
   자동 전환합니다.
-- 자세한 오류는 PowerShell에서
-  `.venv-windows\Scripts\python.exe windows_release\control_center.py`를
-  실행해 확인할 수 있습니다.
+- `%LOCALAPPDATA%\brainToArm\logs\startup-error.txt`의 한국어 오류 내용을
+  확인합니다.
 
 ### PolyG-I가 미감지로 표시됨
 
@@ -240,12 +240,12 @@ PowerShell에서 출력하도록 수정했습니다.
 - 실물 팔이 이미 이동 중이면 안전상 다른 물체로 즉시 꺾지 않고 이동을
   정지합니다. 후보 제시 단계에서는 다음 후보로 전환됩니다.
 
-### 패키지 설치에 실패함
+### 앱 설치에 실패함
 
-- 인터넷 연결과 디스크 여유 공간을 확인합니다.
-- 학교·회사 방화벽, VPN, 프록시 때문에 다운로드가 막힐 수 있습니다.
-- 설치 파일을 다시 실행해도 됩니다. 이미 받은 패키지는 가능한 범위에서
-  재사용됩니다.
+- 디스크 여유 공간을 확인합니다. AI와 3D 런타임 때문에 수 GB가 필요할 수
+  있습니다.
+- 이전 버전을 제거한 뒤 최신 설치 파일을 다시 실행합니다.
+- 설치 프로그램의 마지막 화면에서 로그 저장 위치를 확인합니다.
 
 ### `Arduino Uno/CH340 COM 포트를 찾지 못했습니다`
 
@@ -280,12 +280,11 @@ PowerShell에서 출력하도록 수정했습니다.
 다른 버전의 펌웨어가 Uno에 들어 있습니다. `OPEN_FIRMWARE.bat`으로 현재
 스케치를 다시 업로드합니다.
 
-### AI 설치가 오래 걸림
+### 첫 실행이 다소 오래 걸림
 
-Windows에서 PyTorch/Ultralytics를 처음 설치하면 용량이 크고 시간이
-걸릴 수 있습니다. 설치 창을 닫지 마세요. FastSAM 가중치 자체는
-`windows_release/assets/FastSAM-s.pt`에 포함되어 별도 다운로드하지
-않습니다.
+FastSAM, PyTorch와 MuJoCo가 앱에 포함되어 있어 첫 실행 시 보안 검사와
+라이브러리 로딩에 시간이 걸릴 수 있습니다. 인터넷에서 AI 모델을 별도로
+다운로드하지는 않습니다.
 
 ### 실행 중 카메라 영상이 멈춤
 

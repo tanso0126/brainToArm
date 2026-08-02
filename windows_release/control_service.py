@@ -175,10 +175,15 @@ class ControlCenterService:
                 CAMERA_READY.unlink()
             except FileNotFoundError:
                 pass
-            command = [
-                sys.executable, "-u", str(RELEASE / "windows_camera.py"),
-                "--camera", camera, "--headless",
-            ]
+            if getattr(sys, "frozen", False):
+                command = [
+                    sys.executable, "--camera-worker", "--camera", camera,
+                ]
+            else:
+                command = [
+                    sys.executable, "-u", str(RELEASE / "windows_camera.py"),
+                    "--camera", camera, "--headless",
+                ]
             self._camera_process = subprocess.Popen(
                 command, cwd=str(ROOT),
                 creationflags=(subprocess.CREATE_NO_WINDOW
@@ -561,6 +566,30 @@ class ControlCenterService:
         }
         self._add_event("움직임 없는 장치 진단을 완료했습니다.", "success")
         return checks
+
+    def open_firmware(self):
+        """Open the shipped Uno sketch without requiring a terminal."""
+        sketch = ROOT / "firmware" / "arm_controller" / "arm_controller.ino"
+        if not sketch.is_file():
+            raise FileNotFoundError(
+                "앱에 Arduino 펌웨어가 없습니다. 정식 설치 파일로 다시 "
+                "설치하세요.")
+        try:
+            if os.name == "nt":
+                os.startfile(str(sketch))
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(sketch)])
+            else:
+                subprocess.Popen(["xdg-open", str(sketch)])
+        except OSError as exc:
+            raise RuntimeError(
+                "Arduino IDE에서 펌웨어를 열지 못했습니다. Arduino IDE를 "
+                "설치한 뒤 다시 누르세요.") from exc
+        with self._lock:
+            self._add_event(
+                "Arduino IDE로 현재 Uno 펌웨어를 열었습니다. 보드와 COM "
+                "포트를 선택한 뒤 업로드하세요.", "success")
+        return {"opened": True, "path": str(sketch)}
 
     def status(self):
         with self._lock:

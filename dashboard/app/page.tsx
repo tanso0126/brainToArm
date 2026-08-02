@@ -1151,7 +1151,7 @@ export default function Home() {
       </>
       )}
 
-      <footer><span>localhost 전용 · 데이터는 이 Mac 밖으로 전송되지 않습니다.</span><span>{activeWorkspace === "simulation" ? "CAMERA-ONLY SIM / ERRP-READY / REVERSIBLE TASK" : "PolyG-I / D1WD10 / 256 Hz / 8 EEG / ADC mV"}</span></footer>
+      <footer><span>localhost 전용 · 데이터는 이 PC 밖으로 전송되지 않습니다.</span><span>{activeWorkspace === "simulation" ? "CAMERA-ONLY SIM / ERRP-READY / REVERSIBLE TASK" : "PolyG-I / D1WD10 / 256 Hz / 8 EEG / ADC mV"}</span></footer>
     </main>
   );
 }

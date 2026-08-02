@@ -40,10 +40,10 @@ def main():
             "windows_app", "windows_camera", "windows_support",
             "control_service", "control_center"):
         importlib.import_module(name)
-    dashboard = ROOT / "dashboard"
-    if not (dashboard / "dist" / "client").is_dir():
+    ui = RELEASE / "assets" / "ui"
+    if not (ui / "index.html").is_file():
         raise RuntimeError(
-            "통합 GUI 빌드 파일이 없습니다. SETUP_WINDOWS.bat을 다시 "
+            "Windows 내장 GUI 빌드 파일이 없습니다. SETUP_WINDOWS.bat을 다시 "
             "실행하세요.")
     for model in (
             ROOT / "simul" / "models" / "full_task_policy_v1.ts",

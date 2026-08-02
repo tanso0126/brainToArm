@@ -71,6 +71,30 @@ class WindowsReleaseTests(unittest.TestCase):
         sketch = ROOT_DIR / "firmware" / "arm_controller" / "arm_controller.ino"
         self.assertTrue(sketch.is_file())
 
+    def test_embedded_windows_ui_is_built(self):
+        ui = RELEASE_DIR / "assets" / "ui"
+        index = (ui / "index.html").read_text(encoding="utf-8")
+        self.assertIn("brainToArm 통합 운영실", index)
+        self.assertTrue((ui / "eeg-field.png").is_file())
+        self.assertTrue(any((ui / "assets").glob("*.js")))
+        self.assertTrue(any((ui / "assets").glob("*.css")))
+
+    def test_single_installer_build_files_exist(self):
+        self.assertTrue((RELEASE_DIR / "brainToArm.spec").is_file())
+        self.assertTrue((RELEASE_DIR / "brainToArm.iss").is_file())
+        workflow = ROOT_DIR / ".github" / "workflows" / "build-windows-app.yml"
+        self.assertIn(
+            "brainToArm-Windows-Setup", workflow.read_text(encoding="utf-8"))
+
+    def test_control_center_uses_embedded_ui_and_frozen_camera_worker(self):
+        center = (RELEASE_DIR / "control_center.py").read_text(encoding="utf-8")
+        service = (RELEASE_DIR / "control_service.py").read_text(encoding="utf-8")
+        self.assertIn('UI_ROOT = RELEASE / "assets" / "ui"', center)
+        self.assertNotIn("npm.cmd", center)
+        self.assertIn('"--camera-worker"', service)
+        self.assertIn("def open_firmware", service)
+        self.assertIn('"/api/control/firmware/open"', center)
+
     def test_port_selection_prefers_uno_and_rejects_esp32(self):
         ports = [
             SimpleNamespace(

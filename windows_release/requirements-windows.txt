@@ -6,3 +6,4 @@ scipy>=1.10,<2
 hidapi>=0.14,<1
 mujoco>=3.2,<4
 pywebview>=5.4,<7
+trimesh>=4.0,<5

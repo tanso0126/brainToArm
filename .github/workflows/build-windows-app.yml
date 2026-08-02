@@ -1,0 +1,127 @@
+name: Windows 통합 운영실 빌드 및 릴리스
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "릴리스 버전"
+        required: true
+        default: "2.0.0"
+  push:
+    tags:
+      - "windows-control-center-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - name: 저장소 받기
+        uses: actions/checkout@v4
+
+      - name: Node.js 준비
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: 내장 GUI 빌드
+        shell: pwsh
+        run: |
+          npm --prefix dashboard ci
+          npm --prefix dashboard run build:windows
+
+      - name: Python 준비
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: windows_release/requirements-windows.txt
+
+      - name: 앱 의존성 설치
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip wheel
+          python -m pip install -r windows_release/requirements-windows.txt
+          python -m pip install "pyinstaller>=6.14,<7"
+
+      - name: Windows 코드 테스트
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "$pwd\laptop;$pwd\windows_release"
+          python -m unittest discover -s windows_release -p "test_windows_release.py"
+          python -c "import eeg_dashboard, realtime_visual_servo; from simul.studio import MuJoCoStudio; print('핵심 모듈 가져오기 정상')"
+
+      - name: 독립 실행 앱 만들기
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean windows_release/brainToArm.spec
+          Copy-Item firmware "dist\brainToArm\firmware" -Recurse -Force
+          & "dist\brainToArm\brainToArm.exe" --self-test
+          if ($LASTEXITCODE -ne 0) { throw "독립 실행 앱 자체 검사 실패" }
+
+      - name: 내장 GUI HTTP 검사
+        shell: pwsh
+        run: |
+          $process = Start-Process "dist\brainToArm\brainToArm.exe" -ArgumentList "--no-window", "--api-port", "18765" -PassThru
+          try {
+            $ready = $false
+            foreach ($attempt in 1..60) {
+              Start-Sleep -Milliseconds 500
+              try {
+                $page = Invoke-WebRequest "http://127.0.0.1:18765/" -UseBasicParsing
+                $status = Invoke-RestMethod "http://127.0.0.1:18765/api/control/status"
+                if ($page.Content -match "brainToArm 통합 운영실" -and $status.arm.mode -eq "wrist-3dof") {
+                  $ready = $true
+                  break
+                }
+              } catch {}
+            }
+            if (-not $ready) { throw "패키지에서 GUI 또는 API가 열리지 않음" }
+          } finally {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: 단일 설치 파일 만들기
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          $version = "${{ inputs.version }}"
+          if (-not $version) { $version = "${{ github.ref_name }}" -replace '^windows-control-center-v', '' }
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" "windows_release\brainToArm.iss"
+          $installer = Get-ChildItem "dist\installer\*.exe" | Select-Object -First 1
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLower()
+          "$hash  $($installer.Name)" | Set-Content "$($installer.FullName).sha256" -Encoding ascii
+
+      - name: 빌드 결과 보관
+        uses: actions/upload-artifact@v4
+        with:
+          name: brainToArm-Windows-Setup
+          path: |
+            dist/installer/*.exe
+            dist/installer/*.sha256
+            windows_release/README_WINDOWS.md
+          if-no-files-found: error
+
+      - name: GitHub 릴리스 생성 또는 갱신
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = "${{ inputs.version }}"
+          if (-not $version) { $version = "${{ github.ref_name }}" -replace '^windows-control-center-v', '' }
+          $tag = "windows-control-center-v$version"
+          $assets = @(Get-ChildItem "dist\installer\*.exe", "dist\installer\*.sha256" | ForEach-Object { $_.FullName })
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag @assets --clobber
+            gh release edit $tag --title "brainToArm Windows 통합 운영실 v$version" --notes-file windows_release/RELEASE_NOTES_V2_KO.md --latest
+          } else {
+            gh release create $tag @assets --target "${{ github.sha }}" --title "brainToArm Windows 통합 운영실 v$version" --notes-file windows_release/RELEASE_NOTES_V2_KO.md --latest
+          }

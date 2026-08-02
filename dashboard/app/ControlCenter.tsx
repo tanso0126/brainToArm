@@ -317,6 +317,7 @@ export default function ControlCenter({
               <label><span>자동 작업 제한(초)</span><input type="number" min="10" max="300" value={settings.maxTaskSeconds} onChange={(event) => setSettings({ ...settings, maxTaskSeconds: Number(event.target.value) })} /></label>
               <label className="toggle"><span>ErrP 자동 반영</span><input type="checkbox" checked={settings.errpEnabled} onChange={(event) => setSettings({ ...settings, errpEnabled: event.target.checked, autoRejectPhysical: event.target.checked, autoRejectSimulation: event.target.checked })} /></label>
               <label className="toggle"><span>TAR 자율성 배분</span><input type="checkbox" checked={settings.tarEnabled} onChange={(event) => setSettings({ ...settings, tarEnabled: event.target.checked })} /></label>
+              <button disabled={busy !== null || status?.arm.connected} onClick={() => void act("firmware", "/api/control/firmware/open")}><Cpu size={15} />Arduino 펌웨어 열기</button>
               <button disabled={busy !== null} onClick={() => void saveSettings()}><Save size={15} />설정 저장</button>
             </>}
           </article>
