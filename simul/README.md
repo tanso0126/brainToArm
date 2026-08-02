@@ -120,3 +120,32 @@ PYTHONPATH=laptop:. python3 -m unittest simul.test_studio -v
 
 > 시뮬레이션 성공률은 실물 로봇팔 성공률이 아닙니다. 실제 장치에서는
 > 카메라, 초음파, 전원, 백래시, 조립 오차를 별도로 검증해야 합니다.
+
+## 4번 손목 고정 이후의 별도 축소 모델
+
+현재 실물처럼 2·3번과 집게만 쓰는 코드는 기존 모델을 수정하지 않고
+`reduced_dof_*` 이름으로 분리했습니다.
+
+- `reduced_dof_robot.py`: 1·4·6번 관절/액추에이터가 없는 MuJoCo 모델
+- `reduced_dof_task_env.py`: 실물 센서값 16개와 상위 행동 8개
+- `reduced_dof_task_policy.py`: TorchScript 정책과 실물 관측 기반 쉴드
+- `train_reduced_dof.py`: DAgger 방식 모방학습
+- `evaluate_reduced_dof_physics.py`: 자유 물체 접촉·리프트 평가
+- `reduced_dof_demo.py`: 별도 3차원 시연 창
+
+```bash
+python3 -m simul.reduced_dof_demo
+python3 -m simul.train_reduced_dof --device cpu
+python3 -m simul.evaluate_reduced_dof_physics --episodes 300
+python3 -m unittest simul.test_reduced_dof_sim -v
+```
+
+정책 파일은 `models/reduced_dof_policy_v1.ts`입니다. 이 정책은 모터 각도를
+직접 회귀하지 않습니다. `탐색, 접근, 닫기, 들어 올리기, HOME 복귀, 복구`
+같은 상위 행동을 선택하고, 실물의 `laptop/reduced_dof.py`가 2×2 자코비안과
+충돌 검사를 이용해 실제 2·3번 증분을 계산합니다.
+
+MuJoCo 모델의 손끝과 도구 중심은 여러 자세에서 실물용 축소 순기구학과
+수치적으로 일치하도록 회귀 검사합니다. 다만 고정된 4번 브래킷 각도와
+굽은 어깨 링크의 실제 두 관절 중심 간 오프셋은 아직 자로 실측하지 않았기
+때문에, 현재 결과는 그 보정을 끝낸 뒤 실물에서 다시 검증해야 합니다.

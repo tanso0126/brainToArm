@@ -30,7 +30,10 @@
 - `laptop/reduced_dof_session.py`: 별도 소켓을 사용하는 Uno 연결 서버
 - `laptop/reduced_dof_jog.py`: 2·3번과 집게만 허용하는 수동 점검
 - `laptop/reduced_dof_visual_servo.py`: 카메라·초음파 자동 접근과 파지
+- `laptop/reduced_policy_adapter.py`: 축소 시뮬레이션 정책의 실물 입력 변환
 - `laptop/reduced_dof_firmware.py`: 전용 펌웨어 컴파일·업로드
+- `simul/reduced_dof_robot.py`: 4·6번 관절이 존재하지 않는 별도 MuJoCo 모델
+- `simul/reduced_dof_task_env.py`: 축소 자유도 탐색·접근·파지·HOME 학습 환경
 
 축소 펌웨어도 통신 호환을 위해 각도 여섯 개를 주고받지만, 1·4·6번 값은
 고정 표기값일 뿐입니다. 해당 핀에 `Servo.attach()`를 하지 않으므로 실제
@@ -136,7 +139,55 @@ PYTHONPATH=laptop python3 laptop/reduced_dof_visual_servo.py --run
 PYTHONPATH=laptop python3 laptop/reduced_dof_visual_servo.py --run --grasp
 ```
 
+학습 정책이 탐색·접근·닫기 전환을 판단하게 하려면 다음 옵션을 추가합니다.
+결정론적 자코비안과 충돌 검사는 그대로 최종 실행 권한을 가집니다.
+
+```bash
+PYTHONPATH=laptop python3 laptop/reduced_dof_visual_servo.py \
+  --run --grasp --learned-policy
+```
+
 미리보기는 `data/vision/reduced_dof_latest.jpg`에 계속 갱신됩니다.
+
+## 별도 축소 시뮬레이션과 학습
+
+기존 손목 가동 시뮬레이션은 수리 후 재사용할 수 있도록 그대로 두었습니다.
+새 축소 모델에서는 1·4·6번이 단순히 명령값만 고정된 것이 아니라 MuJoCo
+관절과 액추에이터 목록에서 완전히 빠집니다. 존재하는 제어 출력은 2번,
+3번, 그리고 하나의 5번 모터를 나타내는 좌우 집게 슬라이드뿐입니다.
+
+학습된 한 번의 파지와 HOME 복귀를 별도 3차원 창에서 보는 명령:
+
+```bash
+python3 -m simul.reduced_dof_demo
+```
+
+화면 없이 작업 완료 여부만 검사:
+
+```bash
+python3 -m simul.reduced_dof_demo --headless
+```
+
+정책을 처음부터 다시 학습하고 접촉 물리를 평가하는 명령:
+
+```bash
+python3 -m simul.train_reduced_dof --device cpu
+python3 -m simul.evaluate_reduced_dof_physics --episodes 300
+python3 -m unittest simul.test_reduced_dof_sim -v
+```
+
+정책 입력 16개는 영상 품질, 대상/마커/추적 상태, 영상 오차, 초음파 거리,
+계산된 바닥 여유, 집게 열림, 들어 올림 상태, 2·3·5번 명령, 작업 단계,
+이전 행동입니다. MuJoCo 물체 좌표와 접촉값은 정책 입력에 넣지 않습니다.
+학습된 정책은 8개 상위 행동만 고르고, 실제 모터 증분은 기존 2×2 자코비안과
+실물 충돌 검사기가 계산합니다.
+
+`simul/reduced_dof_robot.py`에는 어깨 링크의 관절 중심 변환을
+`upper_dx`, `upper_dz`로 따로 표현했습니다. 현재 기본값은 기존 실측
+모델과 같은 직선 중심축이지만, 형상 오차에 과적합하지 않도록 시뮬레이션
+변형 범위를 지원합니다. 외형 STL의 굽은 모양만으로 실제 관절 중심 오프셋을
+알 수는 없으므로, 실측한 오프셋이 생기면 이 두 값과 실물 순기구학을 함께
+갱신해야 합니다.
 
 ## 제어 원리
 
@@ -170,4 +221,3 @@ JOG로 낮은 속도에서 2번과 3번의 방향, 손목 고정 방향, 카메�
 축소 파일을 삭제할 필요가 없습니다. 기존 전체 펌웨어를 다시 업로드하고
 기존 세션과 제어기를 실행하면 됩니다. 두 모드를 동시에 실행해 같은 Uno를
 열면 안 됩니다.
-

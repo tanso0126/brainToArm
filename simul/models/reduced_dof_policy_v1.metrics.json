@@ -1,0 +1,33 @@
+{
+  "policy": "rigid_wrist_reduced_dof_macro_v1",
+  "algorithm": "DAgger-style imitation learning with a deterministic safety shield",
+  "controllable_motors": [
+    2,
+    3,
+    5
+  ],
+  "fixed_motors": [
+    1,
+    4,
+    6
+  ],
+  "observations": 16,
+  "actions": 8,
+  "samples": 190000,
+  "dagger_rounds": 3,
+  "validation_accuracy": 0.9994736842105263,
+  "randomized_episodes": 10000,
+  "randomized_success_rate": 1.0,
+  "randomized_mean_steps": 17.6103,
+  "raw_unshielded_success_rate": 1.0,
+  "raw_unshielded_mean_steps": 14.9545,
+  "raw_unshielded_failures": {},
+  "shielded_failures": {},
+  "deterministic_episodes": 1000,
+  "deterministic_success_rate": 1.0,
+  "deterministic_mean_steps": 15.371,
+  "deterministic_failures": {},
+  "sha256": "f8dbe7682637322c75f060de644ef70a7eda6c05ef0a744268f02835f78d213d",
+  "elapsed_seconds": 147.69541162485257,
+  "physical_validation": "required after measuring the fixed wrist angle"
+}

@@ -139,7 +139,8 @@ def close_lift_home(connection, safety, pose):
     return home
 
 
-def run(execute=False, allow_grasp=False, max_seconds=60.0):
+def run(execute=False, allow_grasp=False, max_seconds=60.0,
+        learned_policy=False):
     connection = reduced_client()
     safety = ReducedDofSafety()
     frames = LatestFrameStream()
@@ -151,6 +152,10 @@ def run(execute=False, allow_grasp=False, max_seconds=60.0):
         return {"state": "no-target", "pose": pose, "mode": "reduced-2dof"}
 
     tracker = HistogramTargetTracker()
+    policy = None
+    if learned_policy:
+        from reduced_policy_adapter import ReducedPolicyController
+        policy = ReducedPolicyController()
     target = tracker.initialize(frame, candidate.bbox)
     distance = None
     last_sonar = 0.0
@@ -205,6 +210,17 @@ def run(execute=False, allow_grasp=False, max_seconds=60.0):
                 "고정 베이스 작업선 밖에 물체가 있음",
                 readiness.center_error_px,
             )
+        policy_action = None
+        if policy is not None:
+            decision = policy.decide(
+                pose=pose, target_center=target.center,
+                gripper_center=gripper_center, opening_px=opening_px,
+                frame_shape=frame.shape,
+                quality_valid=bool(observation.quality.valid),
+                target_locked=True, sonar_distance_mm=distance,
+                phase="approach",
+            )
+            policy_action = decision.action
         if now - last_preview >= 1.0 / PREVIEW_HZ:
             _preview(
                 frame, target, gripper_center, aim_y, distance, clearance,
@@ -221,6 +237,11 @@ def run(execute=False, allow_grasp=False, max_seconds=60.0):
                     "preview": str(PREVIEW_PATH),
                     "mode": "reduced-2dof",
                 }
+            if policy_action is not None:
+                from simul.reduced_dof_task_env import ReducedTaskAction
+                if policy_action != ReducedTaskAction.CLOSE:
+                    last_control = now
+                    continue
             home = close_lift_home(connection, safety, pose)
             return {
                 "state": "home-after-grasp", "pose": home,
@@ -249,6 +270,11 @@ def run(execute=False, allow_grasp=False, max_seconds=60.0):
                         "preview": str(PREVIEW_PATH),
                         "mode": "reduced-2dof",
                     }
+                if policy_action is not None:
+                    from simul.reduced_dof_task_env import ReducedTaskAction
+                    if policy_action != ReducedTaskAction.CLOSE:
+                        last_control = now
+                        continue
                 home = close_lift_home(connection, safety, pose)
                 return {
                     "state": "home-after-grasp", "pose": home,
@@ -264,6 +290,12 @@ def run(execute=False, allow_grasp=False, max_seconds=60.0):
                 "preview": str(PREVIEW_PATH),
                 "mode": "reduced-2dof",
             }
+        if policy_action is not None:
+            from simul.reduced_dof_task_env import ReducedTaskAction
+            if policy_action not in (
+                    ReducedTaskAction.APPROACH, ReducedTaskAction.CLOSE):
+                last_control = now
+                continue
         if not execute:
             return {
                 "state": "planned", "pose": step.pose,
@@ -292,10 +324,13 @@ def main():
     parser.add_argument(
         "--grasp", action="store_true", help="접근 후 집고 축소 HOME으로 복귀")
     parser.add_argument("--max-seconds", type=float, default=60.0)
+    parser.add_argument(
+        "--learned-policy", action="store_true",
+        help="축소 시뮬레이션에서 학습한 정책을 상위 행동 게이트로 사용")
     args = parser.parse_args()
     if args.grasp and not args.run:
         parser.error("--grasp를 사용하려면 --run도 함께 지정해야 합니다.")
-    result = run(args.run, args.grasp, args.max_seconds)
+    result = run(args.run, args.grasp, args.max_seconds, args.learned_policy)
     print(f"[축소 자유도 제어 결과] {result}", flush=True)
 
 
