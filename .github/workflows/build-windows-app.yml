@@ -84,12 +84,13 @@ jobs:
               } catch {}
             }
             if (-not $ready) { throw "패키지에서 GUI 또는 API가 열리지 않음" }
-            $simulation = Invoke-RestMethod "http://127.0.0.1:18765/api/simulation/start" -Method Post -ContentType "application/json" -Body "{}"
-            Start-Sleep -Seconds 1
             $simulation = Invoke-RestMethod "http://127.0.0.1:18765/api/simulation/status"
-            if ($simulation.engine -ne "MuJoCo" -or -not $simulation.physics -or -not $simulation.running -or $simulation.objects.Count -lt 2 -or $simulation.servoDeg.Count -ne 6) {
-              throw "패키지에서 MuJoCo 물리 작업실이 정상적으로 진행되지 않음"
+            if ($simulation.engine -ne "MuJoCo" -or -not $simulation.physics -or $simulation.objects.Count -lt 2 -or $simulation.servoDeg.Count -ne 6) {
+              $simulation | ConvertTo-Json -Depth 5
+              throw "패키지에서 MuJoCo 물리 작업실을 초기화하지 못함"
             }
+            $started = Invoke-RestMethod "http://127.0.0.1:18765/api/simulation/start" -Method Post -ContentType "application/json" -Body "{}"
+            if (-not $started.running) { throw "패키지의 MuJoCo 자동 작업 시작 승인을 받지 못함" }
             $stopped = Invoke-RestMethod "http://127.0.0.1:18765/api/simulation/stop" -Method Post -ContentType "application/json" -Body "{}"
             if ($stopped.running) { throw "패키지의 MuJoCo 작업을 정상 종료하지 못함" }
           } finally {
